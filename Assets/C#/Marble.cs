@@ -1,0 +1,145 @@
+using System.Collections;
+using TMPro;
+using UnityEngine;
+
+public class Marble : MonoBehaviour
+{
+    static readonly string[] ShortStrings =
+    {
+        "2", "4", "8", "16", "32", "64", "128", "256", "512", "1K",
+        "2K", "4K", "8K", "16K", "32K", "65K", "131K", "262K", "524K", "1M",
+        "2M", "4M", "8M", "16M", "33M", "67M", "134M", "268M", "536M", "1B",
+        "2B", "4B", "8B", "17B", "34B", "68B", "137B", "274B", "549B", "1T",
+        "2T", "4T", "8T", "17T", "35T", "70T", "140T", "281T", "562T", "1P",
+    };
+
+    public int stage;
+    public float outlineWidth = 0.2f;
+
+    private uint valueExponent;
+    private uint lastExponent;
+    private SpriteRenderer sr;
+    private Rigidbody2D rb;
+    private IStageValue stageValue;
+    private TrailRenderer tr;
+    private CircleCollider2D col;
+    private TMP_Text tmp;
+    private Coroutine trailCoroutine;
+
+    void Awake()
+    {
+        sr = GetComponent<SpriteRenderer>();
+        rb = GetComponent<Rigidbody2D>();
+        stageValue = GetComponent<IStageValue>();
+        col = GetComponent<CircleCollider2D>();
+        tr = GetComponentInChildren<TrailRenderer>();
+        tmp = GetComponentInChildren<TMP_Text>();
+    }
+
+    void Start()
+    {
+        if (sr != null && MapConfig.Instance != null)
+            sr.color = MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball);
+
+        if (tr != null)
+            ScheduleTrailSetup();
+
+        if (tmp != null)
+        {
+            UpdateDisplay();
+            SetupOutline();
+        }
+    }
+
+    void ScheduleTrailSetup()
+    {
+        if (trailCoroutine != null) StopCoroutine(trailCoroutine);
+        trailCoroutine = StartCoroutine(DelayedTrailSetup());
+    }
+
+    IEnumerator DelayedTrailSetup()
+    {
+        yield return new WaitForFixedUpdate();
+        SetupTrail();
+    }
+
+    public void SetupTrail()
+    {
+        float r = GetWorldRadius();
+        tr.widthMultiplier = r;
+
+        Color col = MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball);
+        col += Color.white * 0.15f;
+        col.a = 0.75f; tr.startColor = col;
+        col.a = 0.25f; tr.endColor = col;
+    }
+
+    public void SetupOutline()
+    {
+        var mat = new Material(tmp.fontSharedMaterial);
+        tmp.fontMaterial = mat;
+        mat.SetColor("_OutlineColor", MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball));
+        mat.SetFloat("_OutlineWidth", outlineWidth);
+        mat.EnableKeyword("OUTLINE_ON");
+    }
+
+    float GetWorldRadius()
+    {
+        if (col != null) return col.radius * Mathf.Max(transform.lossyScale.x, transform.lossyScale.y);
+        return 0.5f * Mathf.Max(transform.lossyScale.x, transform.lossyScale.y);
+    }
+
+    public void SetInitialValue(uint exponent)
+    {
+        valueExponent = exponent;
+        ApplyValue();
+    }
+
+    public void MultiplyValue(float times)
+    {
+        uint add = (uint)Mathf.RoundToInt(Mathf.Log(times, 2));
+        SetInitialValue(valueExponent + add);
+    }
+
+    void ApplyValue()
+    {
+        if (stageValue != null)
+        {
+            stageValue.stage = stage;
+            stageValue.value = HugeInt.Pow(2, (int)valueExponent);
+        }
+        if (tr != null) ScheduleTrailSetup();
+
+        if (tmp != null && valueExponent != lastExponent)
+        {
+            lastExponent = valueExponent;
+            UpdateDisplay();
+        }
+    }
+
+    void UpdateDisplay()
+    {
+        int idx = (int)valueExponent - 1;
+        if (idx >= 0 && idx < ShortStrings.Length)
+            tmp.text = ShortStrings[idx];
+        else if (valueExponent == 0)
+            tmp.text = "1";
+        else
+            tmp.text = HugeInt.Pow(2, (int)valueExponent).ToShortString(true);
+    }
+
+    public void Home(Shooter shooter)
+    {
+        transform.position = shooter.transform.position;
+        if (rb != null)
+        {
+            rb.velocity = Vector2.zero;
+            shooter.Launch(rb);
+        }
+    }
+
+    public void Revalue()
+    {
+        ApplyValue();
+    }
+}
