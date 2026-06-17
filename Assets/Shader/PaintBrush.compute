@@ -1,0 +1,66 @@
+#pragma kernel CSPaint
+#pragma target 5.0
+
+RWTexture2D<float2> DataResult;
+RWTexture2D<float4> DisplayResult;
+RWTexture2D<uint> Flag;
+RWStructuredBuffer<uint> ChangedCount;
+
+float2 _PointA, _PointB;
+float _Radius;
+uint _Resolution;
+uint _BallStage;
+float _AttackPower;
+uint _Budget;
+uniform float4 _TeamColors[17];
+uniform int _TeamCount;
+
+float PointToSegmentDistSq(float2 p, float2 a, float2 b)
+{
+    float2 ab = b - a, ap = p - a;
+    float t = saturate(dot(ap, ab) / max(dot(ab, ab), 1e-6));
+    float2 closest = a + t * ab;
+    return dot(p - closest, p - closest);
+}
+
+[numthreads(8, 8, 1)]
+void CSPaint(uint3 id : SV_DispatchThreadID)
+{
+    uint2 coord = id.xy;
+    if (coord.x >= _Resolution || coord.y >= _Resolution) return;
+
+    uint curCount;
+    InterlockedAdd(ChangedCount[0], 0, curCount);
+    if (curCount >= _Budget) return;
+
+    float2 uv = (float2)coord / (float)_Resolution;
+    if (PointToSegmentDistSq(uv, _PointA, _PointB) >= _Radius * _Radius) return;
+
+    float2 col = DataResult[coord];
+    uint curStage = (uint)(col.r * 255.0 + 0.5);
+    uint curG = (uint)(col.g * 255.0 + 0.5);
+    if (curG == 0) curG = 1;
+    if (curStage == _BallStage) return;
+
+    uint newStage = curStage, newG = curG;
+    if (_AttackPower >= (float)curG) { newStage = _BallStage; newG = 1; }
+    else
+    {
+        uint reduced = curG - (uint)_AttackPower;
+        newG = max(1u, reduced);
+        if (reduced == 0) { newStage = _BallStage; newG = 1; }
+    }
+
+    uint oldFlag;
+    InterlockedCompareExchange(Flag[coord], 1, 0, oldFlag);
+    if (oldFlag == 0)
+    {
+        InterlockedAdd(ChangedCount[0], 0, curCount);
+        if (curCount < _Budget) InterlockedAdd(ChangedCount[0], 1);
+    }
+
+    DataResult[coord] = float2(newStage / 255.0, newG / 255.0);
+    uint idx = newStage;
+    if (idx >= (uint)_TeamCount) idx = 0;
+    DisplayResult[coord] = _TeamColors[idx];
+}

@@ -1,0 +1,59 @@
+#pragma kernel CSBulletDisplay
+#pragma kernel CSClearDisplay
+#pragma target 5.0
+
+struct BulletData
+{
+    float2 position;
+    float2 oldPosition;
+    float2 velocity;
+    int stage;
+    int alive;
+    float attackPower;
+    int value;
+};
+
+RWTexture2D<float4> Display;
+RWStructuredBuffer<BulletData> Bullets;
+uint _Resolution;
+float _MapHalfSize;
+float _PixelToWorld;
+int _BulletRadius;
+uniform float4 _BulletColors[17];
+uniform int _TeamCount;
+
+[numthreads(8, 8, 1)]
+void CSClearDisplay(uint3 id : SV_DispatchThreadID)
+{
+    Display[id.xy] = float4(0, 0, 0, 0);
+}
+
+void FillCircle(int2 center, float4 color)
+{
+    for (int dy = -_BulletRadius; dy <= _BulletRadius; dy++)
+    {
+        for (int dx = -_BulletRadius; dx <= _BulletRadius; dx++)
+        {
+            if (dx * dx + dy * dy > _BulletRadius * _BulletRadius) continue;
+            int2 p = center + int2(dx, dy);
+            if (p.x < 0 || p.x >= (int)_Resolution || p.y < 0 || p.y >= (int)_Resolution) continue;
+            Display[p] = color;
+        }
+    }
+}
+
+[numthreads(64, 1, 1)]
+void CSBulletDisplay(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    BulletData b = Bullets[idx];
+    if (b.alive == 0) return;
+
+    int2 pixel = int2((b.position + _MapHalfSize) / _PixelToWorld);
+    uint ci = (uint)b.stage;
+    if (ci >= (uint)_TeamCount) ci = 0;
+
+    float t = saturate(((float)b.value - 4.0) / 252.0);
+    float4 color = lerp(_BulletColors[ci], float4(1, 1, 1, 1), t);
+    FillCircle(pixel, color);
+}

@@ -1,0 +1,9 @@
+#pragma kernel CS_ClearFlag
+RWTexture2D<uint> Flag;
+uint _Resolution;
+
+[numthreads(8, 8, 1)]
+void CS_ClearFlag(uint3 id : SV_DispatchThreadID)
+{
+    Flag[id.xy] = 0;
+}

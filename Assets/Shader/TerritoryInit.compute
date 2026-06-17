@@ -1,0 +1,18 @@
+#pragma kernel CSInit
+
+RWTexture2D<float2> DataResult; // R=stage/255, G=defense/255
+RWTexture2D<float4> DisplayResult; // 最终颜色
+uint _Resolution;
+uniform float4 _TeamColors[17];
+uniform int _TeamCount;
+[numthreads(8, 8, 1)]
+void CSInit(uint3 id : SV_DispatchThreadID)
+{
+    // 编码初始化：stage=0, defense=1
+	DataResult[id.xy] = float2(0.0, 1.0 / 255.0);
+
+    // 显示颜色：stage 0 对应 _TeamColors[0]
+	uint idx = 0;
+	float4 col = _TeamColors[0];
+	DisplayResult[id.xy] = col;
+}

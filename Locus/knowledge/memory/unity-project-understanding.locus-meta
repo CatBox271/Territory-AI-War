@@ -1,0 +1,17 @@
+version: 4
+summary: Maintains a structural cache of Unity project understanding, preserving durable directory responsibilities, system entry points, key asset lookup paths, and constraints.
+injectMode: path
+aiMaintained: true
+explicitMaintenanceRules: true
+inheritToChildren: true
+allowCreateDocuments: true
+allowCreateDirectories: true
+allowMoveDocuments: true
+allowMoveDirectories: true
+maintenanceRules: |-
+  - Record only Unity project structure knowledge and lookup info that reduce repeated exploration
+  - Maintain only project-derived engineering understanding, including directory responsibilities, system entry points, asset relationships, runtime entry points, and config mappings
+  - Write user-supplied design goals, gameplay intent, product direction, and solution decisions into Design
+  - Prioritize directory responsibilities, core system entry points, key scenes, prefabs, ScriptableObjects, assemblies, and config mappings
+  - Record verified asset relationships, runtime entry points, key dependencies, and common lookup paths
+  - Remove temporary investigation traces, one-off task residue, unverified guesses, and expired cache

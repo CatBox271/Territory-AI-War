@@ -1,0 +1,95 @@
+#pragma kernel CSBulletPaint
+#pragma target 5.0
+
+struct BulletData
+{
+    float2 position;
+    float2 oldPosition;
+    float2 velocity;
+    int stage;
+    int alive;
+    float attackPower;
+    int value;
+};
+
+RWStructuredBuffer<BulletData> Bullets;
+RWTexture2D<float2> DataResult;
+RWTexture2D<float4> DisplayResult;
+uint _Resolution;
+float _MapHalfSize;
+float _PixelToWorld;
+int _BulletRadius;
+uniform float4 _TeamColors[17];
+uniform int _TeamCount;
+
+void PaintPixel(int2 center, int stage, float attack, inout int remaining)
+{
+    for (int dy = -_BulletRadius; dy <= _BulletRadius && remaining > 0; dy++)
+    {
+        for (int dx = -_BulletRadius; dx <= _BulletRadius && remaining > 0; dx++)
+        {
+            if (dx * dx + dy * dy > _BulletRadius * _BulletRadius) continue;
+            int2 p = center + int2(dx, dy);
+            if (p.x < 0 || p.x >= (int)_Resolution || p.y < 0 || p.y >= (int)_Resolution) continue;
+
+            uint2 coord = uint2(p);
+            float2 col = DataResult[coord];
+            uint curStage = (uint)(col.r * 255.0 + 0.5);
+            uint curG = (uint)(col.g * 255.0 + 0.5);
+            if (curG == 0) curG = 1;
+            if (curStage == (uint)stage) continue;
+
+            uint newStage, newG;
+            if (attack >= (float)curG) { newStage = (uint)stage; newG = 1; }
+            else
+            {
+                uint reduced = curG - (uint)attack;
+                newG = max(1u, reduced);
+                newStage = reduced == 0 ? (uint)stage : curStage;
+            }
+
+            DataResult[coord] = float2(newStage / 255.0, newG / 255.0);
+            uint ci = newStage;
+            if (ci >= (uint)_TeamCount) ci = 0;
+            DisplayResult[coord] = _TeamColors[ci];
+            remaining--;
+        }
+    }
+}
+
+void Bresenham(int2 start, int2 end, int stage, float attack, inout int remaining)
+{
+    int x0 = start.x, y0 = start.y;
+    int x1 = end.x, y1 = end.y;
+    int dx = abs(x1 - x0), dy = -abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+
+    while (true)
+    {
+        if (x0 >= 0 && x0 < (int)_Resolution && y0 >= 0 && y0 < (int)_Resolution && remaining > 0)
+            PaintPixel(int2(x0, y0), stage, attack, remaining);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+[numthreads(64, 1, 1)]
+void CSBulletPaint(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    BulletData b = Bullets[idx];
+    if (b.alive == 0 || b.value <= 0) return;
+
+    int2 pixelOld = int2((b.oldPosition + _MapHalfSize) / _PixelToWorld);
+    int2 pixelNew = int2((b.position + _MapHalfSize) / _PixelToWorld);
+
+    int remaining = b.value;
+    Bresenham(pixelOld, pixelNew, b.stage, b.attackPower, remaining);
+
+    b.value = remaining;
+    if (remaining <= 0) b.alive = 0;
+    Bullets[idx] = b;
+}
