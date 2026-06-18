@@ -9,12 +9,14 @@ public class MarbleManager : MonoBehaviour
     [Header("Prefabs & Refs")]
     public GameObject MarbleOb;
     public Transform Shooter;
+    public Transform spawnArea;
 
     [Header("Settings")]
     public int initialMarbleCount = 3;
     public float initialSpawnDelay = 0.3f;
     public float spawnInterval = 5f;
     public uint initialValueExponent = 10;
+    public uint startValueExponent = 10;
     public HugeInt maxValue;
     public float gravity = 0.1f;
 
@@ -66,14 +68,14 @@ public class MarbleManager : MonoBehaviour
     {
         if (MarbleOb == null) return;
 
-        Vector3 pos = Shooter != null ? Shooter.position : transform.position;
+        Vector3 pos = GetSpawnPosition();
         GameObject ob = Instantiate(MarbleOb, pos, Quaternion.identity);
 
         Marble m = ob.GetComponent<Marble>();
         if (m != null)
         {
             m.stage = stage;
-            m.SetInitialValue(initialValueExponent);
+            m.SetInitialValue(startValueExponent);
         }
 
         if (shooterComp != null)
@@ -83,6 +85,19 @@ public class MarbleManager : MonoBehaviour
         }
 
         teamMarbleObs[stage].Add(ob);
+    }
+
+    Vector3 GetSpawnPosition()
+    {
+        if (spawnArea != null)
+        {
+            Vector3 center = spawnArea.position;
+            Vector3 half = spawnArea.lossyScale * 0.5f;
+            float x = Random.Range(center.x - half.x, center.x + half.x);
+            float y = Random.Range(center.y - half.y, center.y + half.y);
+            return new Vector3(x, y, center.z);
+        }
+        return Shooter != null ? Shooter.position : transform.position;
     }
 
     public void OnTeamDeath(int stage)

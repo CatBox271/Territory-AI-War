@@ -716,8 +716,33 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetAngle: 15
-  targetMass: 10
-  elasticity: 0.4
+  targetMass: 8
+  elasticity: 0.1
+  maxLimit: 1
+  Time2Mass:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 8
+      inSlope: 1.1
+      outSlope: 1.1
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 20
+      value: 30
+      inSlope: 1.1
+      outSlope: 1.1
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &2213582192586193236
 GameObject:
   m_ObjectHideFlags: 0
