@@ -15,6 +15,7 @@ public class Marble : MonoBehaviour
 
     public int stage;
     public float outlineWidth = 0.2f;
+    public Material enchantMaterial;
 
     private uint valueExponent;
     private uint lastExponent;
@@ -25,6 +26,7 @@ public class Marble : MonoBehaviour
     private CircleCollider2D col;
     private TMP_Text tmp;
     private Coroutine trailCoroutine;
+    private Material enchantInstance;
 
     void Awake()
     {
@@ -48,6 +50,13 @@ public class Marble : MonoBehaviour
         {
             UpdateDisplay();
             SetupOutline();
+        }
+
+        if (sr != null && enchantMaterial != null)
+        {
+            enchantInstance = new Material(enchantMaterial);
+            sr.material = enchantInstance;
+            enchantInstance.SetColor("_EffectColor", MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball));
         }
     }
 
@@ -108,12 +117,24 @@ public class Marble : MonoBehaviour
             stageValue.stage = stage;
             stageValue.value = HugeInt.Pow(2, (int)valueExponent);
         }
+        if (rb != null)
+        {
+            rb.mass = valueExponent + 1;
+            if (MarbleManager.Instance != null)
+                rb.gravityScale = MarbleManager.Instance.gravity;
+        }
         if (tr != null) ScheduleTrailSetup();
 
         if (tmp != null && valueExponent != lastExponent)
         {
             lastExponent = valueExponent;
             UpdateDisplay();
+        }
+
+        if (enchantInstance != null)
+        {
+            float opacity = Mathf.Clamp01((valueExponent - 10f) / 30f);
+            enchantInstance.SetFloat("_EffectOpacity", opacity);
         }
     }
 
