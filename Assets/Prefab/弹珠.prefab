@@ -203,7 +203,7 @@ MonoBehaviour:
   stuckTimeLimit: 2
   stuckBounceMinX: -2
   stuckBounceMaxX: 2
-  stuckBounceMinY: 6
+  stuckBounceMinY: 2
   stuckBounceMaxY: 6
 --- !u!1 &9026055536894575632
 GameObject:
