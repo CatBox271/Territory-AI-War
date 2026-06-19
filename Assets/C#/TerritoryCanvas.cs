@@ -120,17 +120,54 @@ public class TerritoryCanvas : MonoBehaviour
         paintCompute.SetInt("_Budget", budget);
         SetColorArray(paintCompute);
         paintCompute.Dispatch(paintKernel, config.resolution / 8, config.resolution / 8, 1);
-
-        // 读 GPU 计数器获取实际涂色像素数
-        var countData = new uint[1];
-        counter.GetData(countData);
         counter.Release();
+
+        // 采样路径及两侧边缘归属
+        int res = config.resolution;
+        int xA = Mathf.Clamp((int)(uvA.x * res + 0.5f), 0, res - 1);
+        int yA = Mathf.Clamp((int)(uvA.y * res + 0.5f), 0, res - 1);
+        int xB = Mathf.Clamp((int)(uvB.x * res + 0.5f), 0, res - 1);
+        int yB = Mathf.Clamp((int)(uvB.y * res + 0.5f), 0, res - 1);
+        int pr = Mathf.CeilToInt(pixelRadius);
+        float dx = xB - xA, dy = yB - yA;
+        float len = Mathf.Sqrt(dx * dx + dy * dy);
+        float fx = 0, fy = 1;
+        if (len > 0.5f) { fx = dx / len; fy = dy / len; }
+        // 前进方向 180° 内以 30° 分割 5 个方向
+        float[] angles = { 0f, -42f, 42f, -84f, 84f };
+        int enemySamples = 0, totalSamples = 0;
+        for (int i = 0; i < 5; i++)
+        {
+            int sx = Mathf.Clamp((int)(xA + dx * i / 4f), 0, res - 1);
+            int sy = Mathf.Clamp((int)(yA + dy * i / 4f), 0, res - 1);
+            foreach (float a in angles)
+            {
+                float rad = a * Mathf.Deg2Rad;
+                float cos = Mathf.Cos(rad), sin = Mathf.Sin(rad);
+                int px = (int)(sx + (fx * cos - fy * sin) * pr);
+                int py = (int)(sy + (fx * sin + fy * cos) * pr);
+                CheckSample(px, py);
+            }
+        }
+
+        void CheckSample(int px, int py)
+        {
+            px = Mathf.Clamp(px, 0, res - 1);
+            py = Mathf.Clamp(py, 0, res - 1);
+            totalSamples++;
+            if (territoryMap[py * res + px] != stage)
+                enemySamples++;
+        }
 
         // 同步更新 CPU 领地网格
         PaintToMap(uvA, uvB, stage, pixelRadius);
 
-        int changed = Mathf.Min((int)countData[0], budget);
-        return changed;
+        if (enemySamples == 0)
+            return 0;
+        float uvDist = Vector2.Distance(uvA, uvB) * res;
+        int area = Mathf.Min((int)(uvDist * pixelRadius * 2f) + 1, budget);
+        int estimated = Mathf.Min(area * enemySamples / totalSamples + 1, budget);
+        return estimated;
     }
 
     void PaintToMap(Vector2 uvA, Vector2 uvB, int stage, float pixelRadius)

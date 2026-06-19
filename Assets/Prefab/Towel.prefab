@@ -152,6 +152,7 @@ MonoBehaviour:
   _shield_value: 1048576
   Radius: 1
   bulletSpeed: 3
+  bigBallSpeed: 1
   bulletCount:
     curve:
       serializedVersion: 2
@@ -192,7 +193,7 @@ MonoBehaviour:
         outWeight: 0.07332846
       - serializedVersion: 3
         time: 24
-        value: 0.001
+        value: 0.0075
         inSlope: -0.00036891075
         outSlope: -0.00036891075
         tangentMode: 0
@@ -252,17 +253,17 @@ MonoBehaviour:
       - serializedVersion: 3
         time: 0
         value: 0
-        inSlope: 0.005
-        outSlope: 0.005
+        inSlope: 0.25
+        outSlope: 0.25
         tangentMode: 34
         weightedMode: 0
         inWeight: 0
         outWeight: 0.33333334
       - serializedVersion: 3
         time: 20
-        value: 0.1
-        inSlope: 0.005
-        outSlope: 0.005
+        value: 5
+        inSlope: 0.25
+        outSlope: 0.25
         tangentMode: 34
         weightedMode: 0
         inWeight: 0.33333334
@@ -510,6 +511,8 @@ MonoBehaviour:
   aim: {fileID: 2721065759024970260}
   text: {fileID: 4789821447893959217}
   shortDisplay: 1
+  outlineColor: {r: 0, g: 0, b: 0, a: 0}
+  outlineWidth: 0
 --- !u!23 &1928166740538820340
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -605,7 +608,7 @@ MonoBehaviour:
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
   m_fontSizeMax: 72
-  m_fontStyle: 0
+  m_fontStyle: 1
   m_HorizontalAlignment: 2
   m_VerticalAlignment: 512
   m_textAlignment: 65535
@@ -763,6 +766,8 @@ MonoBehaviour:
   aim: {fileID: 1997610200187619198}
   text: {fileID: 11204863425256180}
   shortDisplay: 0
+  outlineColor: {r: 0, g: 0, b: 0, a: 0}
+  outlineWidth: 0
 --- !u!23 &8441994519252661649
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -858,7 +863,7 @@ MonoBehaviour:
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
   m_fontSizeMax: 72
-  m_fontStyle: 0
+  m_fontStyle: 1
   m_HorizontalAlignment: 1
   m_VerticalAlignment: 1024
   m_textAlignment: 65535

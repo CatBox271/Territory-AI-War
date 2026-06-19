@@ -84,6 +84,7 @@ public class MapConfig : MonoBehaviour
         switch (itemName)
         {
             case "霰弹":
+            case "散弹":
                 towel.ShotGun(val);
                 break;
             case "扫射":

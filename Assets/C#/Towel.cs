@@ -20,6 +20,7 @@ public class Towel : MonoBehaviour, IStageValue
     private TerritoryCanvas canvas;
 
     public float bulletSpeed = 3f;
+    public float bigBallSpeed = 1f;
     public CurveTransform bulletCount;
     public CurveTransform bulletInterval;
     public CurveTransform shieldRadius;
@@ -55,6 +56,7 @@ public class Towel : MonoBehaviour, IStageValue
 
     void Update()
     {
+        if (isDead) return;
         float interval = bulletInterval.Evaluate(value);
         clock += Time.deltaTime;
 
@@ -119,28 +121,45 @@ public class Towel : MonoBehaviour, IStageValue
         ps.Play();
     }
 
+    private bool isDead;
+
+
     public void Die()
     {
-        // 每个弹珠台中的弹珠生成球
+        if (isDead) return;
+        isDead = true;
+
+        if (shield != null) shield.SetActive(false);
+
+        CreateExplosionEffect();
+        AllTowel.Remove(stage);
+        StartCoroutine(DieSequence());
+    }
+
+    System.Collections.IEnumerator DieSequence()
+    {
         var marbles = FindObjectsOfType<Marble>();
         foreach (var marble in marbles)
         {
             if (marble.ValueExponent > 0)
+            {
                 SpawnBigBall(HugeInt.Pow(2, (int)marble.ValueExponent));
+                yield return new WaitForSeconds(0.2f);
+            }
         }
-        // 剩余value生成�?        if (value > 0)
+        if (value > 0)
+        {
             SpawnBigBall(value);
-
-        // 爆炸特效
-        CreateExplosionEffect();
-
-        AllTowel.Remove(stage);
+            yield return new WaitForSeconds(0.2f);
+        }
+        if (MarbleManager.Instance != null)
+            MarbleManager.Instance.OnTeamDeath(stage);
         Destroy(gameObject);
     }
 
     public void WhileBeHit(int _stage, HugeInt _value)
     {
-        //����ɱʱ����
+        //����ɱʱ����
         Debug.Log($"stage:{stage} has killed by stage{_stage}");
     }
 
@@ -162,9 +181,9 @@ public class Towel : MonoBehaviour, IStageValue
         if (bv > value) bv = (int)value.ToLong();
         value -= bv;
         var pos = (Vector2)transform.position + Random.insideUnitCircle * BulletPosRandom;
-        float speedOffset = bulletRandomSpeed.Evaluate(value);
-        float speed = bulletSpeed + Random.Range(-speedOffset, speedOffset);
-        BulletManager.Instance.Fire(pos, dir, stage, bv, speed);
+        float maxAngle = bulletRandomSpeed.Evaluate(value);
+        var finalDir = (Vector2)(Quaternion.AngleAxis(Random.Range(-maxAngle, maxAngle), Vector3.forward) * dir);
+        BulletManager.Instance.Fire(pos, finalDir, stage, bv, bulletSpeed);
     }
 
     void ShieldTransform()
@@ -175,8 +194,14 @@ public class Towel : MonoBehaviour, IStageValue
         }
         else
         {
-            if (!shield.activeSelf) shield.SetActive(true);
-            shield.transform.localScale = Vector3.one * shieldRadius.Evaluate(shield_value);
+            if (!shield.activeSelf)
+            {
+                shield.SetActive(true);
+                var s = shield.GetComponent<ShieldEffect>();
+                s.sp.color = s.originColor;
+            }
+                shield.transform.localScale = Vector3.one * shieldRadius.Evaluate(shield_value);
+
         }
     }
 
@@ -211,8 +236,13 @@ public class Towel : MonoBehaviour, IStageValue
             bp.value = val;
         }
         var rb = ob.GetComponent<Rigidbody2D>();
-        if (rb != null)
-            rb.velocity = transform.up * bulletSpeed;
+        if (rb != null) {
+        var dv = ob.GetComponentInChildren<DisplayValue>();
+        if (dv != null)
+            dv.SetOutline(Color.black, 0.2f);
+
+                rb.velocity = transform.up * bigBallSpeed;
+        }
     }
 
     public void ShotGun(HugeInt val,float angle = 0,int defaultNum = 0,int minVal = 0,int maxVal = 0)
@@ -230,8 +260,7 @@ public class Towel : MonoBehaviour, IStageValue
         for (int i = 1; i <= defaultNum; i++)
         {
             var dir = Quaternion.AngleAxis(sa + da * i, Vector3.back) * transform.up;
-            float sOff = bulletRandomSpeed.Evaluate(value);
-            BulletManager.Instance.Fire(transform.position, dir, stage, bv, bulletSpeed + Random.Range(-sOff, sOff));
+            BulletManager.Instance.Fire(transform.position, dir, stage, bv, bulletSpeed);
         }
     }
 }

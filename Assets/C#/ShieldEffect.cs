@@ -6,8 +6,8 @@ public class ShieldEffect : MonoBehaviour, IStageValue
     public int stage { get; set; }
     public HugeInt value { get; set; }
 
-    private SpriteRenderer sp;
-    private Color originColor;
+    public  SpriteRenderer sp;
+    public Color originColor;
 
     [Range(0, 1)] public float intensityPerHit = 0.4f;
     public float decayDuration = 0.3f;
@@ -16,8 +16,11 @@ public class ShieldEffect : MonoBehaviour, IStageValue
 
     private void Awake()
     {
-        if (sp == null) sp = GetComponent<SpriteRenderer>();
-        originColor = sp.color;
+        if (sp == null)
+        {
+            sp = GetComponent<SpriteRenderer>();
+            originColor = sp.color;
+        }
     }
 
     public void WhileBeHit(int _stage, HugeInt _value)

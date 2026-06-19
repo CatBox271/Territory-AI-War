@@ -29,6 +29,16 @@ public class Marble : MonoBehaviour
     private TMP_Text tmp;
     private Coroutine trailCoroutine;
     private Material enchantInstance;
+    private Vector2 lastPos;
+    private float stuckTime;
+
+    [Header("Stuck Detection")]
+    public float stuckThreshold = 0.05f;
+    public float stuckTimeLimit = 2f;
+    public float stuckBounceMinX = -2f;
+    public float stuckBounceMaxX = 2f;
+    public float stuckBounceMinY = 3f;
+    public float stuckBounceMaxY = 6f;
 
     void Awake()
     {
@@ -160,6 +170,27 @@ public class Marble : MonoBehaviour
             rb.velocity = Vector2.zero;
             shooter.Launch(rb);
         }
+        stuckTime = 0;
+    }
+
+    void FixedUpdate()
+    {
+        if (rb == null) return;
+        Vector2 pos = transform.position;
+        if (Vector2.Distance(pos, lastPos) < stuckThreshold)
+        {
+            stuckTime += Time.fixedDeltaTime;
+            if (stuckTime >= stuckTimeLimit)
+            {
+                rb.velocity = new Vector2(Random.Range(stuckBounceMinX, stuckBounceMaxX), Random.Range(stuckBounceMinY, stuckBounceMaxY));
+                stuckTime = 0;
+            }
+        }
+        else
+        {
+            stuckTime = 0;
+        }
+        lastPos = pos;
     }
 
     public void Revalue()

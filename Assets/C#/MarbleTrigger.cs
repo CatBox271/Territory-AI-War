@@ -18,9 +18,9 @@ public class MarbleTrigger : MonoBehaviour
 
         marble.MultiplyValue(Times);
 
-        if (MarbleManager.Instance != null && MarbleManager.Instance.Shooter != null)
+        if (MarbleManager.Instance != null)
         {
-            var shooter = MarbleManager.Instance.Shooter.GetComponent<Shooter>();
+            var shooter = MarbleManager.Instance.GetRandomShooter();
             if (shooter != null)
                 marble.Home(shooter);
         }

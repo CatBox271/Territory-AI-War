@@ -7,6 +7,8 @@ public class DisplayValue : MonoBehaviour
     public GameObject aim;
     public TMP_Text text;
     public bool shortDisplay = true;
+    public Color outlineColor = new Color(0, 0, 0, 0);
+    public float outlineWidth = 0f;
 
     private IStageValue stageValue;
     private HugeInt last = -1;
@@ -18,7 +20,27 @@ public class DisplayValue : MonoBehaviour
     {
         aim.TryGetComponent(out stageValue);
         if (text == null) TryGetComponent(out text);
+        if (text != null && outlineWidth > 0)
+        {
+            var mat = new Material(text.fontSharedMaterial);
+            text.fontMaterial = mat;
+            mat.SetColor("_OutlineColor", outlineColor);
+            mat.SetFloat("_OutlineWidth", outlineWidth);
+            mat.EnableKeyword("OUTLINE_ON");
+        }
         skip = Random.Range(0, 15);
+    }
+
+    public void SetOutline(Color color, float width)
+    {
+        if (text == null) TryGetComponent(out text);
+        if (text == null) return;
+        var mat = new Material(text.fontSharedMaterial);
+        text.fontMaterial = mat;
+        mat.SetColor("_OutlineColor", color);
+        mat.SetFloat("_OutlineWidth", width);
+        if (width > 0) mat.EnableKeyword("OUTLINE_ON");
+        else mat.DisableKeyword("OUTLINE_ON");
     }
 
     void Update()

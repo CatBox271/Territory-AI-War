@@ -21,11 +21,9 @@ public class PropTrigger : MonoBehaviour
         cfg.AddProp(marble.stage, itemName, val);
 
         if (MarbleManager.Instance != null)
-            marble.SetInitialValue(MarbleManager.Instance.initialValueExponent);
-
-        if (MarbleManager.Instance != null && MarbleManager.Instance.Shooter != null)
         {
-            var shooter = MarbleManager.Instance.Shooter.GetComponent<Shooter>();
+            marble.SetInitialValue(MarbleManager.Instance.initialValueExponent);
+            var shooter = MarbleManager.Instance.GetRandomShooter();
             if (shooter != null)
                 marble.Home(shooter);
         }

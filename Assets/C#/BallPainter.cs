@@ -40,12 +40,25 @@ public class BallPainter : MonoBehaviour, IStageValue
 
     void FixedUpdate()
     {
-        if (value <= 0) return;
+        if (value <= 0) { Die(); return; }
 
         if (lastValue == -1 || lastValue != value)
         {
             lastValue = value;
             SetScaleMass();
+        }
+
+        float ts = transform.localScale.x;
+        if (aimScale != -1 && ts != aimScale)
+        {
+            if (Mathf.Abs(ts - aimScale) <= 0.05f)
+            {
+                transform.localScale = Vector3.one * aimScale;
+            }
+            else
+            {
+                transform.localScale = Mathf.Lerp(ts, aimScale, Time.fixedDeltaTime) * Vector3.one;
+            }
         }
 
         float aimSpeed = SpeedCurve.Evaluate(value);
@@ -72,10 +85,12 @@ public class BallPainter : MonoBehaviour, IStageValue
         lastWorldPos = cur;
     }
 
+    private float aimScale = -1;
+
     void SetScaleMass()
     {
         float s = ScaleCurve.Evaluate(value);
-        transform.localScale = Vector3.one * s;
+        aimScale = s;
         TR.widthMultiplier = s;
         rb.mass = (value / 81920000).ToLong();
     }
@@ -126,7 +141,7 @@ public class BallPainter : MonoBehaviour, IStageValue
     void OnCollisionExit2D(Collision2D collision)
     {
         if (collision.collider.TryGetComponent(out IStageValue sv))
-            value -= sv.Hit(stage, value);
+            value -= sv.Hit(stage, value / HitDivide);
         if (value == 0) Die();
     }
 }

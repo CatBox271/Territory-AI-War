@@ -9,6 +9,7 @@ public class MarbleManager : MonoBehaviour
     [Header("Prefabs & Refs")]
     public GameObject MarbleOb;
     public Transform Shooter;
+    public Transform Shooter2;
     public Transform spawnArea;
 
     [Header("Settings")]
@@ -68,6 +69,7 @@ public class MarbleManager : MonoBehaviour
     void SpawnAndLaunch(int stage)
     {
         if (MarbleOb == null) return;
+        if (!Towel.AllTowel.ContainsKey(stage)) return;
 
         Vector3 pos = GetSpawnPosition();
         GameObject ob = Instantiate(MarbleOb, pos, Quaternion.identity);
@@ -109,5 +111,12 @@ public class MarbleManager : MonoBehaviour
         foreach (var ob in list)
             if (ob != null) Destroy(ob);
         list.Clear();
+    }
+
+    public Shooter GetRandomShooter()
+    {
+        if (Shooter2 != null && Random.value < 0.5f)
+            return Shooter2.GetComponent<Shooter>();
+        return Shooter != null ? Shooter.GetComponent<Shooter>() : null;
     }
 }
