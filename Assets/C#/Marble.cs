@@ -29,11 +29,11 @@ public class Marble : MonoBehaviour
     private TMP_Text tmp;
     private Coroutine trailCoroutine;
     private Material enchantInstance;
-    private Vector2 lastPos;
+    private Vector2 stuckMin, stuckMax;
     private float stuckTime;
 
     [Header("Stuck Detection")]
-    public float stuckThreshold = 0.05f;
+    public float stuckRegionRadius = 0.5f;
     public float stuckTimeLimit = 2f;
     public float stuckBounceMinX = -2f;
     public float stuckBounceMaxX = 2f;
@@ -170,6 +170,7 @@ public class Marble : MonoBehaviour
             rb.velocity = Vector2.zero;
             shooter.Launch(rb);
         }
+        stuckMin = stuckMax = transform.position;
         stuckTime = 0;
     }
 
@@ -177,20 +178,25 @@ public class Marble : MonoBehaviour
     {
         if (rb == null) return;
         Vector2 pos = transform.position;
-        if (Vector2.Distance(pos, lastPos) < stuckThreshold)
+
+        // expand bounding box
+        stuckMin = Vector2.Min(stuckMin, pos);
+        stuckMax = Vector2.Max(stuckMax, pos);
+        stuckTime += Time.fixedDeltaTime;
+
+        float diagonal = (stuckMax - stuckMin).magnitude;
+        if (diagonal > stuckRegionRadius * 2f)
         {
-            stuckTime += Time.fixedDeltaTime;
-            if (stuckTime >= stuckTimeLimit)
-            {
-                rb.velocity = new Vector2(Random.Range(stuckBounceMinX, stuckBounceMaxX), Random.Range(stuckBounceMinY, stuckBounceMaxY));
-                stuckTime = 0;
-            }
-        }
-        else
-        {
+            // moved enough — reset window
+            stuckMin = stuckMax = pos;
             stuckTime = 0;
         }
-        lastPos = pos;
+        else if (stuckTime >= stuckTimeLimit)
+        {
+            rb.velocity = new Vector2(Random.Range(stuckBounceMinX, stuckBounceMaxX), Random.Range(stuckBounceMinY, stuckBounceMaxY));
+            stuckMin = stuckMax = pos;
+            stuckTime = 0;
+        }
     }
 
     public void Revalue()

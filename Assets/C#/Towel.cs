@@ -160,7 +160,7 @@ public class Towel : MonoBehaviour, IStageValue
     public void WhileBeHit(int _stage, HugeInt _value)
     {
         Debug.Log($"stage:{stage} has killed by stage{_stage}");
-        if (value <= 0) Die();
+        Die();
     }
 
     void ShotGunTest()

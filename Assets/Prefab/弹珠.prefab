@@ -199,12 +199,12 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
-  stuckThreshold: 0.01
-  stuckTimeLimit: 2
-  stuckBounceMinX: -2
-  stuckBounceMaxX: 2
-  stuckBounceMinY: 2
-  stuckBounceMaxY: 6
+  stuckRegionRadius: 0.333
+  stuckTimeLimit: 5
+  stuckBounceMinX: -4
+  stuckBounceMaxX: 4
+  stuckBounceMinY: 3
+  stuckBounceMaxY: 8
 --- !u!1 &9026055536894575632
 GameObject:
   m_ObjectHideFlags: 0

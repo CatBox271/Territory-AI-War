@@ -92,7 +92,7 @@ public class BallPainter : MonoBehaviour, IStageValue
         float s = ScaleCurve.Evaluate(value);
         aimScale = s;
         TR.widthMultiplier = s;
-        rb.mass = (value / 81920000).ToLong();
+        rb.mass = value / 81920000f;
     }
 
     void ColorSet()

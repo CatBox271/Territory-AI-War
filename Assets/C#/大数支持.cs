@@ -127,6 +127,13 @@ public struct HugeInt : IComparable, IComparable<HugeInt>, IEquatable<HugeInt>, 
         return remainder;
     }
 
+    public static HugeInt operator /(HugeInt dividend, int divisor) => dividend / (HugeInt)divisor;
+    public static HugeInt operator /(HugeInt dividend, long divisor) => dividend / (HugeInt)divisor;
+    public static float operator /(HugeInt dividend, float divisor)
+    {
+        return dividend.ToFloat() / divisor;
+    }
+
     public static HugeInt operator -(HugeInt value)
     {
         if (value == Zero) return Zero;
@@ -489,6 +496,14 @@ public struct HugeInt : IComparable, IComparable<HugeInt>, IEquatable<HugeInt>, 
             result = (result << 32) + _digits[i];
         }
         return _isNegative ? -result : result;
+    }
+
+    public float ToFloat()
+    {
+        if (this == Zero) return 0f;
+        double log2 = Log2(this);
+        double val = System.Math.Pow(2.0, log2);
+        return (float)(_isNegative ? -val : val);
     }
 
     public static HugeInt Zero => new HugeInt(0);
