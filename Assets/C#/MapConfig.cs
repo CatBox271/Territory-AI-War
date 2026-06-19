@@ -1,6 +1,14 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+[System.Serializable]
+public class PropEntry
+{
+    public string item;
+    public HugeInt value;
+    public int stage;
+}
+
 public class MapConfig : MonoBehaviour
 {
     public static MapConfig Instance { get; private set; }
@@ -28,6 +36,10 @@ public class MapConfig : MonoBehaviour
     public int ShotGunMinVal = 8;
     public int ShotGunMaxVal = 1073741824;
 
+    [Header("Towel")]
+    public int TowelDefaultBullets = 4096;
+    public GameObject basicBallPrefab;
+
     public enum ColorStage { Default, Towel, Ball, Bullet }
 
     public Color GetColor(int stage, ColorStage kind = ColorStage.Default)
@@ -44,5 +56,54 @@ public class MapConfig : MonoBehaviour
         return c;
     }
 
-    void Awake() { Instance = this; }
+    [Header("AI")]
+    public bool useAIDecision = false;
+
+    [Header("Props")]
+    public List<PropEntry>[] teamProps;
+
+    void Awake()
+    {
+        Instance = this;
+        int count = teamColors.Count;
+        teamProps = new List<PropEntry>[count];
+        for (int i = 0; i < count; i++)
+            teamProps[i] = new List<PropEntry>();
+    }
+
+    public void AddProp(int stage, string item, HugeInt value)
+    {
+        if (stage < 0 || stage >= teamProps.Length) return;
+        teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
+    }
+
+    public void ExecutePropEffect(int stage, string itemName, HugeInt val)
+    {
+        if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
+
+        switch (itemName)
+        {
+            case "霰弹":
+                towel.ShotGun(val);
+                break;
+            case "扫射":
+                towel.value += val;
+                break;
+            case "护盾":
+                towel.shield_value += val;
+                break;
+            case "大球":
+                towel.SpawnBigBall(val);
+                break;
+            default: // 任意
+                switch (Random.Range(0, 4))
+                {
+                    case 0: towel.ShotGun(val); break;
+                    case 1: towel.value += val; break;
+                    case 2: towel.shield_value += val; break;
+                    case 3: towel.SpawnBigBall(val); break;
+                }
+                break;
+        }
+    }
 }

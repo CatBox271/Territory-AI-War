@@ -120,15 +120,17 @@ public class TerritoryCanvas : MonoBehaviour
         paintCompute.SetInt("_Budget", budget);
         SetColorArray(paintCompute);
         paintCompute.Dispatch(paintKernel, config.resolution / 8, config.resolution / 8, 1);
+
+        // 读 GPU 计数器获取实际涂色像素数
+        var countData = new uint[1];
+        counter.GetData(countData);
         counter.Release();
 
         // 同步更新 CPU 领地网格
         PaintToMap(uvA, uvB, stage, pixelRadius);
 
-        // CPU 预估涂色消耗，避免 GPU 同步读回
-        float uvDist = Vector2.Distance(uvA, uvB) * config.resolution;
-        int estimated = Mathf.Min((int)(uvDist * pixelRadius * 2f) + 1, budget);
-        return estimated;
+        int changed = Mathf.Min((int)countData[0], budget);
+        return changed;
     }
 
     void PaintToMap(Vector2 uvA, Vector2 uvB, int stage, float pixelRadius)

@@ -126,6 +126,7 @@ public class BallPainter : MonoBehaviour, IStageValue
     void OnCollisionExit2D(Collision2D collision)
     {
         if (collision.collider.TryGetComponent(out IStageValue sv))
-            value -= sv.Hit(stage, value / HitDivide);
+            value -= sv.Hit(stage, value);
+        if (value == 0) Die();
     }
 }

@@ -23,6 +23,7 @@ public class Towel : MonoBehaviour, IStageValue
     public CurveTransform bulletCount;
     public CurveTransform bulletInterval;
     public CurveTransform shieldRadius;
+    public CurveTransform bulletRandomSpeed;
 
     public static Dictionary<int, Towel> AllTowel = new();
     public Collider2D towelCollider;
@@ -45,10 +46,11 @@ public class Towel : MonoBehaviour, IStageValue
     {
         lastFireDirection = transform.up;
         sp.color = config.GetColor(stage, MapConfig.ColorStage.Towel);
+        value = config.TowelDefaultBullets;
         LookAt(Vector3.zero);
         PaintInitialCircle();
 
-        ShotGun(1048576, 360, 1024);
+        ShotGun(1048576, 60, 1024);
     }
 
     void Update()
@@ -83,6 +85,59 @@ public class Towel : MonoBehaviour, IStageValue
         ShotGunTest();
     }
 
+    void CreateExplosionEffect()
+    {
+        var go = new GameObject("TowelExplosion");
+        go.transform.position = transform.position;
+        var ps = go.AddComponent<ParticleSystem>();
+        var main = ps.main;
+        main.duration = 1.5f;
+        main.startLifetime = 1.5f;
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.5f, 3f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.2f);
+        main.startColor = config.GetColor(stage, MapConfig.ColorStage.Towel);
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.loop = false;
+        main.stopAction = ParticleSystemStopAction.Destroy;
+        var emission = ps.emission;
+        emission.rateOverTime = 0;
+        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 40) });
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Circle;
+        shape.radius = 0.01f;
+        var vol = ps.velocityOverLifetime;
+        vol.enabled = true;
+        vol.speedModifier = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 1), new Keyframe(1, 0)));
+        var col = ps.colorOverLifetime;
+        col.enabled = true;
+        var grad = new Gradient();
+        grad.SetKeys(
+            new[] { new GradientColorKey(config.GetColor(stage, MapConfig.ColorStage.Towel), 0f), new GradientColorKey(config.GetColor(stage, MapConfig.ColorStage.Towel), 1f) },
+            new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(0f, 1f) }
+        );
+        col.color = grad;
+        ps.Play();
+    }
+
+    public void Die()
+    {
+        // 每个弹珠台中的弹珠生成球
+        var marbles = FindObjectsOfType<Marble>();
+        foreach (var marble in marbles)
+        {
+            if (marble.ValueExponent > 0)
+                SpawnBigBall(HugeInt.Pow(2, (int)marble.ValueExponent));
+        }
+        // 剩余value生成�?        if (value > 0)
+            SpawnBigBall(value);
+
+        // 爆炸特效
+        CreateExplosionEffect();
+
+        AllTowel.Remove(stage);
+        Destroy(gameObject);
+    }
+
     public void WhileBeHit(int _stage, HugeInt _value)
     {
         //����ɱʱ����
@@ -107,7 +162,9 @@ public class Towel : MonoBehaviour, IStageValue
         if (bv > value) bv = (int)value.ToLong();
         value -= bv;
         var pos = (Vector2)transform.position + Random.insideUnitCircle * BulletPosRandom;
-        BulletManager.Instance.Fire(pos, dir, stage, bv, bulletSpeed);
+        float speedOffset = bulletRandomSpeed.Evaluate(value);
+        float speed = bulletSpeed + Random.Range(-speedOffset, speedOffset);
+        BulletManager.Instance.Fire(pos, dir, stage, bv, speed);
     }
 
     void ShieldTransform()
@@ -141,7 +198,24 @@ public class Towel : MonoBehaviour, IStageValue
 
 
 
-    void ShotGun(HugeInt val,float angle = 0,int defaultNum = 0,int minVal = 0,int maxVal = 0)
+    public void SpawnBigBall(HugeInt val)
+    {
+        if (config.basicBallPrefab == null) return;
+        var ob = Instantiate(config.basicBallPrefab, transform.position, Quaternion.identity);
+        var se = ob.GetComponent<StageEditor>();
+        if (se != null) { se.enabled = false; Destroy(se); }
+        var bp = ob.GetComponent<BallPainter>();
+        if (bp != null)
+        {
+            bp.stage = stage;
+            bp.value = val;
+        }
+        var rb = ob.GetComponent<Rigidbody2D>();
+        if (rb != null)
+            rb.velocity = transform.up * bulletSpeed;
+    }
+
+    public void ShotGun(HugeInt val,float angle = 0,int defaultNum = 0,int minVal = 0,int maxVal = 0)
     {
         if (angle == 0) angle = config.ShotGunAngle;
         if (defaultNum == 0) defaultNum = config.ShotGunBulletNum;
@@ -156,7 +230,8 @@ public class Towel : MonoBehaviour, IStageValue
         for (int i = 1; i <= defaultNum; i++)
         {
             var dir = Quaternion.AngleAxis(sa + da * i, Vector3.back) * transform.up;
-            BulletManager.Instance.Fire(transform.position, dir, stage, bv, bulletSpeed);
+            float sOff = bulletRandomSpeed.Evaluate(value);
+            BulletManager.Instance.Fire(transform.position, dir, stage, bv, bulletSpeed + Random.Range(-sOff, sOff));
         }
     }
 }

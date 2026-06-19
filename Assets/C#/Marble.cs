@@ -16,7 +16,9 @@ public class Marble : MonoBehaviour
     public int stage;
     public float outlineWidth = 0.2f;
     public Material enchantMaterial;
+    public AnimationCurve Value2Size;
 
+    public uint ValueExponent => valueExponent;
     private uint valueExponent;
     private uint lastExponent;
     private SpriteRenderer sr;
@@ -128,6 +130,7 @@ public class Marble : MonoBehaviour
         if (tmp != null && valueExponent != lastExponent)
         {
             lastExponent = valueExponent;
+            transform.localScale = Vector3.one * Value2Size.Evaluate(valueExponent);
             UpdateDisplay();
         }
 

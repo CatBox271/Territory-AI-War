@@ -139,7 +139,7 @@ Rigidbody2D:
   m_Mass: 1
   m_LinearDrag: 0
   m_AngularDrag: 0.05
-  m_GravityScale: 0.1
+  m_GravityScale: 0.5
   m_Material: {fileID: 6200000, guid: 3df1a7d2933d75e459627fcd1a813789, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
@@ -166,6 +166,30 @@ MonoBehaviour:
   stage: 0
   outlineWidth: 0.125
   enchantMaterial: {fileID: 2100000, guid: 1fe0d2d8d1ae7e4419d896c177788ae9, type: 2}
+  Value2Size:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0.25
+      inSlope: 0.0084999995
+      outSlope: 0.0084999995
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 20
+      value: 0.42
+      inSlope: 0.0084999995
+      outSlope: 0.0084999995
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &9026055536894575632
 GameObject:
   m_ObjectHideFlags: 0
@@ -240,7 +264,7 @@ TrailRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: -1
-  m_Time: 1
+  m_Time: 0.25
   m_PreviewTimeScale: 1
   m_Parameters:
     serializedVersion: 3

@@ -98,3 +98,35 @@ public struct BulletShieldCollisionJob : IJobParallelFor
         }
     }
 }
+
+[BurstCompile]
+public struct BulletTowelCollisionJob : IJobParallelFor
+{
+    public NativeArray<BulletData> bullets;
+    [ReadOnly] public NativeArray<ShieldCollider> towelBodies;
+    public int towelCount;
+    public NativeList<BulletHit>.ParallelWriter hitWriter;
+
+    public void Execute(int index)
+    {
+        var b = bullets[index];
+        if (b.alive == 0 || b.value <= 0) return;
+
+        for (int i = 0; i < towelCount; i++)
+        {
+            var body = towelBodies[i];
+            if (math.distancesq(b.position, body.position) >= body.radius * body.radius) continue;
+            if (b.stage == body.stage) return;
+
+            hitWriter.AddNoResize(new BulletHit
+            {
+                targetType = 2, targetIndex = i, bulletIndex = index,
+                sameTeam = false, value = b.value,
+                attackPower = b.attackPower, bulletVelocity = b.velocity
+            });
+
+            var d = b; d.alive = 0; d.value = 0; bullets[index] = d;
+            return;
+        }
+    }
+}

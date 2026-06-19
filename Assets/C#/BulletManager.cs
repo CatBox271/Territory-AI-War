@@ -27,9 +27,11 @@ public class BulletManager : MonoBehaviour
 
     private NativeArray<BallCollider> ballColliders;
     private NativeArray<ShieldCollider> shieldColliders;
+    private NativeArray<ShieldCollider> towelBodyColliders;
     private BallPainter[] cachedBalls;
     private Towel[] cachedTowels;
-    private int ballCount, shieldCount;
+    private Towel[] cachedTowelsAll;
+    private int ballCount, shieldCount, towelBodyCount;
     private NativeList<BulletHit> hits;
     private int[] bulletGrid;
     private const int GRID_RES = 400;
@@ -53,8 +55,10 @@ public class BulletManager : MonoBehaviour
         bulletBuffer = new ComputeBuffer(MAX_BULLETS, BulletData.GPUSize);
         ballColliders = new NativeArray<BallCollider>(MAX_COLLIDERS, Allocator.Persistent);
         shieldColliders = new NativeArray<ShieldCollider>(MAX_COLLIDERS, Allocator.Persistent);
+        towelBodyColliders = new NativeArray<ShieldCollider>(MAX_COLLIDERS, Allocator.Persistent);
         cachedBalls = new BallPainter[MAX_COLLIDERS];
         cachedTowels = new Towel[MAX_COLLIDERS];
+        cachedTowelsAll = new Towel[MAX_COLLIDERS];
         hits = new NativeList<BulletHit>(HITS_CAPACITY, Allocator.Persistent);
         bulletGrid = new int[GRID_RES * GRID_RES];
         cachedTeamColors = new Vector4[17];
@@ -260,6 +264,7 @@ public class BulletManager : MonoBehaviour
                 hitWriter = hits.AsParallelWriter()
             };
             JobHandle ballHandle = ballJob.Schedule(MAX_BULLETS, 64);
+            JobHandle prevHandle = ballHandle;
             if (shieldCount > 0)
             {
                 var shJob = new BulletShieldCollisionJob
@@ -267,16 +272,42 @@ public class BulletManager : MonoBehaviour
                     bullets = bullets, shields = shieldColliders,
                     shieldCount = shieldCount, hitWriter = hits.AsParallelWriter()
                 };
-                shJob.Schedule(MAX_BULLETS, 64, ballHandle).Complete();
+                prevHandle = shJob.Schedule(MAX_BULLETS, 64, ballHandle);
             }
-            else ballHandle.Complete();
+            if (towelBodyCount > 0)
+            {
+                new BulletTowelCollisionJob
+                {
+                    bullets = bullets, towelBodies = towelBodyColliders,
+                    towelCount = towelBodyCount, hitWriter = hits.AsParallelWriter()
+                }.Schedule(MAX_BULLETS, 64, prevHandle).Complete();
+            }
+            else prevHandle.Complete();
         }
         else if (shieldCount > 0)
         {
-            new BulletShieldCollisionJob
+            var shJob = new BulletShieldCollisionJob
             {
                 bullets = bullets, shields = shieldColliders,
                 shieldCount = shieldCount, hitWriter = hits.AsParallelWriter()
+            };
+            JobHandle shHandle = shJob.Schedule(MAX_BULLETS, 64);
+            if (towelBodyCount > 0)
+            {
+                new BulletTowelCollisionJob
+                {
+                    bullets = bullets, towelBodies = towelBodyColliders,
+                    towelCount = towelBodyCount, hitWriter = hits.AsParallelWriter()
+                }.Schedule(MAX_BULLETS, 64, shHandle).Complete();
+            }
+            else shHandle.Complete();
+        }
+        else if (towelBodyCount > 0)
+        {
+            new BulletTowelCollisionJob
+            {
+                bullets = bullets, towelBodies = towelBodyColliders,
+                towelCount = towelBodyCount, hitWriter = hits.AsParallelWriter()
             }.Schedule(MAX_BULLETS, 64).Complete();
         }
 
@@ -378,16 +409,30 @@ public class BulletManager : MonoBehaviour
         }
 
         shieldCount = 0;
+        towelBodyCount = 0;
         foreach (var t in FindObjectsOfType<Towel>())
         {
-            if (shieldCount >= MAX_COLLIDERS) break;
-            if (t == null || t.shield == null || t.shield_value <= 0) continue;
+            if (t == null) continue;
             float2 p = new float2(t.transform.position.x, t.transform.position.y);
-            float r = t.shield.transform.lossyScale.x;
-            int v = t.shield_value > int.MaxValue ? int.MaxValue : (int)((HugeInt)t.shield_value).ToLong();
-            shieldColliders[shieldCount] = new ShieldCollider { position = p, radius = r, stage = t.stage, value = v };
-            cachedTowels[shieldCount] = t;
-            shieldCount++;
+
+            // Towel body
+            if (towelBodyCount < MAX_COLLIDERS)
+            {
+                float bodyR = t.towelCollider != null ? Mathf.Max(t.transform.lossyScale.x, t.transform.lossyScale.y) * 0.4f : 0.4f;
+                towelBodyColliders[towelBodyCount] = new ShieldCollider { position = p, radius = bodyR, stage = t.stage, value = 0 };
+                cachedTowelsAll[towelBodyCount] = t;
+                towelBodyCount++;
+            }
+
+            // Shield
+            if (shieldCount < MAX_COLLIDERS && t.shield != null && t.shield_value > 0)
+            {
+                float r = t.shield.transform.lossyScale.x;
+                int v = t.shield_value > int.MaxValue ? int.MaxValue : (int)((HugeInt)t.shield_value).ToLong();
+                shieldColliders[shieldCount] = new ShieldCollider { position = p, radius = r, stage = t.stage, value = v };
+                cachedTowels[shieldCount] = t;
+                shieldCount++;
+            }
         }
     }
 
@@ -424,6 +469,12 @@ public class BulletManager : MonoBehaviour
                     if (bi.value <= 0) { bi.alive = 0; bi.value = 0; }
                     bullets[hit.bulletIndex] = bi;
                 }
+            }
+            else if (hit.targetType == 2 && hit.targetIndex < MAX_COLLIDERS)
+            {
+                var t = cachedTowelsAll[hit.targetIndex];
+                if (t == null) continue;
+                t.Die();
             }
         }
 
@@ -493,6 +544,7 @@ public class BulletManager : MonoBehaviour
         if (bullets.IsCreated) bullets.Dispose();
         if (ballColliders.IsCreated) ballColliders.Dispose();
         if (shieldColliders.IsCreated) shieldColliders.Dispose();
+        if (towelBodyColliders.IsCreated) towelBodyColliders.Dispose();
         if (hits.IsCreated) hits.Dispose();
         bulletBuffer?.Release();
     }

@@ -20,6 +20,7 @@ public class MarbleManager : MonoBehaviour
     public HugeInt maxValue;
     public float gravity = 0.1f;
 
+
     private int teamCount;
     private List<GameObject>[] teamMarbleObs;
     private float timer;

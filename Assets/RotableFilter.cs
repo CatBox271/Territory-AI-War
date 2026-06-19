@@ -32,7 +32,7 @@ public class RotableFilter : MonoBehaviour
         targetMass = Time2Mass.Evaluate(Time.time / 60f);
 
         float error = Mathf.DeltaAngle(rb.rotation, targetAngle);
-        float torque = (elasticity * error - rb.angularVelocity * elasticity * 0.1f) * rb.mass;
+        float torque = (error - rb.angularVelocity * elasticity) * rb.mass;
         float maxTorque = targetMass * maxLimit;
         torque = Mathf.Clamp(torque, -maxTorque, maxTorque);
         rb.AddTorque(torque);
