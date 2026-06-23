@@ -3,7 +3,7 @@ using TMPro;
 
 public class FieldArrivalModifier : MonoBehaviour
 {
-    enum State { Idle, Entering, Falling }
+    enum State { Idle, Entering, Falling, Done }
 
     // ====== 时间 ======
     [Header("时间（每个字符独立计时）")]
@@ -60,7 +60,7 @@ public class FieldArrivalModifier : MonoBehaviour
     private int _visibleCharCount;
     private bool _hasStartPoint;
 
-    public bool IsPlaying => _state != State.Idle;
+    public bool IsPlaying => _state == State.Entering || _state == State.Falling;
 
     public float TotalDuration => _visibleCharCount > 0
         ? charDuration + (_visibleCharCount - 1) * charInterval
@@ -359,6 +359,13 @@ public class FieldArrivalModifier : MonoBehaviour
         _timer += dt;
         float alpha = 1f - Mathf.Clamp01(_timer / fallFadeTime);
         _text.alpha = alpha;
+
+        if (_timer >= fallFadeTime)
+        {
+            _state = State.Done;
+            _timer = 0f;
+            return;
+        }
 
         TMP_TextInfo textInfo = _text.textInfo;
         for (int m = 0; m < textInfo.meshInfo.Length; m++)

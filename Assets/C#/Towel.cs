@@ -29,6 +29,7 @@ public class Towel : MonoBehaviour, IStageValue
     public static Dictionary<int, Towel> AllTowel = new();
     public Collider2D towelCollider;
     public Collider2D shieldCollider;
+    public MessageDisplayer messageDisplayer;
 
     void Awake()
     {
@@ -52,6 +53,8 @@ public class Towel : MonoBehaviour, IStageValue
         PaintInitialCircle();
 
         ShotGun(1048576, 60, 1024);
+
+        Say("HelloWorld");
     }
 
     void Update()
@@ -86,6 +89,8 @@ public class Towel : MonoBehaviour, IStageValue
         ShieldTransform();
         ShotGunTest();
     }
+
+    public bool Say(string content) => messageDisplayer.Say(content);
 
     void CreateExplosionEffect()
     {
