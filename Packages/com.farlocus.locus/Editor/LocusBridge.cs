@@ -8,7 +8,6 @@ using UnityEditor.SceneManagement;
 using System;
 using System.Globalization;
 using System.IO;
-using System.IO.Pipes;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,44 +23,26 @@ namespace Locus
     {
         // ───────────────── Connection state ─────────────────
 
-        private static string _pipeName;
-        private static string PipeName
-        {
-            get
-            {
-                if (_pipeName == null)
-                    _pipeName = GeneratePipeName();
-                return _pipeName;
-            }
-        }
-
-        private static CancellationTokenSource _cts;
-        private static Task _serverTask;
-
-        private static readonly object _connectionLock = new object();
-        private static readonly SemaphoreSlim _writeLock = new SemaphoreSlim(1, 1);
         private static readonly SemaphoreSlim _executeCodeLock = new SemaphoreSlim(1, 1);
         private static readonly SemaphoreSlim _runStatesLock = new SemaphoreSlim(1, 1);
 
-        private static NamedPipeServerStream _currentServer;
-        private static StreamWriter _currentWriter;
-        private static volatile bool _desktopPipeConnected;
         private static readonly int _editorProcessId = ResolveCurrentProcessId();
         private static readonly string _editorProcessPath = ResolveCurrentProcessPath();
+        private static readonly bool _isUnityWorkerProcess = DetectUnityWorkerProcess();
 
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
+
+        private static byte[] ReadAssemblyPayload(string assemblyB64, string assemblyPath)
+        {
+            if (!string.IsNullOrEmpty(assemblyPath))
+                return File.ReadAllBytes(assemblyPath);
+            return Convert.FromBase64String(assemblyB64);
+        }
 
         // ───────────────── Constants ─────────────────
 
         private const int ExecuteTimeoutMs = 30000;
-        private const int PipeBufferSize = 64 * 1024;
-        private const int TextReaderWriterBufferSize = 16 * 1024;
         private const int MaxMainThreadActionsPerUpdate = 32;
-#if UNITY_2020
-        private const PipeOptions ServerPipeOptions = PipeOptions.None;
-#else
-        private const PipeOptions ServerPipeOptions = PipeOptions.Asynchronous;
-#endif
 
         // ───────────────── Main-thread dispatcher ─────────────────
 
@@ -75,8 +56,17 @@ namespace Locus
         private static volatile string _activeScenePath = "";
         private static int _editorUpdateEventSequence;
         private static double _lastEditorUpdateEventAt = -1.0;
-        private static string _lastEditorUpdateSelectionKey = "";
+        private static int _lastEditorUpdateSelectionInstanceId = int.MinValue;
         private const double EditorUpdateEventIntervalSeconds = 0.25;
+
+        // Reused across the 0.25s editor-update tick so the idle steady state does
+        // not allocate a fresh payload/snapshot on every send. Written only on the
+        // main thread (PumpMainThreadQueue), so no synchronization is needed.
+        private static readonly EditorSelectionSnapshot _reusableSelectionSnapshot = new EditorSelectionSnapshot();
+        private static readonly EditorUpdatePayload _reusableEditorUpdatePayload = new EditorUpdatePayload();
+        private static readonly Dictionary<Type, string> _typeFullNameCache = new Dictionary<Type, string>();
+        private static int _cachedSelectionPathInstanceId = int.MinValue;
+        private static string _cachedSelectionPath = "";
 
         // ───────────────── Runtime compilation cache ─────────────────
 
@@ -84,12 +74,43 @@ namespace Locus
 
         private static List<MetadataReference> _cachedMetadataReferences;
         private static bool _metadataReferencesReady;
+        private static List<string> _cachedCompileReferencePaths;
+        private static bool _compileReferencePathsReady;
+        private static string _cachedCompileParamsFingerprint;
+        private static bool _compileParamsFingerprintReady;
+        private static long _cachedCompileParamsFingerprintCheckedAtTicks;
+        private const long CompileParamsFingerprintAuditIntervalTicks = TimeSpan.TicksPerSecond * 5L;
+        /// <summary>Any project script assembly compiles with "Allow unsafe
+        /// code" — hot patches follow it (B4). Cached together with the
+        /// reference paths (same CompilationPipeline walk, same lifetime).</summary>
+        private static bool _cachedCompileAllowUnsafe;
         private static int _snippetAssemblyCounter;
 
         // ───────────────── Agent-controlled recompile ─────────────────
 
         private const string SessionKey_RecompileInProgress = "Locus_RecompileInProgress";
         private const string SessionKey_RecompileResult = "Locus_RecompileResult";
+        // Convergence signalling read by the desktop via get_reload_state.
+        // CompileAwaitingReload: set by OnCompilationFinished on a SUCCESSFUL
+        // compile (any initiator), consumed by OnAfterAssemblyReload in the next
+        // domain to advance ConvergedSerial — so the serial only moves once the
+        // newly compiled assemblies are actually LOADED (true convergence),
+        // never while the old domain still runs the old code. A no-compile
+        // domain reload (e.g. entering play mode) leaves the serial untouched.
+        // EditorSessionId is a per-process id (reset on restart) so the desktop
+        // converges against a fresh editor instance even if it never observed
+        // the old one exit.
+        private const string SessionKey_CompileAwaitingReload = "Locus_CompileAwaitingReload";
+        private const string SessionKey_ConvergedSerial = "Locus_ConvergedSerial";
+        private const string SessionKey_EditorSessionId = "Locus_EditorSessionId";
+        // Set when request_recompile issues a compilation, cleared by the next
+        // OnCompilationFinished (any compile). While true, a domain reload is
+        // loading an EARLIER compile's assemblies — not the requested one's — so
+        // OnAfterAssemblyReload must not advance ConvergedSerial or complete the
+        // request: a stale reload would otherwise converge edits that belong to
+        // the still-running requested compile, reporting them applied before they
+        // are loaded.
+        private const string SessionKey_RecompilePendingCompile = "Locus_RecompilePendingCompile";
 
         private static volatile bool _recompileRequested;
         private static volatile string _lastCompileResult;
@@ -128,13 +149,118 @@ namespace Locus
                 preprocessorSymbols: SnippetPreprocessorSymbols
             );
 
+        // ConcurrentBuild is disabled on purpose: the in-process Roslyn fallback
+        // must compile single-threaded. Roslyn's parallel build spins worker
+        // threads that, if still in flight when a synchronous domain reload
+        // begins (e.g. entering Play Mode), are not aborted and deadlock the
+        // editor inside mono_domain_try_unload ("Begin MonoManager ReloadAssembly"
+        // with 0% CPU). Single-threaded compiles run on the request's own worker
+        // thread and are drained by CancelAndDrainInProcessCompiles on reload.
         private static readonly CSharpCompilationOptions SnippetCompilationOptions =
             new CSharpCompilationOptions(
                 outputKind: OutputKind.DynamicallyLinkedLibrary,
                 optimizationLevel: OptimizationLevel.Release,
                 allowUnsafe: false,
                 assemblyIdentityComparer: DesktopAssemblyIdentityComparer.Default
-            );
+            ).WithConcurrentBuild(false);
+
+        // ───────────────── In-process compile reload guard ─────────────────
+        // Tracks in-flight in-process Roslyn compiles (execute_code / run_states /
+        // compile_named / compile_skill_package fallbacks) so a domain reload can
+        // cancel them and bounded-join before the domain unloads. Without this an
+        // in-flight compile thread survives into mono_domain_try_unload and the
+        // reload deadlocks forever.
+        private const int InProcessCompileDrainTimeoutMs = 5000;
+        private static readonly object _inProcessCompileGuardLock = new object();
+        private static int _inProcessCompileActive;
+        private static CancellationTokenSource _inProcessCompileReloadCts = new CancellationTokenSource();
+
+        /// <summary>
+        /// Token that trips when a domain reload begins. In-process compiles pass
+        /// it to Roslyn's Emit so a reload interrupts a compile in progress.
+        /// </summary>
+        private static CancellationToken InProcessCompileReloadToken
+        {
+            get
+            {
+                lock (_inProcessCompileGuardLock)
+                {
+                    return _inProcessCompileReloadCts.Token;
+                }
+            }
+        }
+
+        private readonly struct InProcessCompileScope : IDisposable
+        {
+            public void Dispose()
+            {
+                Interlocked.Decrement(ref _inProcessCompileActive);
+            }
+        }
+
+        /// <summary>
+        /// Mark an in-process Roslyn compile as active for the lifetime of the
+        /// returned scope. Wrap the CSharpCompilation.Emit call so a domain reload
+        /// can wait for it to finish.
+        /// </summary>
+        private static InProcessCompileScope EnterInProcessCompile()
+        {
+            Interlocked.Increment(ref _inProcessCompileActive);
+            return default(InProcessCompileScope);
+        }
+
+        /// <summary>
+        /// Cancel any in-flight in-process Roslyn compiles and bounded-wait for
+        /// them to unwind so none survive into mono_domain_try_unload. Called on
+        /// the main thread from OnBeforeAssemblyReload; the compiles run on worker
+        /// threads, observe the cancelled token, and finish quickly because they
+        /// are single-threaded (see SnippetCompilationOptions).
+        /// </summary>
+        private static void CancelAndDrainInProcessCompiles(int timeoutMs)
+        {
+            CancellationTokenSource cts;
+            lock (_inProcessCompileGuardLock)
+            {
+                cts = _inProcessCompileReloadCts;
+            }
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+            }
+
+            if (Volatile.Read(ref _inProcessCompileActive) > 0)
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (Volatile.Read(ref _inProcessCompileActive) > 0 && sw.ElapsedMilliseconds < timeoutMs)
+                    Thread.Sleep(10);
+
+                int remaining = Volatile.Read(ref _inProcessCompileActive);
+                if (remaining > 0)
+                {
+                    Debug.LogWarning(
+                        "[Locus] in-process compile did not drain before assembly reload (active=" +
+                        remaining + "); proceeding with reload.");
+                }
+            }
+
+            // Fresh token for the next reload cycle (matters only when a reload is
+            // aborted; a real reload resets these statics in the new domain).
+            lock (_inProcessCompileGuardLock)
+            {
+                try
+                {
+                    _inProcessCompileReloadCts.Dispose();
+                }
+                catch
+                {
+                }
+                _inProcessCompileReloadCts = new CancellationTokenSource();
+            }
+        }
 
         private static string[] BuildSnippetPreprocessorSymbols()
         {
@@ -194,7 +320,12 @@ namespace Locus
             try
             {
                 var group = EditorUserBuildSettings.selectedBuildTargetGroup;
+#if UNITY_2021_2_OR_NEWER
+                string raw = PlayerSettings.GetScriptingDefineSymbols(
+                    UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(group));
+#else
                 string raw = PlayerSettings.GetScriptingDefineSymbolsForGroup(group);
+#endif
                 if (!string.IsNullOrEmpty(raw))
                 {
                     string[] customSymbols = raw.Split(';');
@@ -301,11 +432,23 @@ namespace Locus
 
         static LocusBridge()
         {
+            if (_isUnityWorkerProcess)
+            {
+                NativeShutdownInWorkerProcess();
+                return;
+            }
+
             // Keep the bridge alive across edit sessions. Auto Refresh is only suppressed while a session is active.
+            // The static ctor (InitializeOnLoad) runs on the Unity main thread; record it so the
+            // LocusAsync.SwitchTo* primitives can tell which thread they are on.
+            LocusAsync.CaptureMainThread();
+            RefreshCachedEditorState();
             EditorApplication.update += PumpMainThreadQueue;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            EditorApplication.pauseStateChanged += OnPauseStateChanged;
             EditorApplication.delayCall += Start;
             EditorApplication.quitting += OnQuitting;
-            AssemblyReloadEvents.beforeAssemblyReload += Stop;
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
             CompilationPipeline.assemblyCompilationFinished += OnAssemblyCompilationFinished;
@@ -314,19 +457,31 @@ namespace Locus
         private static void OnQuitting()
         {
             ReleaseAllEditSessions();
+            NativeOnQuitting();
             Stop();
         }
 
-        private static string GeneratePipeName()
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
         {
-            string projectPath = Directory.GetParent(Application.dataPath).FullName;
-            string sanitized = projectPath
-                .Replace('\\', '_')
-                .Replace('/', '_')
-                .Replace(':', '_')
-                .Replace(' ', '_');
+            RefreshCachedEditorState();
+            NativePublishEditorStatusNow();
+        }
 
-            return "locus_unity_" + sanitized;
+        private static void OnPauseStateChanged(PauseState state)
+        {
+            RefreshCachedEditorState();
+            NativePublishEditorStatusNow();
+        }
+
+        private static void OnBeforeAssemblyReload()
+        {
+            RefreshCachedEditorState();
+            // Cancel + bounded-join any in-flight in-process Roslyn compile before
+            // the domain unloads, otherwise its worker thread deadlocks the reload
+            // inside mono_domain_try_unload.
+            CancelAndDrainInProcessCompiles(InProcessCompileDrainTimeoutMs);
+            NativeOnBeforeReload();
+            Stop();
         }
 
         private static int ResolveCurrentProcessId()
@@ -375,6 +530,24 @@ namespace Locus
             }
         }
 
+        private static bool DetectUnityWorkerProcess()
+        {
+            try
+            {
+                string[] args = Environment.GetCommandLineArgs();
+                for (int i = 0; i < args.Length; i++)
+                {
+                    string arg = args[i] ?? "";
+                    if (arg.IndexOf("AssetImportWorker", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
         private static bool IsProjectAssetPath(string path)
         {
             if (string.IsNullOrEmpty(path))
@@ -415,88 +588,33 @@ namespace Locus
 
         public static void Start()
         {
-            if (_serverTask != null && !_serverTask.IsCompleted)
+            if (_isUnityWorkerProcess)
                 return;
 
-            try
-            {
-                _cts = new CancellationTokenSource();
-
-                _serverTask = Task.Factory
-                    .StartNew(
-                        () => ServerLoop(_cts.Token),
-                        _cts.Token,
-                        TaskCreationOptions.LongRunning,
-                        TaskScheduler.Default)
-                    .Unwrap();
-
-                Debug.Log("[Locus] Bridge started, listening on pipe: " + PipeName);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("[Locus] Bridge failed to start: " + ex);
-            }
+            NativeStartIfEnabled();
+            if (!IsNativeBridgeActive)
+                Debug.LogError("[Locus] Native broker bridge is required but did not start.");
         }
 
         public static void Stop()
         {
             CancelActiveExecuteCode("bridge stopped");
 
-            var cts = _cts;
-            var task = _serverTask;
-
-            _cts = null;
-            _serverTask = null;
-
-            try
-            {
-                lock (_connectionLock)
-                {
-                    try { if (_currentWriter != null) _currentWriter.Dispose(); } catch { }
-                    try { if (_currentServer != null) _currentServer.Dispose(); } catch { }
-
-                    _currentWriter = null;
-                    _currentServer = null;
-                    _desktopPipeConnected = false;
-                }
-            }
-            catch
-            {
-            }
-
-            if (cts != null)
-            {
-                try
-                {
-                    cts.Cancel();
-
-                    if (task != null && !task.IsCompleted)
-                        task.Wait(1000);
-                }
-                catch
-                {
-                }
-                finally
-                {
-                    cts.Dispose();
-                }
-            }
-
             lock (_mainThreadQueueLock)
             {
                 _mainThreadQueue.Clear();
             }
-
-            Debug.Log("[Locus] Bridge stopped.");
         }
 
         // ───────────────── Compilation events ─────────────────
 
         private static void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)
         {
-            if (!_recompileRequested)
-                return;
-
+            // Collect errors for EVERY compilation, not just Locus-requested
+            // ones, so OnCompilationFinished can tell a successful compile from
+            // a failed one regardless of who triggered it (the convergence
+            // serial must only advance on success). Reset each cycle in
+            // OnCompilationFinished.
             lock (_recompileErrorsLock)
             {
                 foreach (var msg in messages)
@@ -516,38 +634,93 @@ namespace Locus
             // Compilation did fire — cancel the "no compilation" check
             _recompileCheckFrames = -1;
 
+            // A requested compile (if any) has now finished: its reload is the
+            // one allowed to converge. Clear the in-flight marker for EVERY
+            // compile finish — the flag was set when this request was issued, so
+            // the first finish after it is the requested compile (or a coalesced
+            // superset). This frees OnAfterAssemblyReload to converge again.
+            SessionState.SetBool(SessionKey_RecompilePendingCompile, false);
+
+            // Snapshot + reset the per-cycle error set (collected for every
+            // compilation by OnAssemblyCompilationFinished) so success/failure
+            // is known whoever triggered this compile.
+            List<string> errors = null;
+            lock (_recompileErrorsLock)
+            {
+                if (_recompileErrors.Count > 0)
+                    errors = new List<string>(_recompileErrors);
+                _recompileErrors.Clear();
+            }
+            bool succeeded = errors == null;
+
+            // Initiator-agnostic convergence signal: a SUCCESSFUL compilation —
+            // requested by Locus or triggered by Unity itself (manual Ctrl+R,
+            // save, auto-refresh on focus, startup) — will make the loaded
+            // assemblies reflect the current on-disk sources ONCE its domain
+            // reload completes. Only flag it here; OnAfterAssemblyReload advances
+            // the convergence serial after the new assemblies are actually
+            // loaded, so the desktop never converges while the old domain still
+            // runs the old code (or if the reload never fires). Write the flag
+            // BOTH ways: a FAILED compile must clear a stale flag left by a prior
+            // successful-but-not-yet-reloaded compile, otherwise a later bare
+            // domain reload would consume it and falsely report convergence.
+            SessionState.SetBool(SessionKey_CompileAwaitingReload, succeeded);
+
             if (!_recompileRequested)
                 return;
 
             _recompileRequested = false;
 
-            lock (_recompileErrorsLock)
+            if (!succeeded)
             {
-                if (_recompileErrors.Count > 0)
-                {
-                    // Compilation failed. Persist the error so Rust can surface it after any reconnect.
-                    SetCompileResult("error:" + string.Join("\n", _recompileErrors));
-                    _recompileErrors.Clear();
+                // Compilation failed. Persist the error so Rust can surface it after any reconnect.
+                SetCompileResult("error:" + string.Join("\n", errors));
 
-                    // Failed compilations do not trigger a domain reload, so clear the in-progress flag here.
-                    SessionState.SetBool(SessionKey_RecompileInProgress, false);
-                    _domainReloadCheckFrames = -1;
-                }
-                else
-                {
-                    // Compilation finished successfully. Mark the result and wait for the real reload signal.
-                    SetCompileResult("awaiting_reload");
-                    _recompileErrors.Clear();
-                    Debug.Log($"[Locus] Compilation succeeded, waiting for domain reload. isCompiling={EditorApplication.isCompiling}, isPlaying={EditorApplication.isPlaying}");
-                    // If we are still in the same AppDomain after a few frames, reload did not fire.
-                    _domainReloadCheckFrames = 0;
-                }
+                // Failed compilations do not trigger a domain reload, so clear the in-progress flag here.
+                SessionState.SetBool(SessionKey_RecompileInProgress, false);
+                _domainReloadCheckFrames = -1;
+            }
+            else
+            {
+                // Compilation finished successfully. Mark the result and wait for the real reload signal.
+                SetCompileResult("awaiting_reload");
+                Debug.Log($"[Locus] Compilation succeeded, waiting for domain reload. isCompiling={EditorApplication.isCompiling}, isPlaying={EditorApplication.isPlaying}");
+                // If we are still in the same AppDomain after a few frames, reload did not fire.
+                _domainReloadCheckFrames = 0;
             }
         }
 
         private static void OnAfterAssemblyReload()
         {
-            // afterAssemblyReload is the authoritative completion point for a successful recompile.
+            RefreshCachedEditorState();
+            NativeOnAfterReload();
+
+            // A reload that fires while a requested compile is still in flight is
+            // loading an EARLIER compile's assemblies, not the requested one's.
+            // Advancing the serial or completing the request now would converge
+            // edits that belong to the in-flight compile (not yet loaded). Defer
+            // to that compile's own reload, which runs after its
+            // OnCompilationFinished clears this marker.
+            if (SessionState.GetBool(SessionKey_RecompilePendingCompile, false))
+                return;
+
+            // Initiator-agnostic convergence: if this reload was driven by a
+            // successful compilation (flagged by OnCompilationFinished in the
+            // previous domain), the new assemblies are now loaded — disk is the
+            // loaded truth. Advance the convergence serial so the desktop clears
+            // its "unapplied" tracking. This fires for Unity-initiated recompiles
+            // (Ctrl+R, save, focus auto-refresh) too, not just Locus
+            // request_recompile, and only AFTER load — never at compile time.
+            if (SessionState.GetBool(SessionKey_CompileAwaitingReload, false))
+            {
+                SessionState.SetBool(SessionKey_CompileAwaitingReload, false);
+                SessionState.SetInt(
+                    SessionKey_ConvergedSerial,
+                    SessionState.GetInt(SessionKey_ConvergedSerial, 0) + 1);
+            }
+
+            // afterAssemblyReload is also the completion point for a
+            // Locus-requested recompile (drives get_compile_result polling).
             if (!SessionState.GetBool(SessionKey_RecompileInProgress, false))
                 return;
 
@@ -561,6 +734,12 @@ namespace Locus
             {
                 _metadataReferencesReady = false;
                 _cachedMetadataReferences = null;
+                _compileReferencePathsReady = false;
+                _cachedCompileReferencePaths = null;
+                _compileParamsFingerprintReady = false;
+                _cachedCompileParamsFingerprint = null;
+                _cachedCompileParamsFingerprintCheckedAtTicks = 0;
+                _cachedCompileAllowUnsafe = false;
             }
         }
 
@@ -596,6 +775,24 @@ namespace Locus
             SessionState.SetString(SessionKey_RecompileResult, "");
         }
 
+        /// <summary>
+        /// Stable id for this editor process, minted once and kept in
+        /// SessionState (survives domain reloads, reset on restart). The desktop
+        /// reads it via get_reload_state to recognize a fresh editor instance —
+        /// whose loaded assemblies always reflect disk — and converge even when
+        /// it never observed the previous instance exit.
+        /// </summary>
+        private static string EnsureEditorSessionId()
+        {
+            string id = SessionState.GetString(SessionKey_EditorSessionId, "");
+            if (string.IsNullOrEmpty(id))
+            {
+                id = Guid.NewGuid().ToString("N");
+                SessionState.SetString(SessionKey_EditorSessionId, id);
+            }
+            return id;
+        }
+
         private static void QueueChangedAssets(IEnumerable<string> assetPaths)
         {
             if (assetPaths == null)
@@ -622,12 +819,25 @@ namespace Locus
             string[] pendingPaths = new string[_pendingChangedAssetPaths.Count];
             _pendingChangedAssetPaths.CopyTo(pendingPaths);
             _pendingChangedAssetPaths.Clear();
+            // Parents sort before their children, so a brand-new folder is in
+            // the database before its files import.
+            Array.Sort(pendingPaths, StringComparer.Ordinal);
 
             int importedCount = 0;
+            bool needsRefresh = false;
             foreach (string assetPath in pendingPaths)
             {
                 try
                 {
+                    if (!File.Exists(assetPath) && !Directory.Exists(assetPath))
+                    {
+                        // Deleted on disk. ImportAsset cannot drop a stale
+                        // database entry; a Refresh pass below picks the
+                        // removal up (leaving it would fail the next compile
+                        // with a missing source file).
+                        needsRefresh = true;
+                        continue;
+                    }
                     AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
                     importedCount++;
                 }
@@ -637,8 +847,21 @@ namespace Locus
                 }
             }
 
-            if (importedCount > 0)
-                Debug.Log("[Locus] Flushed changed asset imports before compile: " + importedCount);
+            if (needsRefresh)
+            {
+                try
+                {
+                    AssetDatabase.Refresh();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError("[Locus] AssetDatabase.Refresh for deleted assets failed: " + ex);
+                }
+            }
+
+            if (importedCount > 0 || needsRefresh)
+                Debug.Log("[Locus] Flushed changed asset imports before compile: " + importedCount
+                    + (needsRefresh ? " (+refresh for deletions)" : ""));
 
             return importedCount;
         }
@@ -707,9 +930,11 @@ namespace Locus
 
         private static void PumpMainThreadQueue()
         {
-            bool desktopConnected = HasDesktopPipeConnection();
+            NativePump();
+
+            bool desktopConnected = HasAnyDesktopConnection();
             bool hasRuntimeWork = HasMainThreadRuntimeWork();
-            if (desktopConnected || hasRuntimeWork)
+            if (hasRuntimeWork)
                 RefreshCachedEditorState();
 
             if (_activeRunStatesSession != null)
@@ -732,6 +957,11 @@ namespace Locus
                         _recompileRequested = false;
                         SetCompileResult("error:Unity 未检测到脚本变更，编译未触发。请确认 .cs 文件已正确写入且路径位于 Assets 目录内。");
                         SessionState.SetBool(SessionKey_RecompileInProgress, false);
+                        // No compile/reload happened — drop any stale awaiting flag
+                        // so it cannot be consumed by a later unrelated reload, and
+                        // clear the in-flight marker so future reloads converge.
+                        SessionState.SetBool(SessionKey_CompileAwaitingReload, false);
+                        SessionState.SetBool(SessionKey_RecompilePendingCompile, false);
                         _domainReloadCheckFrames = -1;
                     }
                 }
@@ -748,6 +978,10 @@ namespace Locus
                     _domainReloadCheckFrames = -1;
                     SetCompileResult("error:编译成功但域重载未触发。请检查 Unity Editor 当前状态是否正常。");
                     SessionState.SetBool(SessionKey_RecompileInProgress, false);
+                    // The compile's reload never fired — its assemblies are on
+                    // disk but unloaded. Drop the awaiting flag so a later
+                    // unrelated reload does not claim this compile's convergence.
+                    SessionState.SetBool(SessionKey_CompileAwaitingReload, false);
                 }
             }
 
@@ -775,9 +1009,9 @@ namespace Locus
             }
         }
 
-        private static bool HasDesktopPipeConnection()
+        private static bool HasAnyDesktopConnection()
         {
-            return _desktopPipeConnected;
+            return IsNativeBridgeActive;
         }
 
         private static bool HasMainThreadRuntimeWork()
@@ -804,50 +1038,73 @@ namespace Locus
         {
             double now = EditorApplication.timeSinceStartup;
             UnityEngine.Object selection = Selection.activeObject;
-            string selectionKey = selection != null ? selection.GetInstanceID().ToString() : "none";
-            bool selectionChanged = !string.Equals(selectionKey, _lastEditorUpdateSelectionKey, StringComparison.Ordinal);
+            int selectionInstanceId = LocusObjectIdentity.InstanceId(selection);
+            bool selectionChanged = selectionInstanceId != _lastEditorUpdateSelectionInstanceId;
             if (!selectionChanged && _lastEditorUpdateEventAt >= 0 && now - _lastEditorUpdateEventAt < EditorUpdateEventIntervalSeconds)
                 return;
 
-            _lastEditorUpdateSelectionKey = selectionKey;
+            RefreshCachedEditorState();
+
+            _lastEditorUpdateSelectionInstanceId = selectionInstanceId;
             _lastEditorUpdateEventAt = now;
             _editorUpdateEventSequence++;
 
-            var payload = new EditorUpdatePayload
-            {
-                sequence = _editorUpdateEventSequence,
-                timeSinceStartup = now,
-                isPlaying = _isPlaying,
-                isPaused = _isPaused,
-                activeScenePath = _activeScenePath,
-                selection = BuildEditorSelectionSnapshot(selection)
-            };
+            EditorUpdatePayload payload = _reusableEditorUpdatePayload;
+            payload.sequence = _editorUpdateEventSequence;
+            payload.timeSinceStartup = now;
+            payload.isPlaying = _isPlaying;
+            payload.isPaused = _isPaused;
+            payload.activeScenePath = _activeScenePath;
+            FillEditorSelectionSnapshot(_reusableSelectionSnapshot, selection, selectionInstanceId);
+            payload.selection = _reusableSelectionSnapshot;
             SendEventToRust("unity-editor-update", JsonUtility.ToJson(payload));
         }
 
-        private static EditorSelectionSnapshot BuildEditorSelectionSnapshot(UnityEngine.Object selection)
+        private static void FillEditorSelectionSnapshot(
+            EditorSelectionSnapshot target, UnityEngine.Object selection, int instanceId)
         {
             if (selection == null)
             {
-                return new EditorSelectionSnapshot
-                {
-                    kind = "none",
-                    name = "",
-                    type = "",
-                    path = "",
-                    instanceId = 0
-                };
+                target.kind = "none";
+                target.name = "";
+                target.type = "";
+                target.path = "";
+                target.instanceId = 0;
+                return;
             }
 
-            string path = AssetDatabase.GetAssetPath(selection) ?? "";
-            return new EditorSelectionSnapshot
+            // GetAssetPath hits the AssetDatabase and allocates a fresh string on
+            // every call; reuse the last result while the selection is unchanged.
+            string path;
+            if (instanceId == _cachedSelectionPathInstanceId)
             {
-                kind = EditorSelectionKind(selection, path),
-                name = selection.name ?? "",
-                type = selection.GetType().FullName ?? selection.GetType().Name,
-                path = path,
-                instanceId = selection.GetInstanceID()
-            };
+                path = _cachedSelectionPath;
+            }
+            else
+            {
+                path = AssetDatabase.GetAssetPath(selection) ?? "";
+                _cachedSelectionPathInstanceId = instanceId;
+                _cachedSelectionPath = path;
+            }
+
+            target.kind = EditorSelectionKind(selection, path);
+            target.name = selection.name ?? "";
+            target.type = CachedTypeFullName(selection.GetType());
+            target.path = path;
+            target.instanceId = instanceId;
+        }
+
+        private static string CachedTypeFullName(Type type)
+        {
+            if (type == null)
+                return "";
+            string name;
+            if (!_typeFullNameCache.TryGetValue(type, out name))
+            {
+                name = type.FullName ?? type.Name;
+                _typeFullNameCache[type] = name;
+            }
+            return name;
         }
 
         private static string EditorSelectionKind(UnityEngine.Object selection, string path)
@@ -863,258 +1120,13 @@ namespace Locus
             return "object";
         }
 
-        // ───────────────── Pipe server loop ─────────────────
-
-        /// <summary>
-        /// </summary>
-        private static async Task ServerLoop(CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                NamedPipeServerStream server = null;
-
-                try
-                {
-                    server = new NamedPipeServerStream(
-                        PipeName,
-                        PipeDirection.InOut,
-                        1,
-                        PipeTransmissionMode.Byte,
-                        ServerPipeOptions,
-                        PipeBufferSize,
-                        PipeBufferSize
-                    );
-
-#if UNITY_2020
-                    WaitForConnectionCompat(server, ct);
-#else
-                    await server.WaitForConnectionAsync(ct);
-#endif
-                    Debug.Log("[Locus] Pipe client connected: " + PipeName);
-
-                    await HandleConnectionAsync(server, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    try { if (server != null) server.Dispose(); } catch { }
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    try { if (server != null) server.Dispose(); } catch { }
-                    Debug.LogError("[Locus] Bridge error: " + ex);
-
-                    try
-                    {
-                        await Task.Delay(500, ct);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Unity 2020's Mono runtime exposes WaitForConnectionAsync(CancellationToken) but throws NotImplementedException.
-#if UNITY_2020
-        private static void WaitForConnectionCompat(NamedPipeServerStream server, CancellationToken ct)
-        {
-            if (ct.IsCancellationRequested)
-                throw new OperationCanceledException(ct);
-
-            using (ct.Register(delegate
-            {
-                try { server.Dispose(); } catch { }
-            }))
-            {
-                try
-                {
-                    server.WaitForConnection();
-                }
-                catch (ObjectDisposedException)
-                {
-                    if (ct.IsCancellationRequested)
-                        throw new OperationCanceledException(ct);
-                    throw;
-                }
-                catch (IOException)
-                {
-                    if (ct.IsCancellationRequested)
-                        throw new OperationCanceledException(ct);
-                    throw;
-                }
-            }
-
-            if (ct.IsCancellationRequested)
-                throw new OperationCanceledException(ct);
-        }
-#endif
-
-        // ───────────────── Connection handling ─────────────────
-
-        /// <summary>
-        /// </summary>
-        private static async Task HandleConnectionAsync(NamedPipeServerStream server, CancellationToken ct)
-        {
-            try
-            {
-                using (server)
-                using (var reader = new StreamReader(server, Utf8NoBom, false, TextReaderWriterBufferSize, true))
-                using (var writer = new StreamWriter(server, Utf8NoBom, TextReaderWriterBufferSize, true) { AutoFlush = false })
-                {
-                    lock (_connectionLock)
-                    {
-                        _currentServer = server;
-                        _currentWriter = writer;
-                    }
-
-                    await SendEnvelopeAsync(new PipeEnvelope
-                    {
-                        type = "unity_connected",
-                        message = "connected",
-                        processId = _editorProcessId,
-                        processPath = _editorProcessPath
-                    });
-
-                    lock (_connectionLock)
-                    {
-                        if (ReferenceEquals(_currentServer, server))
-                            _desktopPipeConnected = true;
-                    }
-
-                    while (!ct.IsCancellationRequested)
-                    {
-                        string line = await reader.ReadLineAsync();
-                        if (line == null)
-                            break;
-
-                        if (string.IsNullOrWhiteSpace(line))
-                            continue;
-
-                        string captured = line;
-                        _ = ProcessIncomingLineAsync(captured);
-                    }
-
-                    lock (_connectionLock)
-                    {
-                        _currentWriter = null;
-                        _currentServer = null;
-                        _desktopPipeConnected = false;
-                    }
-                    await _writeLock.WaitAsync();
-                    _writeLock.Release();
-                }
-            }
-            catch (IOException)
-            {
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("[Locus] Bridge connection error: " + ex);
-            }
-            finally
-            {
-                lock (_connectionLock)
-                {
-                    if (ReferenceEquals(_currentServer, server))
-                    {
-                        _currentWriter = null;
-                        _currentServer = null;
-                        _desktopPipeConnected = false;
-                    }
-                }
-
-                CancelActiveExecuteCode("pipe disconnected");
-                Debug.Log("[Locus] Pipe client disconnected: " + PipeName);
-            }
-        }
-
-        private static async Task ProcessIncomingLineAsync(string json)
-        {
-            PipeEnvelope request = null;
-
-            try
-            {
-                request = JsonUtility.FromJson<PipeEnvelope>(json);
-            }
-            catch (Exception ex)
-            {
-                string msg = "[Locus] Invalid JSON from client: " + ex.Message + " | raw=" + json;
-                PostToMainThread(delegate { Debug.LogWarning(msg); });
-                return;
-            }
-
-            if (request == null || string.IsNullOrEmpty(request.type))
-            {
-                string msg = "[Locus] Invalid message envelope: " + json;
-                PostToMainThread(delegate { Debug.LogWarning(msg); });
-                return;
-            }
-
-            PipeEnvelope response = await HandleMessageAsync(request);
-
-            if (response != null && !string.IsNullOrEmpty(response.reply_to))
-                await SendEnvelopeAsync(response);
-        }
-
         // ───────────────── Outbound messaging ─────────────────
 
         /// <summary>
         /// </summary>
         public static void SendEventToRust(string eventType, string message)
         {
-            _ = SendEnvelopeAsync(new PipeEnvelope
-            {
-                type = eventType,
-                message = message
-            });
-        }
-
-        /// <summary>
-        /// </summary>
-        private static async Task<bool> SendEnvelopeAsync(PipeEnvelope env)
-        {
-            StreamWriter writer;
-
-            lock (_connectionLock)
-            {
-                writer = _currentWriter;
-            }
-
-            if (writer == null)
-                return false;
-
-            string json;
-            try
-            {
-                json = JsonUtility.ToJson(env);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("[Locus] Failed to serialize envelope: " + ex);
-                return false;
-            }
-
-            await _writeLock.WaitAsync();
-            try
-            {
-                await writer.WriteLineAsync(json);
-                await writer.FlushAsync();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[Locus] Failed to write to pipe: " + ex.Message);
-                return false;
-            }
-            finally
-            {
-                _writeLock.Release();
-            }
+            NativeEmitEvent(eventType, message);
         }
 
         // ───────────────── Response helpers ─────────────────
@@ -1298,12 +1310,15 @@ namespace Locus
                     case "ping":
                         return OkResponse(reqId, "pong");
 
+                    case "bridge_capabilities":
+                        return OkResponse(reqId, "managed_executor_v1,status_cached,set_editor_status_async");
+
                     case "status":
-                        return await HandleStatus(reqId);
+                        return HandleStatus(reqId);
 
                     case "get_console_text":
                     {
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1315,7 +1330,7 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "exit_play_mode":
@@ -1332,10 +1347,13 @@ namespace Locus
                     }
 
                     case "set_editor_status":
-                        return await HandleSetEditorStatus(reqId, msg.message);
+                        return HandleSetEditorStatus(reqId, msg.message);
 
                     case "execute_code":
-                        return await HandleExecuteCode(reqId, msg.message);
+                        return await HandleExecuteCode(reqId, msg.message).ConfigureAwait(false);
+
+                    case "execute_loaded":
+                        return await HandleExecuteLoaded(reqId, msg.message).ConfigureAwait(false);
 
                     case "cancel_execute_code":
                         return HandleCancelExecuteCode(reqId);
@@ -1346,76 +1364,109 @@ namespace Locus
 
                     case "export_type_index":
                     {
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
-                        PostToMainThread(delegate
+                        // Pure reflection + string building (no Unity API,
+                        // and JsonUtility is thread-safe for plain types):
+                        // run directly on the pipe worker so a busy or
+                        // import-blocked main thread cannot stall the export.
+                        try
                         {
-                            try
-                            {
-                                tcs.SetResult(OkResponse(reqId, ExportTypeIndexJson()));
-                            }
-                            catch (Exception ex)
-                            {
-                                tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
-                            }
-                        });
-                        return await tcs.Task;
+                            return OkResponse(reqId, ExportTypeIndexJson());
+                        }
+                        catch (Exception ex)
+                        {
+                            return ErrorResponse(reqId, ex.ToString());
+                        }
                     }
 
                     case "export_type_index_fingerprint":
                     {
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
-                        PostToMainThread(delegate
+                        try
                         {
-                            try
-                            {
-                                tcs.SetResult(OkResponse(reqId, ExportTypeIndexFingerprintJson()));
-                            }
-                            catch (Exception ex)
-                            {
-                                tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
-                            }
-                        });
-                        return await tcs.Task;
+                            return OkResponse(reqId, ExportTypeIndexFingerprintJson());
+                        }
+                        catch (Exception ex)
+                        {
+                            return ErrorResponse(reqId, ex.ToString());
+                        }
                     }
 
+                    case "get_compile_params":
+                        return await HandleGetCompileParams(reqId, msg.message).ConfigureAwait(false);
+
+                    case "hot_reload_probe":
+                        return await HandleHotReloadProbe(reqId).ConfigureAwait(false);
+
+                    case "hot_reload_set_code_optimization":
+                        return await HandleHotReloadSetCodeOptimization(reqId, msg.message).ConfigureAwait(false);
+
+                    case "hot_reload_set_debug":
+                        return await HandleHotReloadSetDebug(reqId).ConfigureAwait(false);
+
+                    case "hot_reload_set_play_mode_reload":
+                        return await HandleHotReloadSetPlayModeReload(reqId, msg.message).ConfigureAwait(false);
+
+                    case "hot_reload_access_probe":
+                        return await HandleHotReloadAccessProbe(reqId, msg.message).ConfigureAwait(false);
+
+                    case "hot_reload_inline_probe":
+                        return await HandleHotReloadInlineProbe(reqId).ConfigureAwait(false);
+
+                    case "hot_reload_inlining_active":
+                        return await HandleHotReloadInliningActive(reqId).ConfigureAwait(false);
+
+                    case "hot_patch_loaded":
+                        return await HandleHotPatchLoaded(reqId, msg.message).ConfigureAwait(false);
+
+                    case "hot_patch_dispose":
+                        return await HandleHotPatchDispose(reqId, msg.message).ConfigureAwait(false);
+
                     case "run_states":
-                        return await HandleRunStates(reqId, msg.message);
+                        return await HandleRunStates(reqId, msg.message).ConfigureAwait(false);
+
+                    case "run_states_loaded":
+                        return await HandleRunStatesLoaded(reqId, msg.message).ConfigureAwait(false);
 
                     case "compile_run_states":
-                        return await HandleCompileRunStates(reqId, msg.message);
+                        return await HandleCompileRunStates(reqId, msg.message).ConfigureAwait(false);
 
                     case "compile_named":
-                        return await HandleCompileNamed(reqId, msg.message);
+                        return await HandleCompileNamed(reqId, msg.message).ConfigureAwait(false);
 
                     case "compile_skill_package":
-                        return await HandleCompileSkillPackage(reqId, msg.message);
+                        return await HandleCompileSkillPackage(reqId, msg.message).ConfigureAwait(false);
 
                     case "invoke_skill_package":
-                        return await HandleInvokeSkillPackage(reqId, msg.message);
+                        return await HandleInvokeSkillPackage(reqId, msg.message).ConfigureAwait(false);
 
                     case "invoke_named":
-                        return await HandleInvokeNamed(reqId, msg.message);
+                        return await HandleInvokeNamed(reqId, msg.message).ConfigureAwait(false);
 
                     case "invoke_named_cached":
-                        return await HandleInvokeNamedCached(reqId, msg.message);
+                        return await HandleInvokeNamedCached(reqId, msg.message).ConfigureAwait(false);
 
                     case "view_binding_read":
-                        return await HandleViewBindingRead(reqId, msg.message);
+                        return await HandleViewBindingRead(reqId, msg.message).ConfigureAwait(false);
 
                     case "view_binding_write":
-                        return await HandleViewBindingWrite(reqId, msg.message);
+                        return await HandleViewBindingWrite(reqId, msg.message).ConfigureAwait(false);
 
                     case "view_binding_apply":
-                        return await HandleViewBindingApply(reqId, msg.message);
+                        return await HandleViewBindingApply(reqId, msg.message).ConfigureAwait(false);
 
                     case "view_binding_discover":
-                        return await HandleViewBindingDiscover(reqId, msg.message);
+                        return await HandleViewBindingDiscover(reqId, msg.message).ConfigureAwait(false);
 
                     case "capture_viewport":
-                        return await HandleCaptureViewport(reqId, msg.message);
+                        return await HandleCaptureViewport(reqId, msg.message).ConfigureAwait(false);
 
                     case "request_recompile":
                     {
+                        // Hot-reload sessions write/delete files without telling
+                        // the AssetDatabase; the desktop forwards every tracked
+                        // dirty path here so created files import and deleted
+                        // ones refresh away before the compile. Older callers
+                        // send an empty message — unchanged behavior.
+                        string changedPathsRaw = msg.message ?? "";
                         PostToMainThread(delegate
                         {
                             ReleaseAllEditSessions();
@@ -1425,9 +1476,24 @@ namespace Locus
                             _recompileRequested = true;
 
                             SessionState.SetBool(SessionKey_RecompileInProgress, true);
+                            if (changedPathsRaw.Length > 0)
+                                QueueChangedAssets(changedPathsRaw.Split('\n'));
                             FlushQueuedAssetImports();
+                            // Catch out-of-band file changes the AssetDatabase
+                            // never saw — chiefly a Locus plugin push, which
+                            // copies new/changed .cs straight into Packages
+                            // without going through ImportAsset. Without this a
+                            // newly added plugin file (no .meta yet) is absent
+                            // from the next compilation and any reference to it
+                            // fails to compile. Refresh imports them first.
+                            AssetDatabase.Refresh();
                             _domainReloadCheckFrames = -1;
                             CompilationPipeline.RequestScriptCompilation();
+                            // Mark the requested compile in-flight: until its
+                            // OnCompilationFinished fires, any domain reload is an
+                            // earlier compile's and must not complete this request
+                            // or advance the convergence serial.
+                            SessionState.SetBool(SessionKey_RecompilePendingCompile, true);
 
                             _recompileCheckFrames = 0;
                         });
@@ -1438,7 +1504,7 @@ namespace Locus
                     case "begin_edit_session":
                     {
                         string owner = msg.message ?? "";
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1450,13 +1516,13 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "end_edit_session":
                     {
                         string owner = msg.message ?? "";
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1468,14 +1534,14 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "import_assets":
                     {
                         string paths = msg.message ?? "";
                         var lines = paths.Split(new[] { '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1492,12 +1558,44 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
+                    }
+
+                    case "get_reload_state":
+                    {
+                        // Lightweight reload-lifecycle probe the desktop polls to
+                        // reconcile its hot-reload "unapplied changes" set: the
+                        // per-domain generation (changes on every reload) plus a
+                        // serial that advances on every SUCCESSFUL compilation
+                        // (any initiator). A moved serial means a real compile
+                        // converged disk into the loaded assemblies; a changed
+                        // generation with an unchanged serial is a no-compile
+                        // reload (e.g. entering play mode). SessionState read on
+                        // the main thread, like get_compile_result.
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
+                        PostToMainThread(delegate
+                        {
+                            try
+                            {
+                                var payload = new ReloadStatePayload
+                                {
+                                    session_id = EnsureEditorSessionId(),
+                                    domain_generation = _compileDomainGeneration,
+                                    converged_serial = SessionState.GetInt(SessionKey_ConvergedSerial, 0),
+                                };
+                                tcs.SetResult(OkResponse(reqId, JsonUtility.ToJson(payload)));
+                            }
+                            catch (Exception ex)
+                            {
+                                tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
+                            }
+                        });
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "get_compile_result":
                     {
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1523,7 +1621,7 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.ToString()));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "select_asset":
@@ -1548,7 +1646,7 @@ namespace Locus
                     case "open_asset_inspector":
                     {
                         SelectAssetRequest request = ParseSelectAssetRequest(msg.message);
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1561,19 +1659,19 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.Message));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "asset_thumbnail":
-                        return await HandleAssetThumbnail(reqId, msg.message);
+                        return await HandleAssetThumbnail(reqId, msg.message).ConfigureAwait(false);
 
                     case "asset_preview_render":
-                        return await HandleAssetPreviewRender(reqId, msg.message);
+                        return await HandleAssetPreviewRender(reqId, msg.message).ConfigureAwait(false);
 
                     case "select_scene_object":
                     {
                         SceneObjectRequest request = ParseSceneObjectRequest(msg.message);
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1586,13 +1684,13 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.Message));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "open_scene_object_inspector":
                     {
                         SceneObjectRequest request = ParseSceneObjectRequest(msg.message);
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1605,13 +1703,13 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.Message));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "start_asset_drag":
                     {
                         StartAssetDragRequest request = ParseStartAssetDragRequest(msg.message);
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1627,12 +1725,12 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.Message));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "cancel_asset_drag":
                     {
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1645,12 +1743,12 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.Message));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "open_frontend_window":
                     {
-                        var tcs = new TaskCompletionSource<PipeEnvelope>();
+                        var tcs = LocusAsync.CreateTcs<PipeEnvelope>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1663,21 +1761,21 @@ namespace Locus
                                 tcs.SetResult(ErrorResponse(reqId, ex.Message));
                             }
                         });
-                        return await tcs.Task;
+                        return await tcs.Task.ConfigureAwait(false);
                     }
 
                     case "list_yaml":
-                        return await HandleListYaml(reqId, msg.message);
+                        return await HandleListYaml(reqId, msg.message).ConfigureAwait(false);
 
                     case "search_yaml":
-                        return await HandleSearchYaml(reqId, msg.message);
+                        return await HandleSearchYaml(reqId, msg.message).ConfigureAwait(false);
 
                     case "read_yaml":
-                        return await HandleReadYaml(reqId, msg.message);
+                        return await HandleReadYaml(reqId, msg.message).ConfigureAwait(false);
 
                     case "reload_open_scenes":
                     {
-                        TaskCompletionSource<string> tcs = new TaskCompletionSource<string>();
+                        TaskCompletionSource<string> tcs = LocusAsync.CreateTcs<string>();
                         PostToMainThread(delegate
                         {
                             try
@@ -1699,7 +1797,7 @@ namespace Locus
                                 tcs.TrySetResult("error:" + ex.Message);
                             }
                         });
-                        string result = await tcs.Task;
+                        string result = await tcs.Task.ConfigureAwait(false);
                         return OkResponse(reqId, result);
                     }
 
@@ -1714,22 +1812,9 @@ namespace Locus
             }
         }
 
-        private static async Task<PipeEnvelope> HandleStatus(string requestId)
+        private static PipeEnvelope HandleStatus(string requestId)
         {
-            var tcs = new TaskCompletionSource<PipeEnvelope>();
-            PostToMainThread(delegate
-            {
-                try
-                {
-                    RefreshCachedEditorState();
-                    tcs.SetResult(OkStatusResponse(requestId));
-                }
-                catch (Exception ex)
-                {
-                    tcs.SetResult(ErrorResponse(requestId, ex.ToString()));
-                }
-            });
-            return await tcs.Task;
+            return OkStatusResponse(requestId);
         }
 
         private static string BuildCachedEditorStatusMessage()

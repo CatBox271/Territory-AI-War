@@ -13,10 +13,6 @@ public class MessageDisplayer : MonoBehaviour
     private Transform _textPool;
     private Transform textPool => _textPool ??= GameObject.FindGameObjectWithTag("TextPool").transform;
 
-    private void Start()
-    {
-    }
-
     private void OnDestroy()
     {
         if (_text != null)

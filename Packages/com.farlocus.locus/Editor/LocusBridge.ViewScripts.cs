@@ -44,6 +44,14 @@ namespace Locus
             public string source;
             public string sourceHash;
             public string path;
+
+            // Optional: assembly pre-compiled by the Locus compile-server
+            // sidecar. When present, a cache miss loads these bytes instead
+            // of compiling `source`; on any load failure the local compile
+            // path still runs. Older plugin builds ignore these fields.
+            public string assembly_b64;
+            public string assembly_path;
+            public string assembly_id;
         }
 
         [Serializable]
@@ -70,6 +78,13 @@ namespace Locus
             public string packageId;
             public string sourceHash;
             public SkillPackageScriptSource[] scripts;
+
+            // Optional: assembly pre-compiled by the Locus compile-server
+            // sidecar. Current desktop builds include these fields; older
+            // builds omit them and take the local compile fallback.
+            public string assembly_b64;
+            public string assembly_path;
+            public string assembly_id;
         }
 
         [Serializable]
@@ -103,6 +118,12 @@ namespace Locus
             public string TypeIndexFingerprint;
             public TypeIndexEntry[] PublicTypes;
             public Assembly Assembly;
+        }
+
+        private sealed class SkillPackageAssemblyCompileResult
+        {
+            public CompiledSkillPackageAssembly Compiled;
+            public bool CacheHit;
         }
 
         private static void InvalidateViewScriptCache()
@@ -168,22 +189,17 @@ namespace Locus
                 return ErrorResponse(requestId, ex.Message);
             }
 
-            string prepareError = await EnsureExecuteCodeCompilationReadyAsync();
-            if (!string.IsNullOrEmpty(prepareError))
-                return ErrorResponse(requestId, prepareError);
-
-            bool cacheHit;
-            CompiledSkillPackageAssembly compiled;
+            SkillPackageAssemblyCompileResult result;
             try
             {
-                compiled = CompileOrGetSkillPackageAssembly(request, out cacheHit);
+                result = await CompileOrGetSkillPackageAssemblyAsync(request);
             }
             catch (Exception ex)
             {
                 return ErrorResponse(requestId, ex.Message);
             }
 
-            return OkResponse(requestId, BuildCompileSkillPackageResponse(compiled, cacheHit));
+            return OkResponse(requestId, BuildCompileSkillPackageResponse(result.Compiled, result.CacheHit));
         }
 
         private static async Task<PipeEnvelope> HandleInvokeSkillPackage(string requestId, string message)
@@ -198,41 +214,47 @@ namespace Locus
                 return ErrorResponse(requestId, ex.Message);
             }
 
-            var tcs = new TaskCompletionSource<string>();
-            PostToMainThread(delegate
-            {
-                try
-                {
-                    object result = InvokeCompiledSkillPackageMethod(request);
-                    tcs.TrySetResult(BuildInvokeSkillPackageResponse(request, result));
-                }
-                catch (TargetInvocationException ex)
-                {
-                    tcs.TrySetException(ex.InnerException ?? ex);
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetException(ex);
-                }
-            });
-
-            Task completed = await Task.WhenAny(tcs.Task, Task.Delay(ExecuteTimeoutMs));
-            if (completed != tcs.Task)
-                return ErrorResponse(requestId, "invoke_skill_package timed out");
-
+            // Stage 1: invoke the user's static method ON the main thread and take
+            // its raw return value WITHOUT blocking on it. The synchronous body of
+            // the user method runs on the main thread (it may touch Unity APIs).
+            object raw;
             try
             {
-                return OkResponse(requestId, tcs.Task.Result);
+                raw = await LocusAsync.RunOnMainThreadAsync<object>(
+                    delegate { return InvokeCompiledSkillPackageMethodRaw(request); },
+                    ExecuteTimeoutMs);
             }
-            catch (AggregateException ex)
+            catch (TimeoutException)
             {
-                Exception inner = ex.InnerException ?? ex;
-                return ErrorResponse(requestId, inner.Message);
+                return ErrorResponse(requestId, "invoke_skill_package timed out");
+            }
+            catch (TargetInvocationException ex)
+            {
+                return ErrorResponse(requestId, (ex.InnerException ?? ex).Message);
             }
             catch (Exception ex)
             {
                 return ErrorResponse(requestId, ex.Message);
             }
+
+            // Stage 2: if the method returned a Task/Task<T>, await it OFF the main
+            // thread. Never block the main thread on user code — that deadlocks if
+            // the user awaits a main-thread continuation (the old GetAwaiter().GetResult()).
+            object result;
+            try
+            {
+                result = await UnwrapTaskResultAsync(raw, ExecuteTimeoutMs).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                return ErrorResponse(requestId, "invoke_skill_package awaited task timed out");
+            }
+            catch (Exception ex)
+            {
+                return ErrorResponse(requestId, ex.Message);
+            }
+
+            return OkResponse(requestId, BuildInvokeSkillPackageResponse(request, result));
         }
 
         private static async Task<PipeEnvelope> HandleInvokeNamed(string requestId, string message)
@@ -301,7 +323,7 @@ namespace Locus
             bool cacheHit,
             ViewInvokeNamedRequest request)
         {
-            var tcs = new TaskCompletionSource<string>();
+            var tcs = LocusAsync.CreateTcs<string>();
             PostToMainThread(delegate
             {
                 try
@@ -449,16 +471,66 @@ namespace Locus
                     return cached;
                 }
 
-                CompiledViewScript compiled = CompileViewScript(request);
+                CompiledViewScript compiled = TryLoadPrecompiledViewScript(request);
+                if (compiled == null)
+                    compiled = CompileViewScript(request);
                 _viewScriptCache[cacheKey] = compiled;
                 cacheHit = false;
                 return compiled;
             }
         }
 
-        private static CompiledSkillPackageAssembly CompileOrGetSkillPackageAssembly(
-            SkillPackageCompileRequest request,
-            out bool cacheHit)
+        /// <summary>
+        /// Load a View Script assembly pre-compiled by the compile-server
+        /// sidecar (optional assembly path/base64 on the request). Returns
+        /// null — falling back to the local compile — when the request has no
+        /// bytes or the load fails for any reason; the source is always
+        /// present.
+        /// </summary>
+        private static CompiledViewScript TryLoadPrecompiledViewScript(ViewCompileNamedRequest request)
+        {
+            if (string.IsNullOrEmpty(request.assembly_b64) &&
+                string.IsNullOrEmpty(request.assembly_path))
+                return null;
+
+            try
+            {
+                byte[] assemblyBytes = ReadAssemblyPayload(request.assembly_b64, request.assembly_path);
+                Assembly assembly = Assembly.Load(assemblyBytes);
+                Type entryType = ResolveEntryType(assembly, request.entryType);
+                string assemblyId = string.IsNullOrEmpty(request.assembly_id)
+                    ? SafeAssemblyName(assembly)
+                    : request.assembly_id;
+
+                return new CompiledViewScript
+                {
+                    Name = request.scriptName,
+                    Hash = request.sourceHash,
+                    EntryTypeName = request.entryType,
+                    AssemblyId = assemblyId,
+                    Path = request.path,
+                    Assembly = assembly,
+                    EntryType = entryType
+                };
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(
+                    "[Locus] precompiled View Script load failed; compiling in Unity instead: " +
+                    ex.Message);
+                return null;
+            }
+        }
+
+        private static bool HasPrecompiledSkillPackageAssemblyPayload(SkillPackageCompileRequest request)
+        {
+            return request != null &&
+                   (!string.IsNullOrEmpty(request.assembly_b64) ||
+                    !string.IsNullOrEmpty(request.assembly_path));
+        }
+
+        private static async Task<SkillPackageAssemblyCompileResult> CompileOrGetSkillPackageAssemblyAsync(
+            SkillPackageCompileRequest request)
         {
             string cacheKey = BuildSkillPackageAssemblyCacheKey(request);
 
@@ -468,14 +540,120 @@ namespace Locus
                 if (_skillPackageAssemblyCache.TryGetValue(cacheKey, out cached))
                 {
                     ActivateSkillPackageAssembly(cached);
-                    cacheHit = true;
-                    return cached;
+                    return new SkillPackageAssemblyCompileResult
+                    {
+                        Compiled = cached,
+                        CacheHit = true
+                    };
+                }
+            }
+
+            CompiledSkillPackageAssembly precompiled = TryLoadPrecompiledSkillPackageAssembly(request);
+            if (precompiled != null)
+            {
+                lock (_skillPackageAssemblyCacheLock)
+                {
+                    CompiledSkillPackageAssembly cached;
+                    if (_skillPackageAssemblyCache.TryGetValue(cacheKey, out cached))
+                    {
+                        ActivateSkillPackageAssembly(cached);
+                        return new SkillPackageAssemblyCompileResult
+                        {
+                            Compiled = cached,
+                            CacheHit = true
+                        };
+                    }
+
+                    _skillPackageAssemblyCache[cacheKey] = precompiled;
+                }
+                ActivateSkillPackageAssembly(precompiled);
+                return new SkillPackageAssemblyCompileResult
+                {
+                    Compiled = precompiled,
+                    CacheHit = false
+                };
+            }
+
+            string prepareError = await EnsureExecuteCodeCompilationReadyAsync();
+            if (!string.IsNullOrEmpty(prepareError))
+                throw new Exception(prepareError);
+
+            lock (_skillPackageAssemblyCacheLock)
+            {
+                CompiledSkillPackageAssembly cached;
+                if (_skillPackageAssemblyCache.TryGetValue(cacheKey, out cached))
+                {
+                    ActivateSkillPackageAssembly(cached);
+                    return new SkillPackageAssemblyCompileResult
+                    {
+                        Compiled = cached,
+                        CacheHit = true
+                    };
                 }
 
                 CompiledSkillPackageAssembly compiled = CompileSkillPackageAssembly(request);
                 _skillPackageAssemblyCache[cacheKey] = compiled;
-                cacheHit = false;
-                return compiled;
+                return new SkillPackageAssemblyCompileResult
+                {
+                    Compiled = compiled,
+                    CacheHit = false
+                };
+            }
+        }
+
+        private static CompiledSkillPackageAssembly TryLoadPrecompiledSkillPackageAssembly(
+            SkillPackageCompileRequest request)
+        {
+            if (!HasPrecompiledSkillPackageAssemblyPayload(request))
+                return null;
+
+            try
+            {
+                string assemblyId = string.IsNullOrEmpty(request.assembly_id)
+                    ? BuildSkillPackageAssemblyId(request)
+                    : request.assembly_id;
+                string assemblyPath = SkillPackageAssemblyPath(assemblyId);
+                Assembly assembly = FindLoadedAssemblyByName(assemblyId);
+                if (assembly == null)
+                {
+                    byte[] assemblyBytes = ReadAssemblyPayload(request.assembly_b64, request.assembly_path);
+                    Directory.CreateDirectory(Path.GetDirectoryName(assemblyPath));
+                    File.WriteAllBytes(assemblyPath, assemblyBytes);
+                    assembly = Assembly.LoadFile(assemblyPath);
+                }
+                else
+                {
+                    string loadedPath = SafeAssemblyLocation(assembly);
+                    if (!string.IsNullOrEmpty(loadedPath))
+                        assemblyPath = loadedPath;
+                }
+
+                string loadedName = SafeAssemblyName(assembly);
+                if (!string.Equals(loadedName, assemblyId, StringComparison.Ordinal))
+                    throw new Exception("assembly name mismatch: expected " + assemblyId + ", got " + loadedName);
+
+                Type[] assemblyTypes = SafeGetAssemblyTypes(assembly) ?? new Type[0];
+                int publicTypeCount = assemblyTypes
+                    .Count(type => type != null && type.IsPublic && !type.IsNested);
+
+                return new CompiledSkillPackageAssembly
+                {
+                    PackageId = request.packageId,
+                    Hash = request.sourceHash,
+                    AssemblyId = assemblyId,
+                    AssemblyPath = assemblyPath.Replace('\\', '/'),
+                    ScriptCount = request.scripts != null ? request.scripts.Length : 0,
+                    PublicTypeCount = publicTypeCount,
+                    PublicTypes = BuildTypeIndexEntriesForAssembly(assembly, assemblyId),
+                    Assembly = assembly
+                };
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(
+                    "[Locus] precompiled Skill Package load failed; compiling in Unity instead: " +
+                    ex.Message);
+                return null;
             }
         }
 
@@ -604,13 +782,16 @@ namespace Locus
             using (var peStream = new MemoryStream(16 * 1024))
             {
                 EmitResult emitResult;
-                try
+                using (EnterInProcessCompile())
                 {
-                    emitResult = compilation.Emit(peStream);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("emit failed: " + ex.Message);
+                    try
+                    {
+                        emitResult = compilation.Emit(peStream, cancellationToken: InProcessCompileReloadToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("emit failed: " + ex.Message);
+                    }
                 }
 
                 if (!emitResult.Success)
@@ -659,15 +840,7 @@ namespace Locus
                 throw new Exception("parse failed: " + ex.Message);
             }
 
-            string shortHash = SanitizeAssemblyNamePart(request.sourceHash);
-            if (shortHash.Length > 12)
-                shortHash = shortHash.Substring(0, 12);
-
-            string assemblyId =
-                "__LocusSkillPackage_" +
-                SanitizeAssemblyNamePart(request.packageId) +
-                "_" +
-                shortHash;
+            string assemblyId = BuildSkillPackageAssemblyId(request);
 
             CSharpCompilation compilation = CSharpCompilation.Create(
                 assemblyName: assemblyId,
@@ -679,13 +852,16 @@ namespace Locus
             using (var peStream = new MemoryStream(64 * 1024))
             {
                 EmitResult emitResult;
-                try
+                using (EnterInProcessCompile())
                 {
-                    emitResult = compilation.Emit(peStream);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("emit failed: " + ex.Message);
+                    try
+                    {
+                        emitResult = compilation.Emit(peStream, cancellationToken: InProcessCompileReloadToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("emit failed: " + ex.Message);
+                    }
                 }
 
                 if (!emitResult.Success)
@@ -731,6 +907,18 @@ namespace Locus
                     throw new Exception("assembly load/bootstrap failed: " + ex.Message);
                 }
             }
+        }
+
+        private static string BuildSkillPackageAssemblyId(SkillPackageCompileRequest request)
+        {
+            string shortHash = SanitizeAssemblyNamePart(request.sourceHash);
+            if (shortHash.Length > 12)
+                shortHash = shortHash.Substring(0, 12);
+
+            return "__LocusSkillPackage_" +
+                   SanitizeAssemblyNamePart(request.packageId) +
+                   "_" +
+                   shortHash;
         }
 
         private static Assembly FindLoadedAssemblyByName(string assemblyName)
@@ -828,7 +1016,7 @@ namespace Locus
             return (request.entryType ?? "").Trim();
         }
 
-        private static object InvokeCompiledSkillPackageMethod(SkillPackageInvokeRequest request)
+        private static object InvokeCompiledSkillPackageMethodRaw(SkillPackageInvokeRequest request)
         {
             string typeName = EffectiveSkillPackageInvokeTypeName(request);
             Assembly assembly = FindSkillPackageInvokeAssembly(request);
@@ -858,7 +1046,9 @@ namespace Locus
                 throw new Exception("Skill package methods may accept zero parameters or one JSON argument");
             }
 
-            return CompleteTaskResult(method.Invoke(null, args));
+            // Return the raw value (possibly a Task); the caller awaits it off the
+            // main thread instead of blocking here.
+            return method.Invoke(null, args);
         }
 
         private static Assembly FindSkillPackageInvokeAssembly(SkillPackageInvokeRequest request)
@@ -947,13 +1137,20 @@ namespace Locus
             return null;
         }
 
-        private static object CompleteTaskResult(object result)
+        // Await a value that may be a Task/Task<T> WITHOUT blocking, off the main
+        // thread, bounded by a timeout. Replaces the old CompleteTaskResult, whose
+        // task.GetAwaiter().GetResult() ran inside the main-thread invoke and
+        // deadlocked the editor whenever the user method awaited a continuation
+        // that needed the main thread.
+        private static async Task<object> UnwrapTaskResultAsync(object result, int timeoutMs)
         {
             Task task = result as Task;
             if (task == null)
                 return result;
 
-            task.GetAwaiter().GetResult();
+            await LocusAsync.WithTimeout(task, timeoutMs, "invoke_skill_package awaited task").ConfigureAwait(false);
+
+            // Task<T> exposes Result; a non-generic Task does not.
             PropertyInfo resultProperty = task.GetType().GetProperty("Result");
             return resultProperty != null ? resultProperty.GetValue(task, null) : null;
         }

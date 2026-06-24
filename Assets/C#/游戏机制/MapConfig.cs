@@ -60,6 +60,7 @@ public class MapConfig : MonoBehaviour
     public bool useAIDecision = false;
 
     [Header("Props")]
+    public int propLimit = 5;
     public List<PropEntry>[] teamProps;
 
     void Awake()
@@ -74,6 +75,16 @@ public class MapConfig : MonoBehaviour
     public void AddProp(int stage, string item, HugeInt value)
     {
         if (stage < 0 || stage >= teamProps.Length) return;
+
+        // 超出上限，自动使用最新存入的道具（栈顶）
+        while (teamProps[stage].Count >= propLimit)
+        {
+            int last = teamProps[stage].Count - 1;
+            var top = teamProps[stage][last];
+            teamProps[stage].RemoveAt(last);
+            ExecutePropEffect(top.stage, top.item, top.value);
+        }
+
         teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
     }
 

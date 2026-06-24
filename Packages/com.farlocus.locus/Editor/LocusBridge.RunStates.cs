@@ -74,7 +74,7 @@ namespace Locus
             }
         }
 
-        private enum RunStatesControlKind
+        internal enum RunStatesControlKind
         {
             Sleep,
             Goto,
@@ -82,15 +82,19 @@ namespace Locus
             Fail
         }
 
-        private sealed class RunStatesControlException : Exception
+        internal sealed class RunStatesControlException : Exception
         {
-            public readonly RunStatesControlKind Kind;
-            public readonly string Target;
-            public readonly string MessageText;
-            public readonly int SleepFrames;
+            public RunStatesControlKind Kind;
+            public string Target;
+            public string MessageText;
+            public int SleepFrames;
 
-            public RunStatesControlException(RunStatesControlKind kind, string target, string message, int sleepFrames)
-                : base(kind.ToString())
+            public RunStatesControlException()
+                : base("run_states_control")
+            {
+            }
+
+            public void Reset(RunStatesControlKind kind, string target, string message, int sleepFrames)
             {
                 Kind = kind;
                 Target = target;
@@ -1169,9 +1173,59 @@ namespace Locus
             }
         }
 
+        // Cached open delegate for ProfilerDriver.lastFrameIndex. Resolving the
+        // PropertyInfo and calling GetValue every sampled frame boxes the int and
+        // allocates an object[] for the (empty) argument list; binding the getter
+        // once to a Func<int> removes both from the per-frame sampling path.
+        private static Func<int> _lastFrameIndexGetter;
+        private static bool _lastFrameIndexGetterResolved;
+
         private static int CurrentProfilerFrameIndex()
         {
+            Func<int> getter = _lastFrameIndexGetter;
+            if (getter == null && !_lastFrameIndexGetterResolved)
+            {
+                _lastFrameIndexGetterResolved = true;
+                getter = _lastFrameIndexGetter = ResolveProfilerDriverIntGetter("lastFrameIndex");
+            }
+
+            if (getter != null)
+            {
+                try
+                {
+                    return getter();
+                }
+                catch
+                {
+                    // A version whose getter throws drops to the reflection path.
+                    _lastFrameIndexGetter = null;
+                }
+            }
+
             return ReadProfilerDriverIntProperty("lastFrameIndex", -1);
+        }
+
+        private static Func<int> ResolveProfilerDriverIntGetter(string propertyName)
+        {
+            try
+            {
+                PropertyInfo property = typeof(ProfilerDriver).GetProperty(
+                    propertyName,
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+                );
+                if (property == null || !property.CanRead || property.PropertyType != typeof(int))
+                    return null;
+
+                MethodInfo getter = property.GetGetMethod(true);
+                if (getter == null)
+                    return null;
+
+                return (Func<int>)Delegate.CreateDelegate(typeof(Func<int>), getter);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static int ReadProfilerDriverIntProperty(string propertyName, int fallback)
@@ -1484,17 +1538,17 @@ namespace Locus
                 int normalized = Math.Max(0, frames);
                 if (normalized <= 0)
                     return;
-                throw new RunStatesControlException(RunStatesControlKind.Sleep, null, null, normalized);
+                throw _session.Control(RunStatesControlKind.Sleep, null, null, normalized);
             }
 
             public void Goto(string stateName)
             {
-                throw new RunStatesControlException(RunStatesControlKind.Goto, stateName, null, 0);
+                throw _session.Control(RunStatesControlKind.Goto, stateName, null, 0);
             }
 
             public void Done(string message)
             {
-                throw new RunStatesControlException(RunStatesControlKind.Done, null, message, 0);
+                throw _session.Control(RunStatesControlKind.Done, null, message, 0);
             }
 
             public void Done()
@@ -1504,7 +1558,7 @@ namespace Locus
 
             public void Fail(string message)
             {
-                throw new RunStatesControlException(RunStatesControlKind.Fail, null, message, 0);
+                throw _session.Control(RunStatesControlKind.Fail, null, message, 0);
             }
 
             public void PromptUser(string token, string message)
@@ -1677,6 +1731,8 @@ namespace Locus
             private readonly Dictionary<string, RuntimeProfilerSession> _profilers =
                 new Dictionary<string, RuntimeProfilerSession>(StringComparer.Ordinal);
             private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+            private readonly RuntimeCtx _runtimeCtx;
+            private readonly RunStatesControlException _control = new RunStatesControlException();
 
             private string _currentStateName;
             private bool _needsStart = true;
@@ -1697,6 +1753,7 @@ namespace Locus
                 _definition = definition;
                 _currentStateName = initialState;
                 _completion = completion;
+                _runtimeCtx = new RuntimeCtx(this);
                 _stateStartFrame = 0;
                 _stateStartSeconds = 0;
             }
@@ -1707,6 +1764,12 @@ namespace Locus
             public int ElapsedFramesInState { get { return Math.Max(0, TotalFrames - _stateStartFrame); } }
             public double TotalSeconds { get { return _stopwatch.Elapsed.TotalSeconds; } }
             public double ElapsedSecondsInState { get { return Math.Max(0, TotalSeconds - _stateStartSeconds); } }
+
+            internal RunStatesControlException Control(RunStatesControlKind kind, string target, string message, int sleepFrames)
+            {
+                _control.Reset(kind, target, message, sleepFrames);
+                return _control;
+            }
 
             public void Tick()
             {
@@ -1764,7 +1827,7 @@ namespace Locus
                         "too large: print output exceeded hard limit of "
                             + RunStatesPrintHardLimitTokens
                             + " estimated tokens; result was not saved."));
-                    throw new RunStatesControlException(RunStatesControlKind.Fail, null, "too large", 0);
+                    throw Control(RunStatesControlKind.Fail, null, "too large", 0);
                 }
 
                 _printBytes = nextBytes;
@@ -2089,7 +2152,7 @@ namespace Locus
 
                 try
                 {
-                    handler(new RuntimeCtx(this));
+                    handler(_runtimeCtx);
                     return !_completed;
                 }
                 catch (RunStatesControlException control)
@@ -2202,7 +2265,7 @@ namespace Locus
                 _runningEnd = true;
                 try
                 {
-                    state.End(new RuntimeCtx(this));
+                    state.End(_runtimeCtx);
                 }
                 catch (RunStatesControlException control)
                 {
@@ -2282,48 +2345,87 @@ namespace Locus
             }
         }
 
-        private static async Task<PipeEnvelope> HandleSetEditorStatus(string requestId, string desiredStatus)
+        private static PipeEnvelope HandleSetEditorStatus(string requestId, string desiredStatus)
         {
             string normalized = (desiredStatus ?? "").Trim();
             if (string.IsNullOrEmpty(normalized))
                 return ErrorResponse(requestId, "empty requested editor status");
 
-            var tcs = new TaskCompletionSource<PipeEnvelope>();
-            PostToMainThread(delegate
+            switch (normalized)
             {
-                try
-                {
-                    switch (normalized)
+                case "editing":
+                    _isPaused = false;
+                    _isPlaying = false;
+                    // Background thread (the executor now runs off the main
+                    // thread): publish the optimistic target status from the
+                    // cached fields without reading Unity APIs. The real
+                    // EditorApplication change is posted to the main thread below,
+                    // and the next heartbeat reconciles from the live editor state.
+                    NativeSetManagedState(ManagedStateReady);
+                    PostToMainThread(delegate
                     {
-                        case "editing":
+                        try
+                        {
                             EditorApplication.isPaused = false;
                             EditorApplication.isPlaying = false;
-                            tcs.TrySetResult(OkResponse(requestId, "editing_requested"));
-                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            UnityEngine.Debug.LogError("[Locus] set_editor_status(editing) failed: " + ex);
+                        }
+                    });
+                    return OkResponse(requestId, "editing_requested");
 
-                        case "playing":
+                case "playing":
+                    _isPaused = false;
+                    _isPlaying = true;
+                    // Background thread (the executor now runs off the main
+                    // thread): publish the optimistic target status from the
+                    // cached fields without reading Unity APIs. The real
+                    // EditorApplication change is posted to the main thread below,
+                    // and the next heartbeat reconciles from the live editor state.
+                    NativeSetManagedState(ManagedStateReady);
+                    PostToMainThread(delegate
+                    {
+                        try
+                        {
                             EditorApplication.isPaused = false;
                             EditorApplication.isPlaying = true;
-                            tcs.TrySetResult(OkResponse(requestId, "playing_requested"));
-                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            UnityEngine.Debug.LogError("[Locus] set_editor_status(playing) failed: " + ex);
+                        }
+                    });
+                    return OkResponse(requestId, "playing_requested");
 
-                        case "playing_paused":
+                case "playing_paused":
+                    _isPaused = true;
+                    _isPlaying = true;
+                    // Background thread (the executor now runs off the main
+                    // thread): publish the optimistic target status from the
+                    // cached fields without reading Unity APIs. The real
+                    // EditorApplication change is posted to the main thread below,
+                    // and the next heartbeat reconciles from the live editor state.
+                    NativeSetManagedState(ManagedStateReady);
+                    PostToMainThread(delegate
+                    {
+                        try
+                        {
+                            if (!EditorApplication.isPlaying)
+                                EditorApplication.isPlaying = true;
                             EditorApplication.isPaused = true;
-                            EditorApplication.isPlaying = true;
-                            tcs.TrySetResult(OkResponse(requestId, "playing_paused_requested"));
-                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            UnityEngine.Debug.LogError("[Locus] set_editor_status(playing_paused) failed: " + ex);
+                        }
+                    });
+                    return OkResponse(requestId, "playing_paused_requested");
 
-                        default:
-                            tcs.TrySetResult(ErrorResponse(requestId, "unsupported editor status: " + normalized));
-                            break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetResult(ErrorResponse(requestId, ex.ToString()));
-                }
-            });
-            return await tcs.Task;
+                default:
+                    return ErrorResponse(requestId, "unsupported editor status: " + normalized);
+            }
         }
 
         private static async Task<PipeEnvelope> HandleCompileRunStates(string requestId, string requestJson)
@@ -2446,48 +2548,178 @@ namespace Locus
                     return ErrorResponse(requestId, "run_states compilation exception: " + ex.Message);
                 }
 
-                var completion = new TaskCompletionSource<RunStatesCompletion>();
-                PostToMainThread(delegate
-                {
-                    try
-                    {
-                        if (_activeRunStatesSession != null)
-                        {
-                            completion.TrySetResult(new RunStatesCompletion(false, "A unity_run_states session is already running."));
-                            return;
-                        }
-
-                        string statusError = ValidateRunStatesEditorStatus(request.request_editor_status);
-                        if (!string.IsNullOrEmpty(statusError))
-                        {
-                            completion.TrySetResult(new RunStatesCompletion(false, statusError));
-                            return;
-                        }
-
-                        RuntimeStateMachineDefinition definition = compiled.Builder();
-                        if (!definition.ContainsState(initialState))
-                        {
-                            completion.TrySetResult(new RunStatesCompletion(false, "Initial state not found: " + initialState));
-                            return;
-                        }
-
-                        _activeRunStatesSession = new RuntimeStateMachineSession(definition, initialState, completion);
-                    }
-                    catch (Exception ex)
-                    {
-                        completion.TrySetResult(new RunStatesCompletion(false, "run_states bootstrap failed: " + ex));
-                    }
-                });
-
-                RunStatesCompletion result = await completion.Task;
-                if (result.Ok)
-                    return OkResponse(requestId, result.Message);
-                return ErrorResponse(requestId, result.Message);
+                return await RunCompiledRunStatesAsync(
+                    requestId,
+                    compiled,
+                    request.request_editor_status,
+                    initialState);
             }
             finally
             {
                 _runStatesLock.Release();
             }
+        }
+
+        // ───────────────── run_states_loaded (compile-server sidecar) ─────────────────
+
+        [Serializable]
+        private sealed class RunStatesLoadedRequest
+        {
+            public string assembly_b64;
+            public string assembly_path;
+            public string entry_type;
+            public string request_editor_status;
+            public string initial_state;
+        }
+
+        /// <summary>
+        /// Sidecar variant of run_states: the state machine was already
+        /// compiled by the Locus compile server; load the assembly bytes and
+        /// run the same session pipeline as the in-Unity compile path.
+        /// </summary>
+        private static async Task<PipeEnvelope> HandleRunStatesLoaded(string requestId, string requestJson)
+        {
+            if (string.IsNullOrWhiteSpace(requestJson))
+                return ErrorResponse(requestId, "empty run_states_loaded request");
+
+            RunStatesLoadedRequest request;
+            try
+            {
+                request = JsonUtility.FromJson<RunStatesLoadedRequest>(requestJson);
+            }
+            catch (Exception ex)
+            {
+                return ErrorResponse(requestId, "run_states_loaded request parse failed: " + ex.Message);
+            }
+
+            if (request == null ||
+                (string.IsNullOrEmpty(request.assembly_b64) &&
+                 string.IsNullOrEmpty(request.assembly_path)))
+                return ErrorResponse(requestId, "run_states_loaded request missing assembly bytes");
+            if (string.IsNullOrWhiteSpace(request.initial_state))
+                return ErrorResponse(requestId, "initial_state is required");
+
+            byte[] assemblyBytes;
+            try
+            {
+                assemblyBytes = ReadAssemblyPayload(request.assembly_b64, request.assembly_path);
+            }
+            catch (Exception ex)
+            {
+                return ErrorResponse(requestId, "run_states_loaded assembly load failed: " + ex.Message);
+            }
+
+            string entryTypeName = string.IsNullOrEmpty(request.entry_type)
+                ? "Locus.RuntimeStateMachines.__LocusRunStatesHost"
+                : request.entry_type;
+
+            await _runStatesLock.WaitAsync();
+            try
+            {
+                CompiledRunStates compiled;
+                try
+                {
+                    compiled = LoadCompiledRunStates(assemblyBytes, entryTypeName);
+                }
+                catch (Exception ex)
+                {
+                    return ErrorResponse(requestId, "run_states compilation exception: " + ex.Message);
+                }
+
+                return await RunCompiledRunStatesAsync(
+                    requestId,
+                    compiled,
+                    request.request_editor_status,
+                    request.initial_state.Trim());
+            }
+            finally
+            {
+                _runStatesLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Load a sidecar-compiled run_states assembly and bind its Build
+        /// entry point. Mirrors the load section of CompileRunStates,
+        /// including error wording.
+        /// </summary>
+        private static CompiledRunStates LoadCompiledRunStates(byte[] assemblyBytes, string entryTypeName)
+        {
+            try
+            {
+                Assembly assembly = Assembly.Load(assemblyBytes);
+
+                Type hostType = assembly.GetType(entryTypeName, true);
+                MethodInfo buildMethod = hostType.GetMethod(
+                    "Build",
+                    BindingFlags.Public | BindingFlags.Static
+                );
+
+                if (buildMethod == null)
+                    throw new Exception("compiled state machine missing Build method");
+
+                Func<RuntimeStateMachineDefinition> builder =
+                    (Func<RuntimeStateMachineDefinition>)Delegate.CreateDelegate(
+                        typeof(Func<RuntimeStateMachineDefinition>),
+                        buildMethod
+                    );
+
+                return new CompiledRunStates(builder);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("assembly load/bootstrap failed: " + ex);
+            }
+        }
+
+        /// <summary>
+        /// Shared run_states / run_states_loaded session bootstrap: validate
+        /// editor status on the main thread, build the definition, and hand
+        /// it to a RuntimeStateMachineSession.
+        /// </summary>
+        private static async Task<PipeEnvelope> RunCompiledRunStatesAsync(
+            string requestId,
+            CompiledRunStates compiled,
+            string requestedEditorStatus,
+            string initialState)
+        {
+            var completion = LocusAsync.CreateTcs<RunStatesCompletion>();
+            PostToMainThread(delegate
+            {
+                try
+                {
+                    if (_activeRunStatesSession != null)
+                    {
+                        completion.TrySetResult(new RunStatesCompletion(false, "A unity_run_states session is already running."));
+                        return;
+                    }
+
+                    string statusError = ValidateRunStatesEditorStatus(requestedEditorStatus);
+                    if (!string.IsNullOrEmpty(statusError))
+                    {
+                        completion.TrySetResult(new RunStatesCompletion(false, statusError));
+                        return;
+                    }
+
+                    RuntimeStateMachineDefinition definition = compiled.Builder();
+                    if (!definition.ContainsState(initialState))
+                    {
+                        completion.TrySetResult(new RunStatesCompletion(false, "Initial state not found: " + initialState));
+                        return;
+                    }
+
+                    _activeRunStatesSession = new RuntimeStateMachineSession(definition, initialState, completion);
+                }
+                catch (Exception ex)
+                {
+                    completion.TrySetResult(new RunStatesCompletion(false, "run_states bootstrap failed: " + ex));
+                }
+            });
+
+            RunStatesCompletion result = await completion.Task;
+            if (result.Ok)
+                return OkResponse(requestId, result.Message);
+            return ErrorResponse(requestId, result.Message);
         }
 
         private static string ValidateRunStatesRequest(RunStatesRequest request)
@@ -2557,13 +2789,16 @@ namespace Locus
             using (var peStream = new MemoryStream(16 * 1024))
             {
                 EmitResult emitResult;
-                try
+                using (EnterInProcessCompile())
                 {
-                    emitResult = compilation.Emit(peStream);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("emit failed: " + ex);
+                    try
+                    {
+                        emitResult = compilation.Emit(peStream, cancellationToken: InProcessCompileReloadToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("emit failed: " + ex);
+                    }
                 }
 
                 if (!emitResult.Success)
@@ -2612,7 +2847,6 @@ namespace Locus
             sb.AppendLine("using System.Collections.Generic;");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine("using UnityEngine.SceneManagement;");
-            sb.AppendLine("using UnityEngine.UI;");
             sb.AppendLine("using Unity.Profiling;");
             sb.AppendLine("using UnityEditor;");
             sb.AppendLine("using UnityEditor.Profiling;");
@@ -2706,6 +2940,7 @@ namespace Locus
 
             sb.Append(indent).AppendLine("new global::System.Action<global::Locus.LocusBridge.RuntimeCtx>(ctx =>");
             sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    var print = new global::System.Action<object>(ctx.Print);");
             sb.Append(indent).Append("    #line 1 ").AppendLine(ToCSharpStringLiteral("unity_run_states:" + stateName + ":" + phase));
             sb.AppendLine(code);
             sb.Append(indent).AppendLine("    #line default");
