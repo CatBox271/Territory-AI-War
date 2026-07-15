@@ -1,10 +1,19 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum WeaponKind
+{
+    霰弹,
+    扫射,
+    护盾,
+    大球,
+    任意
+}
+
 [System.Serializable]
 public class PropEntry
 {
-    public string item;
+    public WeaponKind item;
     public HugeInt value;
     public int stage;
 }
@@ -72,7 +81,7 @@ public class MapConfig : MonoBehaviour
             teamProps[i] = new List<PropEntry>();
     }
 
-    public void AddProp(int stage, string item, HugeInt value)
+    public void AddProp(int stage, WeaponKind item, HugeInt value)
     {
         if (stage < 0 || stage >= teamProps.Length) return;
 
@@ -82,32 +91,33 @@ public class MapConfig : MonoBehaviour
             int last = teamProps[stage].Count - 1;
             var top = teamProps[stage][last];
             teamProps[stage].RemoveAt(last);
-            ExecutePropEffect(top.stage, top.item, top.value);
+            ExecutePropEffect(top.stage, top.item, top.value);//溢出
         }
 
         teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
     }
 
-    public void ExecutePropEffect(int stage, string itemName, HugeInt val)
+    public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null)//这里需要添加ItemType作为目标。
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
 
+        if (aim_pos != null && aim_pos.item != null) towel.LookAt(aim_pos.pos); //转向,炮塔默认会自动顺时针转向
+
         switch (itemName)
         {
-            case "霰弹":
-            case "散弹":
+            case WeaponKind.霰弹:
                 towel.ShotGun(val);
                 break;
-            case "扫射":
+            case WeaponKind.扫射:
                 towel.value += val;
                 break;
-            case "护盾":
+            case WeaponKind.护盾:
                 towel.shield_value += val;
                 break;
-            case "大球":
+            case WeaponKind.大球:
                 towel.SpawnBigBall(val);
                 break;
-            default: // 任意
+            case WeaponKind.任意:
                 switch (Random.Range(0, 4))
                 {
                     case 0: towel.ShotGun(val); break;

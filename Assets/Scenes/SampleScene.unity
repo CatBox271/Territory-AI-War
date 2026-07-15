@@ -1551,7 +1551,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_text
-      value: "\u4EFB\u610F"
+      value: "\u9730\u5F39"
       objectReference: {fileID: 0}
     - target: {fileID: 4284300323083742931, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: Refresh
@@ -1603,7 +1603,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
-      value: "\u4EFB\u610F"
+      value: 4
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalScale.x
@@ -1635,7 +1635,7 @@ PrefabInstance:
       objectReference: {fileID: -7073026908005886744, guid: f3328a2926ae3994a94a47ab095aa740, type: 2}
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_text
-      value: "\u626B\u5C04"
+      value: "\u9730\u5F39"
       objectReference: {fileID: 0}
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_fontAsset
@@ -1699,7 +1699,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
-      value: "\u626B\u5C04"
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalScale.x
@@ -2949,6 +2949,7 @@ MonoBehaviour:
   TowelDefaultBullets: 262144
   basicBallPrefab: {fileID: 2741485188931532298, guid: 5d1c6af57d89db441b4186adbf0c8bc1, type: 3}
   useAIDecision: 0
+  propLimit: 5
 --- !u!1 &638774368
 GameObject:
   m_ObjectHideFlags: 0
@@ -4473,7 +4474,7 @@ MonoBehaviour:
   _captureOnStart: 0
   _startPaused: 0
   _listVideoCodecsOnStart: 0
-  _isRealTime: 1
+  _isRealTime: 0
   _stopMode: 0
   _stopFrames: 0
   _stopSeconds: 0
@@ -4538,9 +4539,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6bff62cf841a5794ebc77f1bde21986c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _capture: {fileID: 1038388512}
   _cycleInterval: 2
-  _autoStart: 1
 --- !u!1001 &1059564635
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -4551,7 +4550,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_text
-      value: "\u62A4\u76FE"
+      value: "\u9730\u5F39"
       objectReference: {fileID: 0}
     - target: {fileID: 4284300323083742931, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: Refresh
@@ -4603,7 +4602,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
-      value: "\u62A4\u76FE"
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalScale.x
@@ -6105,7 +6104,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_text
-      value: "\xD74"
+      value: "\xD72"
       objectReference: {fileID: 0}
     - target: {fileID: 4284300323083742931, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: Refresh
@@ -6378,6 +6377,52 @@ Transform:
   - {fileID: 2028775385}
   - {fileID: 166247399}
   m_Father: {fileID: 1853953899}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1460203814
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1460203816}
+  - component: {fileID: 1460203815}
+  m_Layer: 0
+  m_Name: "\u4E16\u754C\u72B6\u6001\u6536\u96C6\u5668"
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1460203815
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1460203814}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b92a71ac45ff276468b269c3fe4d8fe9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  MarbleItem: {fileID: 1507769745}
+  MapItem: {fileID: 571894828}
+--- !u!4 &1460203816
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1460203814}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -5.916904, y: -0.34384814, z: -0.03627232}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1479710774
 GameObject:
@@ -8382,7 +8427,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_text
-      value: "\u5927\u7403"
+      value: "\u9730\u5F39"
       objectReference: {fileID: 0}
     - target: {fileID: 4284300323083742931, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: Refresh
@@ -8434,7 +8479,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
-      value: "\u5927\u7403"
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalScale.x
@@ -9713,7 +9758,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
-      value: "\u6563\u5F39"
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalScale.x
@@ -10541,3 +10586,4 @@ SceneRoots:
   - {fileID: 1671556642}
   - {fileID: 1507769744}
   - {fileID: 1038388513}
+  - {fileID: 1460203816}

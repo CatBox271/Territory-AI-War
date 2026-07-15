@@ -220,7 +220,7 @@ public class Towel : MonoBehaviour, IStageValue
         canvas.PaintSegment(uv, uv, stage, float.MaxValue, pr, int.MaxValue);
     }
 
-    void LookAt(Vector3 pos)
+    public void LookAt(Vector3 pos)
     {
         var dir = pos - transform.position;
         transform.localEulerAngles += new Vector3(0, 0, Vector2.SignedAngle(transform.up, dir));

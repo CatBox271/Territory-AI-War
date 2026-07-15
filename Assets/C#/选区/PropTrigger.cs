@@ -3,13 +3,19 @@ using UnityEngine;
 
 public class PropTrigger : MonoBehaviour
 {
-    public string itemName;
+    public WeaponKind itemName;
     public TextMeshPro text;
 
     void OnValidate()
     {
         if (text != null)
-            text.text = itemName;
+            text.text = itemName.ToString();
+    }
+
+    MapConfig cfg;
+    private void Start()
+    {
+        cfg = MapConfig.Instance;
     }
 
     void OnTriggerEnter2D(Collider2D other)
@@ -17,7 +23,7 @@ public class PropTrigger : MonoBehaviour
         if (!other.TryGetComponent(out Marble marble)) return;
 
         HugeInt val = HugeInt.Pow(2, (int)marble.ValueExponent);
-        var cfg = MapConfig.Instance;
+
         cfg.AddProp(marble.stage, itemName, val);
 
         if (MarbleManager.Instance != null)
