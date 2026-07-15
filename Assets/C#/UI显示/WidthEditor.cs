@@ -8,6 +8,11 @@ public class WidthEditor : MonoBehaviour
 
     private void OnValidate()
     {
-        transform.GetChild(0).localScale = new Vector3(1 / transform.lossyScale.x, 1 / transform.lossyScale.y, 1 / transform.lossyScale.z);
+        if (transform.childCount == 0) return;
+        transform.GetChild(0).localScale = new Vector3(
+            1 / transform.lossyScale.x,
+            1 / transform.lossyScale.y,
+            1 / transform.lossyScale.z
+        );
     }
 }
