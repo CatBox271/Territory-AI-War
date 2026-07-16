@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public enum WeaponKind
 {
@@ -96,7 +98,6 @@ public class MapConfig : MonoBehaviour
 
         teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
     }
-
     public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null)//这里需要添加ItemType作为目标。
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;

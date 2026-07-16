@@ -2,7 +2,7 @@ using System.Collections;
 using TMPro;
 using UnityEngine;
 
-public class Marble : MonoBehaviour
+public class Marble : MonoBehaviour, IStageValue
 {
     static readonly string[] ShortStrings =
     {
@@ -13,7 +13,8 @@ public class Marble : MonoBehaviour
         "2T", "4T", "8T", "17T", "35T", "70T", "140T", "281T", "562T", "1P",
     };
 
-    public int stage;
+    [field: SerializeField] public int stage { get; set; }
+    public HugeInt value { get; set; }
     public float outlineWidth = 0.2f;
     public Material enchantMaterial;
     public AnimationCurve Value2Size;
@@ -23,7 +24,6 @@ public class Marble : MonoBehaviour
     private uint lastExponent;
     private SpriteRenderer sr;
     private Rigidbody2D rb;
-    private IStageValue stageValue;
     private TrailRenderer tr;
     private CircleCollider2D col;
     private TMP_Text tmp;
@@ -44,7 +44,6 @@ public class Marble : MonoBehaviour
     {
         sr = GetComponent<SpriteRenderer>();
         rb = GetComponent<Rigidbody2D>();
-        stageValue = GetComponent<IStageValue>();
         col = GetComponent<CircleCollider2D>();
         tr = GetComponentInChildren<TrailRenderer>();
         tmp = GetComponentInChildren<TMP_Text>();
@@ -124,11 +123,7 @@ public class Marble : MonoBehaviour
 
     void ApplyValue()
     {
-        if (stageValue != null)
-        {
-            stageValue.stage = stage;
-            stageValue.value = HugeInt.Pow(2, (int)valueExponent);
-        }
+        value = HugeInt.Pow(2, (int)valueExponent);
         if (rb != null)
         {
             rb.mass = valueExponent + 1;
@@ -203,4 +198,6 @@ public class Marble : MonoBehaviour
     {
         ApplyValue();
     }
+
+    public void WhileBeHit(int _stage, HugeInt _value) { }
 }

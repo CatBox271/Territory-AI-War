@@ -55,6 +55,10 @@ public class Towel : MonoBehaviour, IStageValue
         ShotGun(1048576, 60, 1024);
 
         Say("HelloWorld");
+
+        //InformGeter初始化
+        InformGeter.AddItem(stage, new ItemType(transform, "炮塔基地"));
+        InformGeter.AddItem(stage, new ItemType(shield.transform, "基地护盾", shield.GetComponent<IStageValue>()));
     }
 
     void Update()
@@ -248,6 +252,9 @@ public class Towel : MonoBehaviour, IStageValue
 
                 rb.velocity = transform.up * bigBallSpeed;
         }
+
+        //InformGeter
+        InformGeter.AddItem(stage, new ItemType(ob.transform, "大球", bp, rb));
     }
 
     public void ShotGun(HugeInt val,float angle = 0,int defaultNum = 0,int minVal = 0,int maxVal = 0)
