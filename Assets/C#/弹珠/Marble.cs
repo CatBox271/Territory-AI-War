@@ -2,7 +2,7 @@ using System.Collections;
 using TMPro;
 using UnityEngine;
 
-public class Marble : MonoBehaviour, IStageValue
+public class Marble : MonoBehaviour
 {
     static readonly string[] ShortStrings =
     {
@@ -13,8 +13,7 @@ public class Marble : MonoBehaviour, IStageValue
         "2T", "4T", "8T", "17T", "35T", "70T", "140T", "281T", "562T", "1P",
     };
 
-    [field: SerializeField] public int stage { get; set; }
-    public HugeInt value { get; set; }
+    public int stage;
     public float outlineWidth = 0.2f;
     public Material enchantMaterial;
     public AnimationCurve Value2Size;
@@ -123,7 +122,6 @@ public class Marble : MonoBehaviour, IStageValue
 
     void ApplyValue()
     {
-        value = HugeInt.Pow(2, (int)valueExponent);
         if (rb != null)
         {
             rb.mass = valueExponent + 1;
@@ -198,6 +196,4 @@ public class Marble : MonoBehaviour, IStageValue
     {
         ApplyValue();
     }
-
-    public void WhileBeHit(int _stage, HugeInt _value) { }
 }

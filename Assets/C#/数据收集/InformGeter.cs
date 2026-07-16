@@ -13,7 +13,21 @@ public class InformGeter : MonoBehaviour
     public static Dictionary<int, List<ItemType>> Oitems = new();//外在数据
     public static Dictionary<int, List<ItemType>> Iitems = new();//内部数据，目前没用
 
-    //帮我完成对Marble的注册表式收集
+    //弹珠注册表：按阵营收集，生成时注册、销毁时自动清理
+    public static Dictionary<int, List<MarbleType>> MarbleItems = new();
+
+    //guid → Transform 全局查找表，供AI指令通过guid定位对象
+    public static Dictionary<string, Transform> GuidToTransform = new();
+
+    #region 注册
+    //注册一个新弹珠，由MarbleManager在生成时调用
+    public static void AddMarble(int stage, Marble m)
+    {
+        if (!MarbleItems.ContainsKey(stage)) MarbleItems[stage] = new();
+        var mt = new MarbleType(m);
+        MarbleItems[stage].Add(mt);
+        GuidToTransform[mt.guid] = mt.item;
+    }
 
     //有两种调用  1.初始化的调用√  2.新增加的大球的调用√
     public static void AddItem(int stage, ItemType item, bool Out = true)
@@ -22,8 +36,11 @@ public class InformGeter : MonoBehaviour
         {
             if (!Oitems.ContainsKey(stage)) Oitems[stage] = new();
             Oitems[stage].Add(item);
+            if (!string.IsNullOrEmpty(item.guid) && item.item != null)
+                GuidToTransform[item.guid] = item.item;
         }
     }
+    #endregion
     //获得目标stage能获得的全部信息
     public static void GetInfo(StringBuilder builder, int stage)
     {
@@ -32,8 +49,15 @@ public class InformGeter : MonoBehaviour
         {
             GetInfoOKey(builder, key);
         }
-        
+        //弹珠为阵营私有信息，只返回请求方自己的
+        foreach (var key in MarbleItems.Keys)
+        {
+            if (key != stage) continue;
+            GetInfoMarble(builder, key);
+        }
     }
+
+    #region 收集整合
     //获得目标key的信息
     private static void GetInfoOKey(StringBuilder builder, int key)
     {
@@ -50,13 +74,45 @@ public class InformGeter : MonoBehaviour
             builder.AppendLine();builder.Append(")");
         }
         foreach (var item in toRemove)
+        {
             Items.Remove(item);
+            GuidToTransform.Remove(item.guid);
+        }
         //end
         builder.AppendLine(); builder.Append("}");
     }
+    //输出弹珠信息：清理已销毁的，列出存活数量和每个弹珠的值
+    private static void GetInfoMarble(StringBuilder builder, int key)
+    {
+        List<MarbleType> items = MarbleItems[key];
+        if (items.Count <= 0) return;
+        builder.AppendLine(); builder.Append("{");
+        builder.Append(key); builder.Append("号阵营弹珠: ");
+        var toRemove = new List<MarbleType>();
+        foreach (var item in items)
+        {
+            builder.AppendLine(); builder.Append("(");
+            if (item.AppendTo(builder))
+            { }
+            else
+                toRemove.Add(item);
+            builder.AppendLine(); builder.Append(")");
+        }
+        foreach (var item in toRemove)
+        {
+            items.Remove(item);
+            GuidToTransform.Remove(item.guid);
+        }
+        builder.AppendLine(); builder.Append("}");
+    }
+    #endregion
+
     public void Awake()
     {
         Oitems = new();
+        Iitems = new();
+        MarbleItems = new();
+        GuidToTransform = new();
     }
 }
 
@@ -180,5 +236,35 @@ public class ItemType //对象类
                 break;
         }
         return BeDestroyed;
+    }
+}
+
+//弹珠注册项：独立于ItemType的注册表条目，追踪单个弹珠的引用和值
+public class MarbleType
+{
+    public string guid;
+    public int stage;
+    public string valueStr;
+    public uint valueExponent;
+    public Transform item;
+    public Rigidbody2D rb;
+
+    public MarbleType(Marble m)
+    {
+        guid = System.Guid.NewGuid().ToString("N");
+        stage = m.stage;
+        valueExponent = m.ValueExponent;
+        valueStr = HugeInt.Pow(2, (int)valueExponent).ToShortString();
+        item = m.transform;
+        rb = m.GetComponent<Rigidbody2D>();
+    }
+
+    public bool AliveCheck() => item != null && item.gameObject.activeSelf;
+
+    public bool AppendTo(StringBuilder builder)
+    {
+        if (!AliveCheck()) return false;
+        builder.Append(valueStr);
+        return true;
     }
 }
