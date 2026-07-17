@@ -351,7 +351,7 @@ public class BulletManager : MonoBehaviour
                         if (pixelOwner != bStage)
                         {
                             map[py * res + px] = bStage;
-                            cost += pixelOwner == 0 ? 1 : 2; // 中立 1x，敌队 2x
+                            cost += MapConfig.Instance.paintCost;
                         }
                     }
                 }

@@ -11,6 +11,7 @@ public class BallPainter : MonoBehaviour, IStageValue
     public float baseWorldRadius = 0.5f;
     public float attackPower = 1.0f;
     public int HitDivide = 3;
+    public float ScaleChangeSpeed = 3f;
 
     public CurveTransform ScaleCurve;
     public CurveTransform SpeedCurve;
@@ -57,7 +58,7 @@ public class BallPainter : MonoBehaviour, IStageValue
             }
             else
             {
-                transform.localScale = Mathf.Lerp(ts, aimScale, Time.fixedDeltaTime) * Vector3.one;
+                transform.localScale = Mathf.Lerp(ts, aimScale, Time.fixedDeltaTime * ScaleChangeSpeed) * Vector3.one;
             }
         }
 

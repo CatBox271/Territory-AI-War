@@ -55,6 +55,7 @@ public class InformGeter : MonoBehaviour
             if (key != stage) continue;
             GetInfoMarble(builder, key);
         }
+        GetInfoProp(builder, stage);
     }
 
     #region 收集整合
@@ -65,6 +66,11 @@ public class InformGeter : MonoBehaviour
         if (Items.Count <= 0) return;
         //start
         builder.AppendLine(); builder.Append("{"); builder.Append(key);builder.Append("号阵营场上信息: ");
+        if (Towel.AllTowel.TryGetValue(key, out var towel))
+        {
+            builder.AppendLine(); builder.Append("当前子弹量: ");
+            builder.Append(towel.value.ToShortString());
+        }
         List<ItemType> toRemove = new();
         foreach (ItemType item in Items)
         {
@@ -105,8 +111,24 @@ public class InformGeter : MonoBehaviour
         }
         builder.AppendLine(); builder.Append("}");
     }
-    #endregion
 
+
+    private static void GetInfoProp(StringBuilder builder, int stage)
+    {
+        var props = MapConfig.Instance.teamProps[stage];
+        if (props.Count <= 0) return;
+        builder.AppendLine(); builder.Append("{");
+        builder.Append(stage); builder.Append("号阵营道具栈: ");
+        foreach (var p in props)
+        {
+            builder.AppendLine(); builder.Append("(");
+            builder.Append(p.item.ToString()); builder.Append(" "); builder.Append(p.value.ToShortString());
+            builder.AppendLine(); builder.Append(")");
+        }
+        builder.AppendLine(); builder.Append("}");
+    }
+
+    #endregion
     public void Awake()
     {
         Oitems = new();

@@ -221,7 +221,7 @@ GameObject:
   - component: {fileID: 6864175156454396675}
   - component: {fileID: 3767908013893368130}
   - component: {fileID: 6264478398640388796}
-  - component: {fileID: 2340345562739087144}
+  - component: {fileID: 2128266677755943854}
   m_Layer: 0
   m_Name: "\u57FA\u7840\u7403"
   m_TagString: Ball
@@ -481,7 +481,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   TR: {fileID: 622875075528979609}
---- !u!114 &2340345562739087144
+--- !u!114 &2128266677755943854
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

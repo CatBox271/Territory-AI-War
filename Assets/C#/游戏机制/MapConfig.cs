@@ -20,6 +20,22 @@ public class PropEntry
     public int stage;
 }
 
+public class PropInfo
+{
+    public int stage;
+    public WeaponKind kind;
+    public HugeInt value;
+    public ItemType aim;
+
+    public PropInfo(WeaponKind kind, HugeInt value, int stage = 0, ItemType aim = null)
+    {
+        this.stage = stage;
+        this.kind = kind;
+        this.value = value;
+        this.aim = aim;
+    }
+}
+
 public class MapConfig : MonoBehaviour
 {
     public static MapConfig Instance { get; private set; }
@@ -27,6 +43,8 @@ public class MapConfig : MonoBehaviour
     [Header("Map")]
     public float worldSize = 10f;
     public int resolution = 1024;
+    public int paintCost = 1; // 每像素占领消耗，不区分中立/敌方
+    public float marbleSpeed = 10f; // 弹珠发射速度
 
     [Header("Colors")]
     public List<Color> teamColors = new()
@@ -74,6 +92,10 @@ public class MapConfig : MonoBehaviour
     public int propLimit = 5;
     public List<PropEntry>[] teamProps;
 
+    //监听道具入栈出栈
+    public static event Action<PropInfo> OnPropIn;
+    public static event Action<PropInfo> OnPropOut;
+
     void Awake()
     {
         Instance = this;
@@ -93,16 +115,21 @@ public class MapConfig : MonoBehaviour
             int last = teamProps[stage].Count - 1;
             var top = teamProps[stage][last];
             teamProps[stage].RemoveAt(last);
-            ExecutePropEffect(top.stage, top.item, top.value);//溢出
+            ExecutePropEffect(top.stage, top.item, top.value);//溢出（内部触发OnPropPop）
         }
 
         teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
+        {
+            OnPropIn?.Invoke(new PropInfo(item, value, stage));
+        }
     }
     public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null)//这里需要添加ItemType作为目标。
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
 
         if (aim_pos != null && aim_pos.item != null) towel.LookAt(aim_pos.pos); //转向,炮塔默认会自动顺时针转向
+
+        OnPropOut?.Invoke(new PropInfo(itemName, val, stage, aim_pos));
 
         switch (itemName)
         {

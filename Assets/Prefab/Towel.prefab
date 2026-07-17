@@ -58,6 +58,8 @@ GameObject:
   - component: {fileID: 410374500694920208}
   - component: {fileID: 6080560076359578667}
   - component: {fileID: 525751960054713117}
+  - component: {fileID: 618785998335546845}
+  - component: {fileID: 7866295218095374167}
   m_Layer: 0
   m_Name: Towel
   m_TagString: Towel
@@ -310,6 +312,36 @@ CircleCollider2D:
   m_Offset: {x: 0, y: 0}
   serializedVersion: 2
   m_Radius: 0.26
+--- !u!114 &618785998335546845
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1997610200187619198}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 266139b90dc3b57439787386624dc11d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  speed: 30
+  angleRange: {x: 0, y: 360}
+  loop: 1
+  active: 1
+--- !u!114 &7866295218095374167
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1997610200187619198}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 06ab6e55de897df4da4a655d3fd36504, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  auto: {fileID: 618785998335546845}
+  towel: {fileID: 6080560076359578667}
 --- !u!1 &2721065759024970260
 GameObject:
   m_ObjectHideFlags: 0
@@ -472,7 +504,7 @@ GameObject:
   - component: {fileID: 5421630381665802631}
   - component: {fileID: 1928166740538820340}
   - component: {fileID: 4789821447893959217}
-  - component: {fileID: 692335612601549000}
+  - component: {fileID: 5756727732543006327}
   m_Layer: 0
   m_Name: "\u62A4\u76FE\u6570\u5B57"
   m_TagString: Untagged
@@ -653,7 +685,7 @@ MonoBehaviour:
   m_hasFontAssetChanged: 0
   m_renderer: {fileID: 1928166740538820340}
   m_maskType: 0
---- !u!114 &692335612601549000
+--- !u!114 &5756727732543006327
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

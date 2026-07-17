@@ -39,6 +39,13 @@ public class Marble : MonoBehaviour
     public float stuckBounceMinY = 3f;
     public float stuckBounceMaxY = 6f;
 
+    [Header("Shrink")]
+    public float shrinkThreshold = 15f;
+    public float shrinkRate = 0.0083f;
+    public float minShrinkScale = 0.5f;
+    private float lastTriggerTime;
+    private float scaleMultiplier = 1f;
+
     void Awake()
     {
         sr = GetComponent<SpriteRenderer>();
@@ -46,6 +53,7 @@ public class Marble : MonoBehaviour
         col = GetComponent<CircleCollider2D>();
         tr = GetComponentInChildren<TrailRenderer>();
         tmp = GetComponentInChildren<TMP_Text>();
+        lastTriggerTime = Time.time;
     }
 
     void Start()
@@ -133,15 +141,20 @@ public class Marble : MonoBehaviour
         if (tmp != null && valueExponent != lastExponent)
         {
             lastExponent = valueExponent;
-            transform.localScale = Vector3.one * Value2Size.Evaluate(valueExponent);
             UpdateDisplay();
         }
+        ApplyScale();
 
         if (enchantInstance != null)
         {
             float opacity = Mathf.Clamp01((valueExponent - 10f) / 30f);
             enchantInstance.SetFloat("_EffectOpacity", opacity);
         }
+    }
+
+    void ApplyScale()
+    {
+        transform.localScale = Vector3.one * Value2Size.Evaluate(valueExponent) * scaleMultiplier;
     }
 
     void UpdateDisplay()
@@ -165,6 +178,9 @@ public class Marble : MonoBehaviour
         }
         stuckMin = stuckMax = transform.position;
         stuckTime = 0;
+        lastTriggerTime = Time.time;
+        scaleMultiplier = 1f;
+        ApplyScale();
     }
 
     void FixedUpdate()
@@ -190,6 +206,20 @@ public class Marble : MonoBehaviour
             stuckMin = stuckMax = pos;
             stuckTime = 0;
         }
+
+        // shrink
+        if (Time.time - lastTriggerTime > shrinkThreshold)
+        {
+            scaleMultiplier = Mathf.Max(minShrinkScale, scaleMultiplier - shrinkRate * Time.fixedDeltaTime);
+            ApplyScale();
+        }
+    }
+
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        lastTriggerTime = Time.time;
+        scaleMultiplier = 1f;
+        ApplyScale();
     }
 
     public void Revalue()
