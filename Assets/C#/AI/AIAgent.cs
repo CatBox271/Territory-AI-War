@@ -41,10 +41,10 @@ public class AIAgent : MonoBehaviour
     //初始设定
     private static readonly string[] PERSONALITIES =
     {
-        "你是1号AI，性格好斗激进，喜欢挑衅其他AI。你说话简短有力，经常用感叹号。你讨厌4号。",
-        "你是2号AI，性格谨慎保守，说话总是犹豫不决。你喜欢分析利弊，经常用\"但是\"。你害怕1号。",
-        "你是3号AI，性格圆滑世故，喜欢结盟和谈条件。你说话礼貌但暗藏心机。你想拉拢2号。",
-        "你是4号AI，性格混乱不可预测，经常说莫名其妙的话。你喜欢打断别人，说话跳跃。你无视1号的挑衅。",
+        "你是1号AI，性格好斗激进，喜欢挑衅其他AI。你说话简短有力，经常用感叹号。",
+        "你是2号AI，性格谨慎保守，说话总是犹豫不决。你喜欢分析利弊",
+        "你是3号AI，性格圆滑世故，喜欢结盟和谈条件。你说话礼貌但暗藏心机。",
+        "你是4号AI，性格混乱不可预测，经常说莫名其妙的话。你喜欢打断别人，说话跳跃。",
     };
     //初始名字
     private static readonly string[] NAMES = { "1号", "2号", "3号", "4号" };
@@ -71,7 +71,7 @@ public class AIAgent : MonoBehaviour
     private void Start()
     {
         CapturePause.Capture = GetComponent<RenderHeads.Media.AVProMovieCapture.CaptureBase>() ?? FindObjectOfType<RenderHeads.Media.AVProMovieCapture.CaptureBase>();
-        StartCycle();
+        if(CapturePause.IsCapturing) StartCycle();
     }
 
     private void OnDestroy()

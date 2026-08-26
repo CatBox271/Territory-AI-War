@@ -30,6 +30,7 @@ public class Towel : MonoBehaviour, IStageValue
     public Collider2D towelCollider;
     public Collider2D shieldCollider;
     public MessageDisplayer messageDisplayer;
+    public AimController aimController;
 
     void Awake()
     {

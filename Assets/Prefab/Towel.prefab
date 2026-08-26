@@ -276,6 +276,7 @@ MonoBehaviour:
   towelCollider: {fileID: 525751960054713117}
   shieldCollider: {fileID: 480754872830793386}
   messageDisplayer: {fileID: 2532380011593234005}
+  aimController: {fileID: 7866295218095374167}
   BulletPosRandom: 0
 --- !u!58 &525751960054713117
 CircleCollider2D:

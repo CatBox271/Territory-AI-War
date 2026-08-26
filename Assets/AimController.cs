@@ -13,7 +13,6 @@ public class AimController : MonoBehaviour
     ItemType aim;
     void LookAt(Vector2 pos) => towel.LookAt(pos);
 
-
     private void Start()
     {
         SqrDis = MaxDis * MaxDis;
@@ -31,7 +30,7 @@ public class AimController : MonoBehaviour
     }
 
     float aimTime = new();
-    void ChangeAim(ItemType Iaim)
+    public void ChangeAim(ItemType Iaim)
     {
         aimTime = Time.time;
         aim = Iaim;

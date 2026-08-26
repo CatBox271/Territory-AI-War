@@ -16,7 +16,7 @@ public class DeepSeekCaptureController : MonoBehaviour
     private bool _isWaiting;
 
     private const string API_URL = "https://api.deepseek.com/chat/completions";
-    private const string MODEL = "deepseek-v4-pro";
+    private const string MODEL = "deepseek-v4-flash";
 
     private static readonly JsonSerializerSettings JSON_SETTINGS = new()
     {

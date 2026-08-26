@@ -127,8 +127,11 @@ public class MapConfig : MonoBehaviour
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
 
-        if (aim_pos != null && aim_pos.item != null) towel.LookAt(aim_pos.pos); //转向,炮塔默认会自动顺时针转向
-
+        if (aim_pos != null && aim_pos.item != null)
+        {
+            towel.LookAt(aim_pos.pos); //转向,炮塔默认会自动顺时针转向
+            towel.aimController.ChangeAim(aim_pos);
+        }
         OnPropOut?.Invoke(new PropInfo(itemName, val, stage, aim_pos));
 
         switch (itemName)
