@@ -10,7 +10,7 @@ public class ShieldEffect : MonoBehaviour, IStageValue
     public Color originColor;
 
     [Range(0, 1)] public float intensityPerHit = 0.4f;
-    public float decayDuration = 0.3f;
+    public float decayDuration = 3f;
     private float flashIntensity;
     private Coroutine flashCoroutine;
 

@@ -16,15 +16,15 @@ public class MarbleManager : MonoBehaviour
     public int initialMarbleCount = 3;
     public float initialSpawnDelay = 0.3f;
     public float spawnInterval = 5f;
+    public float SpawnTimer = 30f;
     public uint initialValueExponent = 10;
     public uint startValueExponent = 10;
     public HugeInt maxValue;
     public float gravity = 0.1f;
 
-
     private int teamCount;
     private List<GameObject>[] teamMarbleObs;
-    private float timer;
+
     private Shooter shooterComp;
 
     private void Awake()
@@ -43,6 +43,8 @@ public class MarbleManager : MonoBehaviour
             teamMarbleObs[stage] = new List<GameObject>();
 
         StartCoroutine(SpawnInitial());
+
+        SpawnTimer = spawnInterval * 60f - 15f;
     }
 
     IEnumerator SpawnInitial()
@@ -57,10 +59,10 @@ public class MarbleManager : MonoBehaviour
 
     void Update()
     {
-        timer += Time.deltaTime;
-        if (timer >= spawnInterval * 60f)
+        SpawnTimer += Time.deltaTime;
+        if (SpawnTimer >= spawnInterval * 60f)
         {
-            timer -= spawnInterval * 60f;
+            SpawnTimer -= spawnInterval * 60f;
             for (int stage = 1; stage <= teamCount; stage++)
                 SpawnAndLaunch(stage);
         }

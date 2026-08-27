@@ -162,20 +162,29 @@ MonoBehaviour:
       - serializedVersion: 3
         time: 0
         value: 2
-        inSlope: 1.4761164
-        outSlope: 1.4761164
+        inSlope: 2.3025095
+        outSlope: 2.3025095
         tangentMode: 0
         weightedMode: 0
         inWeight: 0
-        outWeight: 0.090946175
+        outWeight: 0.13878429
       - serializedVersion: 3
-        time: 40
+        time: 21
         value: 128
-        inSlope: 7.150963
-        outSlope: 7.150963
+        inSlope: 15.375662
+        outSlope: 15.375662
         tangentMode: 0
         weightedMode: 0
-        inWeight: 0.07565375
+        inWeight: 0.0868742
+        outWeight: 0.33333334
+      - serializedVersion: 3
+        time: 40
+        value: 256
+        inSlope: 0.3049061
+        outSlope: 0.3049061
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0.1663495
         outWeight: 0.33333334
       m_PreInfinity: 2
       m_PostInfinity: 2
@@ -492,7 +501,7 @@ MonoBehaviour:
   sp: {fileID: 0}
   originColor: {r: 0, g: 0, b: 0, a: 0}
   intensityPerHit: 0.4
-  decayDuration: 0.3
+  decayDuration: 1
 --- !u!1 &4338203946166271588
 GameObject:
   m_ObjectHideFlags: 0

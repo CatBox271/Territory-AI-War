@@ -7,9 +7,9 @@ public class RotableFilter : MonoBehaviour
     public float elasticity = 10f;
     public float maxLimit = 2f;
 
+    public AnimationCurve ForceCurve;
     public AnimationCurve Time2Mass;
     private Rigidbody2D rb;
-
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -21,7 +21,9 @@ public class RotableFilter : MonoBehaviour
         {
             rb.mass = targetMass;
             if (MarbleManager.Instance != null)
+            {
                 rb.gravityScale = MarbleManager.Instance.gravity;
+            }
         }
     }
 
@@ -31,9 +33,9 @@ public class RotableFilter : MonoBehaviour
 
         targetMass = Time2Mass.Evaluate(Time.time / 60f);
 
-        float error = Mathf.DeltaAngle(rb.rotation, targetAngle);
-        float torque = (error - rb.angularVelocity * elasticity) * rb.mass;
+        float angle = Mathf.DeltaAngle(rb.rotation, targetAngle);
         float maxTorque = targetMass * maxLimit;
+        float torque = (ForceCurve.Evaluate(angle) - rb.angularVelocity * elasticity) * rb.mass;
         torque = Mathf.Clamp(torque, -maxTorque, maxTorque);
         rb.AddTorque(torque);
     }

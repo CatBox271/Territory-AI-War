@@ -12,6 +12,7 @@ public class AIAgent : MonoBehaviour
     private bool _isWaiting;
     private MonoCharacter[] _characters;
     private int _round;
+    private bool _start = false;
 
     #region 初始化
 
@@ -51,8 +52,6 @@ public class AIAgent : MonoBehaviour
 
     void SetDefaultSetting()
     {
-        print(NAMES.Length);
-        print(PERSONALITIES.Length);
         _characters = new MonoCharacter[4];
         for (int i = 0; i < 4; i++)
         {
@@ -71,7 +70,19 @@ public class AIAgent : MonoBehaviour
     private void Start()
     {
         CapturePause.Capture = GetComponent<RenderHeads.Media.AVProMovieCapture.CaptureBase>() ?? FindObjectOfType<RenderHeads.Media.AVProMovieCapture.CaptureBase>();
-        if(CapturePause.IsCapturing) StartCycle();
+    }
+
+    private void Update()
+    {
+
+        if (CapturePause.IsCapturing)
+        {
+            if (!_start)
+            {
+                _start = true;
+                StartCycle();
+            }
+        }
     }
 
     private void OnDestroy()

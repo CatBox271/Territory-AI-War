@@ -205,6 +205,9 @@ MonoBehaviour:
   stuckBounceMaxX: 4
   stuckBounceMinY: 3
   stuckBounceMaxY: 8
+  shrinkThreshold: 15
+  shrinkRate: 0.0083
+  minShrinkScale: 0.5
 --- !u!1 &9026055536894575632
 GameObject:
   m_ObjectHideFlags: 0

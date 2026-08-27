@@ -13,7 +13,7 @@ public class BulletManager : MonoBehaviour
     [Range(1, 8)] public int bulletDisplayRadius = 2;
     [Range(1, 50)] public float bulletSpeed = 10f;
 
-    private const int MAX_BULLETS = 8192;
+    private const int MAX_BULLETS = 32768;
     private const int MAX_COLLIDERS = 128;
     private const int HITS_CAPACITY = 4096;
     private const int GATHER_INTERVAL = 30;
