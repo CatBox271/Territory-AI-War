@@ -43,8 +43,6 @@ public class MarbleManager : MonoBehaviour
             teamMarbleObs[stage] = new List<GameObject>();
 
         StartCoroutine(SpawnInitial());
-
-        SpawnTimer = spawnInterval * 60f - 15f;
     }
 
     IEnumerator SpawnInitial()

@@ -5,9 +5,9 @@ using static DeepSeekClient;
 
 public class MonoCharacter
 {
-    public string ai_name = "";//角色的唯一名称
-    public string oc = "";//角色设定
-    public List<ChatMsg> messages = new();//头个固定为oc
+    public string ai_name = "";//瑙掕壊鐨勫敮涓�鍚嶇О
+    public string oc = "";//瑙掕壊璁惧畾
+    public List<ChatMsg> messages = new();//澶翠釜鍥哄畾涓簅c
 
     public List<ChatMsg> Creat(string ai_name,string oc)
     {

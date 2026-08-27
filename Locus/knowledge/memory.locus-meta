@@ -1,0 +1,15 @@
+version: 4
+summary: 用户长期偏好、稳定背景与跨任务上下文
+inheritInjectMode: true
+aiMaintained: true
+explicitMaintenanceRules: true
+inheritToChildren: true
+allowCreateDocuments: true
+allowCreateDirectories: true
+allowMoveDocuments: true
+allowMoveDirectories: true
+maintenanceRules: |-
+  - 仅维护用户明确表达的长期偏好、稳定背景与跨任务上下文
+  - 优先保留语言、汇报方式、代码风格、禁忌、长期目标与明确约束
+  - 修改或删除记忆时保持用户原意，合并重复内容
+  - 删除一次性安排、临时口径与未经确认的推断

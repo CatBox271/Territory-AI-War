@@ -22,7 +22,7 @@ public class CurveTransform
         if (a < minTime) return minValue;
         return curve.Evaluate(a);
     }
-    #region »ù´¡¹¤¾ß
+    #region åŸºç¡€å·¥å…·
     private float _maxTime = float.NaN;
     public float maxTime 
     {

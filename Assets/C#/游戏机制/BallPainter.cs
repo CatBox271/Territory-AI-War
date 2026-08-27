@@ -10,7 +10,6 @@ public class BallPainter : MonoBehaviour, IStageValue
 
     public float baseWorldRadius = 0.5f;
     public float attackPower = 1.0f;
-    public int HitDivide = 3;
     public float ScaleChangeSpeed = 3f;
 
     public CurveTransform ScaleCurve;
@@ -142,7 +141,17 @@ public class BallPainter : MonoBehaviour, IStageValue
     void OnCollisionExit2D(Collision2D collision)
     {
         if (collision.collider.TryGetComponent(out IStageValue sv))
-            value -= sv.Hit(stage, value / HitDivide);
+        {
+            if (collision.collider.CompareTag("Ball"))
+            {
+                if (collision.collider.GetInstanceID() < collision.collider.GetInstanceID()) return;
+                //确保执行一次
+            }
+            HugeInt max = (value > sv.value ? value : sv.value).Multiply(config.bounceRate);//mutiple
+            //确保不会出现贷款
+            max = (max > value) ? value : max;
+            value -= sv.Hit(stage, max);
+        }
         if (value == 0) Die();
     }
 }

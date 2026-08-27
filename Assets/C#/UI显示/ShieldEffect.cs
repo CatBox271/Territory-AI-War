@@ -19,8 +19,9 @@ public class ShieldEffect : MonoBehaviour, IStageValue
         if (sp == null)
         {
             sp = GetComponent<SpriteRenderer>();
-            originColor = sp.color;
+
         }
+        if(sp != null) originColor = sp.color;
     }
 
     public void WhileBeHit(int _stage, HugeInt _value)

@@ -1,0 +1,15 @@
+version: 4
+summary: 项目需求、方案、约束与阶段性设计结论
+inheritInjectMode: true
+aiMaintained: false
+explicitMaintenanceRules: true
+inheritToChildren: true
+allowCreateDocuments: true
+allowCreateDirectories: true
+allowMoveDocuments: true
+allowMoveDirectories: true
+maintenanceRules: |-
+  - 仅维护用户与 AI 已共同确认的需求、方案、约束与阶段性设计结论
+  - 新增设计方向、产品意图或方案决策前先取得用户确认
+  - 优先保留仍会影响后续实现与判断的结论，合并重复内容
+  - 删除已废弃、已被替代或缺少依据的设计记录

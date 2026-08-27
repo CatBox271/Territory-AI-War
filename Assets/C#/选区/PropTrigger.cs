@@ -33,8 +33,5 @@ public class PropTrigger : MonoBehaviour
             if (shooter != null)
                 marble.Home(shooter);
         }
-
-        if (!cfg.useAIDecision)
-            cfg.ExecutePropEffect(marble.stage, itemName, val);
     }
 }

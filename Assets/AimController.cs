@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-//负责持续锁定目标
+//璐熻矗鎸佺画閿佸畾鐩爣
 public class AimController : MonoBehaviour
 {
     public AutoRotater auto;
@@ -17,7 +17,7 @@ public class AimController : MonoBehaviour
     {
         SqrDis = MaxDis * MaxDis;
     }
-    //无控制状态自动切换为旋转
+    //鏃犳帶鍒剁姸鎬佽嚜鍔ㄥ垏鎹负鏃嬭浆
 
     Vector2 pos = new();
     Vector2 self

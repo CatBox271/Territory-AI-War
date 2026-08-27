@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+
+
 public class Towel : MonoBehaviour, IStageValue
 {
     [field: SerializeField] public int stage { get; set; }
@@ -57,9 +59,9 @@ public class Towel : MonoBehaviour, IStageValue
 
         Say("HelloWorld");
 
-        //InformGeter³õÊ¼»¯
-        InformGeter.AddItem(stage, new ItemType(transform, "ÅÚËş»ùµØ"));
-        InformGeter.AddItem(stage, new ItemType(shield.transform, "»ùµØ»¤¶Ü", shield.GetComponent<IStageValue>()));
+        //InformGeteråˆå§‹åŒ–
+        InformGeter.AddItem(stage, new ItemType(transform, "ç‚®å¡”åŸºåœ°"));
+        InformGeter.AddItem(stage, new ItemType(shield.transform, "åŸºåœ°æŠ¤ç›¾", shield.GetComponent<IStageValue>()));
     }
 
     void Update()
@@ -132,7 +134,6 @@ public class Towel : MonoBehaviour, IStageValue
     }
 
     private bool isDead;
-
 
     public void Die()
     {
@@ -255,11 +256,12 @@ public class Towel : MonoBehaviour, IStageValue
         }
 
         //InformGeter
-        InformGeter.AddItem(stage, new ItemType(ob.transform, "´óÇò", bp, rb));
+        InformGeter.AddItem(stage, new ItemType(ob.transform, "å¤§çƒ", bp, rb));
     }
 
     public void ShotGun(HugeInt val,float angle = 0,int defaultNum = 0,int minVal = 0,int maxVal = 0)
     {
+        ScreenShake.Instance?.ShortGunShake(val);
         if (angle == 0) angle = config.ShotGunAngle;
         if (defaultNum == 0) defaultNum = config.ShotGunBulletNum;
         if (minVal == 0) minVal = config.ShotGunMinVal;

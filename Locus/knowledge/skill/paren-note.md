@@ -1,18 +1,10 @@
 ---
 id: kd_a68d8b6c-2532-4cab-92a0-5b3654a254c8
-type: skill
-path: paren-note.md
-title: paren-note
-inheritInjectMode: true
-summaryEnabled: true
-commandEnabled: true
-readOnly: false
-inheritAiConfig: true
+injectMode: inherit
+aiEditMode: inherit
 skillEnabled: true
 skillSurface: command
 commandTrigger: /paren-note
-createdAt: 1784197890038
-updatedAt: 1784197890038
 ---
 
 # paren-note

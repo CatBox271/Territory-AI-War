@@ -1,20 +1,12 @@
 ---
 id: kd_da6abf16-ce94-49b3-b3df-9ecb7228c157
-type: skill
-path: do-gate.md
-title: do-gate
-inheritInjectMode: true
-summaryEnabled: true
-commandEnabled: true
-readOnly: false
-inheritAiConfig: true
+injectMode: inherit
+aiEditMode: inherit
 skillEnabled: true
 skillSurface: command
 commandTrigger: /do-gate
 tools:
 - ask_user_question
-createdAt: 1784127240251
-updatedAt: 1784127240251
 ---
 
 # do-gate

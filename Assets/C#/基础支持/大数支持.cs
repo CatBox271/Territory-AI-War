@@ -134,6 +134,92 @@ public struct HugeInt : IComparable, IComparable<HugeInt>, IEquatable<HugeInt>, 
         return dividend.ToFloat() / divisor;
     }
 
+    /// <summary>
+    /// HugeInt 除以 float，结果仍是 HugeInt（向零截断的整数商）。
+    /// 内部把 float 转成精确分数（尾数  2^指数）再做整数除法，避免 ToFloat 丢失大数精度。
+    /// 例如：a.Divide(1.2f) 返回 HugeInt。
+    /// </summary>
+    public HugeInt Divide(float divisor)
+    {
+        if (float.IsNaN(divisor) || float.IsInfinity(divisor))
+            throw new ArgumentException("Divisor must be a finite number", nameof(divisor));
+        if (divisor == 0f)
+            throw new DivideByZeroException();
+
+        int bits = System.BitConverter.ToInt32(System.BitConverter.GetBytes(divisor), 0);
+        bool divisorNegative = (bits & unchecked((int)0x80000000)) != 0;
+        int exponentBits = (bits >> 23) & 0xFF;
+        int mantissaBits = bits & 0x7FFFFF;
+
+        ulong significand;
+        int powerOfTwo;
+        if (exponentBits == 0)
+        {
+            // 次正规数：value = mantissaBits * 2^-149
+            significand = (ulong)mantissaBits;
+            powerOfTwo = -149;
+        }
+        else
+        {
+            // 正规数：value = (0x800000 | mantissaBits) * 2^(exponentBits - 150)
+            significand = 0x800000u | (uint)mantissaBits;
+            powerOfTwo = exponentBits - 127 - 23;
+        }
+
+        HugeInt numerator = divisorNegative ? -this : this;
+        HugeInt denominator = new HugeInt((long)significand);
+
+        if (powerOfTwo >= 0)
+            denominator *= Pow(new HugeInt(2), powerOfTwo);
+        else
+            numerator *= Pow(new HugeInt(2), -powerOfTwo);
+
+        return numerator / denominator;
+    }
+
+    /// <summary>
+    /// HugeInt 乘以 float，结果仍是 HugeInt（向零截断的整数积）。
+    /// 内部把 float 转成精确分数（尾数  2^指数）再运算，避免 ToFloat 丢失大数精度。
+    /// 例如：a.Multiply(1.2f) 返回 HugeInt。
+    /// </summary>
+    public HugeInt Multiply(float multiplier)
+    {
+        if (float.IsNaN(multiplier) || float.IsInfinity(multiplier))
+            throw new ArgumentException("Multiplier must be a finite number", nameof(multiplier));
+        if (multiplier == 0f) return Zero;
+
+        int bits = System.BitConverter.ToInt32(System.BitConverter.GetBytes(multiplier), 0);
+        bool multiplierNegative = (bits & unchecked((int)0x80000000)) != 0;
+        int exponentBits = (bits >> 23) & 0xFF;
+        int mantissaBits = bits & 0x7FFFFF;
+
+        ulong significand;
+        int powerOfTwo;
+        if (exponentBits == 0)
+        {
+            // 次正规数：value = mantissaBits * 2^-149
+            significand = (ulong)mantissaBits;
+            powerOfTwo = -149;
+        }
+        else
+        {
+            // 正规数：value = (0x800000 | mantissaBits) * 2^(exponentBits - 150)
+            significand = 0x800000u | (uint)mantissaBits;
+            powerOfTwo = exponentBits - 127 - 23;
+        }
+
+        HugeInt result = this;
+        if (multiplierNegative) result = -result;
+        result *= new HugeInt((long)significand);
+
+        if (powerOfTwo >= 0)
+            result *= Pow(new HugeInt(2), powerOfTwo);
+        else
+            result /= Pow(new HugeInt(2), -powerOfTwo);
+
+        return result;
+    }
+
     public static HugeInt operator -(HugeInt value)
     {
         if (value == Zero) return Zero;

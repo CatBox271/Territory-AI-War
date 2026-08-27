@@ -1,3 +1,6 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 public interface IStageValue
@@ -38,3 +41,5 @@ public interface IStageValue
         WhileBeHit(_stage, -_value);
     }
 }
+
+

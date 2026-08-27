@@ -68,6 +68,8 @@ public class MapConfig : MonoBehaviour
     [Header("Towel")]
     public int TowelDefaultBullets = 4096;
     public GameObject basicBallPrefab;
+    [Header("Bounce")]
+    public float bounceRate = 0.5f;
 
     public enum ColorStage { Default, Towel, Ball, Bullet }
 
@@ -109,18 +111,17 @@ public class MapConfig : MonoBehaviour
     {
         if (stage < 0 || stage >= teamProps.Length) return;
 
+        teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
+        {
+            OnPropIn?.Invoke(new PropInfo(item, value, stage));
+        }
         // 超出上限，自动使用最新存入的道具（栈顶）
-        while (teamProps[stage].Count >= propLimit)
+        while (teamProps[stage].Count >= propLimit || (!useAIDecision && teamProps[stage].Count > 0))
         {
             int last = teamProps[stage].Count - 1;
             var top = teamProps[stage][last];
             teamProps[stage].RemoveAt(last);
             ExecutePropEffect(top.stage, top.item, top.value);//溢出（内部触发OnPropPop）
-        }
-
-        teamProps[stage].Add(new PropEntry { item = item, value = value, stage = stage });
-        {
-            OnPropIn?.Invoke(new PropInfo(item, value, stage));
         }
     }
     public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null)//这里需要添加ItemType作为目标。

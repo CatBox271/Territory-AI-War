@@ -31,6 +31,37 @@ namespace Locus
             public string path_prefix;
         }
 
+        [Serializable]
+        private struct YamlPreviewCacheSelfTestArgs
+        {
+            public int sample_count;
+            public int seed;
+        }
+
+        [Serializable]
+        private sealed class YamlPreviewCacheSelfTestCase
+        {
+            public string scene_path;
+            public string status;
+            public string message;
+        }
+
+        [Serializable]
+        private sealed class YamlPreviewCacheSelfTestReport
+        {
+            public string unity_version;
+            public string mode;
+            public bool preview_supported;
+            public int seed;
+            public int candidate_count;
+            public int sample_count;
+            public int passed;
+            public int failed;
+            public int skipped;
+            public List<YamlPreviewCacheSelfTestCase> cases =
+                new List<YamlPreviewCacheSelfTestCase>();
+        }
+
         private const string UnityYamlModeList = "list";
         private const string UnityYamlModeSearch = "search";
         private const string UnityYamlModeRead = "read";
@@ -39,13 +70,24 @@ namespace Locus
         private const int DefaultSerializedMaxArrayItems = 20;
         private const int HardSerializedFieldMaxDepth = 6;
         private const int HardSerializedMaxArrayItems = 200;
+        private const double YamlPreviewSceneCacheTtlSeconds = 90d;
+        private const double YamlPreviewSceneCacheSweepSeconds = 5d;
+        private const int YamlPreviewSceneCacheMaxEntries = 2;
 
-        /// <summary>
-        /// </summary>
-        private static async Task<PipeEnvelope> HandleListYaml(string requestId, string json)
+        private sealed class YamlPreviewSceneCacheEntry
         {
-            return await HandleYamlTool(requestId, json, UnityYamlModeList, "list_yaml");
+            public string ScenePath;
+            public string DependencyHash;
+            public UnityEngine.SceneManagement.Scene Scene;
+            public GameObject[] Roots;
+            public List<HierarchySummaryNode> SummaryRoots;
+            public List<HierarchySummaryNode> SearchRoots;
+            public double LastAccessTime;
         }
+
+        private static readonly List<YamlPreviewSceneCacheEntry> _yamlPreviewSceneCache =
+            new List<YamlPreviewSceneCacheEntry>();
+        private static double _yamlPreviewSceneCacheNextSweepAt;
 
         private static async Task<PipeEnvelope> HandleSearchYaml(string requestId, string json)
         {
@@ -131,6 +173,14 @@ namespace Locus
                 return "__ERROR__: Unity YAML editor tools only support .unity and .prefab files via Unity API";
 
             string objectPath = string.IsNullOrEmpty(args.object_path) ? null : args.object_path;
+            if (objectPath != null && (objectPath.IndexOf('⟦') >= 0 || objectPath.IndexOf('⟧') >= 0))
+            {
+                // The ⟦ ⟧ wrappers are display-only; strip them defensively
+                // when a caller pastes them back despite the instructions.
+                objectPath = objectPath.Replace("⟦", "").Replace("⟧", "");
+                if (objectPath.Length == 0)
+                    objectPath = null;
+            }
             var options = ReadYamlOptions.FromArgs(args);
 
             // Search-mode field matching must reach nested serialized data —
@@ -140,6 +190,11 @@ namespace Locus
             // the hard cap is affordable here.
             if (mode == UnityYamlModeSearch && args.max_field_depth <= 0)
                 options.SerializedFieldMaxDepth = HardSerializedFieldMaxDepth;
+            // Same reasoning for arrays: a field-value hit sitting at index
+            // 21+ of a list must not be a false negative just because the
+            // display default truncates at 20.
+            if (mode == UnityYamlModeSearch && args.max_array_items <= 0)
+                options.SerializedMaxArrayItems = HardSerializedMaxArrayItems;
 
             if (mode == UnityYamlModeRead && string.IsNullOrEmpty(objectPath))
                 return "__ERROR__: unity_yaml_read requires object_path for .unity/.prefab files";
@@ -164,23 +219,504 @@ namespace Locus
             ReadYamlOptions options,
             string mode)
         {
+            // Path comparison is case-insensitive: Windows paths routinely
+            // differ in casing from Unity's canonical asset path, and an
+            // Ordinal miss here silently falls back to (possibly stale) disk
+            // YAML.
             var activeScene = EditorSceneManager.GetActiveScene();
-            bool isActiveScene = activeScene.IsValid() && activeScene.path == scenePath;
+            bool isActiveScene = activeScene.IsValid()
+                && activeScene.isLoaded
+                && !EditorSceneManager.IsPreviewScene(activeScene)
+                && string.Equals(activeScene.path, scenePath, StringComparison.OrdinalIgnoreCase);
 
             if (!isActiveScene)
             {
                 for (int i = 0; i < EditorSceneManager.sceneCount; i++)
                 {
                     var s = EditorSceneManager.GetSceneAt(i);
-                    if (s.IsValid() && s.isLoaded && s.path == scenePath)
+                    if (s.IsValid()
+                        && s.isLoaded
+                        && !EditorSceneManager.IsPreviewScene(s)
+                        && string.Equals(s.path, scenePath, StringComparison.OrdinalIgnoreCase))
                     {
+                        RemoveYamlPreviewSceneCacheEntry(scenePath);
                         return ReadSceneContents(s, scenePath, objectPath, options, mode);
                     }
                 }
+
+#if UNITY_2023_1_OR_NEWER
+                bool cacheHit;
+                string previewError;
+                var previewEntry = GetOrOpenYamlPreviewScene(scenePath, out cacheHit, out previewError);
+                if (previewEntry == null)
+                    return "__ERROR__: unable to open scene through Unity preview API: " + previewError;
+
+                return ReadSceneContents(
+                    previewEntry.Scene,
+                    scenePath,
+                    objectPath,
+                    options,
+                    mode,
+                    previewEntry,
+                    cacheHit);
+#else
+                // OpenPreviewScene was added in Unity 2023.1. Older editors
+                // keep the existing disk YAML cold path; opening additively
+                // would mutate the user's multi-scene setup and can execute
+                // edit-mode scene behaviours.
                 return "__ERROR__: scene not loaded in editor, falling back to YAML parsing";
+#endif
             }
 
+            RemoveYamlPreviewSceneCacheEntry(scenePath);
             return ReadSceneContents(activeScene, scenePath, objectPath, options, mode);
+        }
+
+#if UNITY_2023_1_OR_NEWER
+        private static YamlPreviewSceneCacheEntry GetOrOpenYamlPreviewScene(
+            string scenePath,
+            out bool cacheHit,
+            out string error)
+        {
+            cacheHit = false;
+            error = null;
+
+            // Access after the TTL must reopen even when it lands between the
+            // five-second background sweep ticks.
+            PruneYamlPreviewSceneCache(true);
+            string dependencyHash = AssetDatabase.GetAssetDependencyHash(scenePath).ToString();
+            for (int i = _yamlPreviewSceneCache.Count - 1; i >= 0; i--)
+            {
+                var entry = _yamlPreviewSceneCache[i];
+                if (!string.Equals(entry.ScenePath, scenePath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (YamlPreviewSceneCacheEntryIsUsable(entry)
+                    && string.Equals(entry.DependencyHash, dependencyHash, StringComparison.Ordinal))
+                {
+                    entry.LastAccessTime = EditorApplication.timeSinceStartup;
+                    RestoreRegularActiveScene(entry.Scene);
+                    cacheHit = true;
+                    return entry;
+                }
+
+                CloseYamlPreviewSceneCacheEntry(entry);
+                _yamlPreviewSceneCache.RemoveAt(i);
+            }
+
+            while (_yamlPreviewSceneCache.Count >= YamlPreviewSceneCacheMaxEntries)
+                EvictLeastRecentlyUsedYamlPreviewScene();
+
+            var previousActiveScene = FindRegularActiveScene();
+            UnityEngine.SceneManagement.Scene previewScene = default(UnityEngine.SceneManagement.Scene);
+            try
+            {
+                previewScene = EditorSceneManager.OpenPreviewScene(scenePath);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return null;
+            }
+            finally
+            {
+                RestoreRegularActiveScene(previewScene, previousActiveScene);
+            }
+
+            if (!previewScene.IsValid() || !previewScene.isLoaded)
+            {
+                error = "OpenPreviewScene returned an invalid or unloaded scene";
+                return null;
+            }
+
+            var opened = new YamlPreviewSceneCacheEntry
+            {
+                ScenePath = scenePath,
+                DependencyHash = dependencyHash,
+                Scene = previewScene,
+                Roots = previewScene.GetRootGameObjects(),
+                LastAccessTime = EditorApplication.timeSinceStartup,
+            };
+            _yamlPreviewSceneCache.Add(opened);
+            _yamlPreviewSceneCacheNextSweepAt =
+                EditorApplication.timeSinceStartup + YamlPreviewSceneCacheSweepSeconds;
+            return opened;
+        }
+#endif
+
+        private static bool YamlPreviewSceneCacheEntryIsUsable(YamlPreviewSceneCacheEntry entry)
+        {
+            return entry != null
+                && entry.Scene.IsValid()
+                && entry.Scene.isLoaded
+                && EditorSceneManager.IsPreviewScene(entry.Scene);
+        }
+
+        private static UnityEngine.SceneManagement.Scene FindRegularActiveScene()
+        {
+            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (active.IsValid() && active.isLoaded && !EditorSceneManager.IsPreviewScene(active))
+                return active;
+
+            for (int i = 0; i < EditorSceneManager.sceneCount; i++)
+            {
+                var candidate = EditorSceneManager.GetSceneAt(i);
+                if (candidate.IsValid()
+                    && candidate.isLoaded
+                    && !EditorSceneManager.IsPreviewScene(candidate))
+                    return candidate;
+            }
+
+            return default(UnityEngine.SceneManagement.Scene);
+        }
+
+        private static void RestoreRegularActiveScene(
+            UnityEngine.SceneManagement.Scene previewScene,
+            UnityEngine.SceneManagement.Scene preferredScene = default(UnityEngine.SceneManagement.Scene))
+        {
+            var target = preferredScene;
+            if (!target.IsValid() || !target.isLoaded || EditorSceneManager.IsPreviewScene(target))
+                target = FindRegularActiveScene();
+
+            if (!target.IsValid() || !target.isLoaded || EditorSceneManager.IsPreviewScene(target))
+                return;
+
+            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (active != target || (previewScene.IsValid() && active == previewScene))
+                UnityEngine.SceneManagement.SceneManager.SetActiveScene(target);
+        }
+
+        private static void RemoveYamlPreviewSceneCacheEntry(string scenePath)
+        {
+            for (int i = _yamlPreviewSceneCache.Count - 1; i >= 0; i--)
+            {
+                var entry = _yamlPreviewSceneCache[i];
+                if (!string.Equals(entry.ScenePath, scenePath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                CloseYamlPreviewSceneCacheEntry(entry);
+                _yamlPreviewSceneCache.RemoveAt(i);
+            }
+        }
+
+        private static void EvictLeastRecentlyUsedYamlPreviewScene()
+        {
+            if (_yamlPreviewSceneCache.Count == 0)
+                return;
+
+            int oldestIndex = 0;
+            for (int i = 1; i < _yamlPreviewSceneCache.Count; i++)
+            {
+                if (_yamlPreviewSceneCache[i].LastAccessTime
+                    < _yamlPreviewSceneCache[oldestIndex].LastAccessTime)
+                    oldestIndex = i;
+            }
+
+            CloseYamlPreviewSceneCacheEntry(_yamlPreviewSceneCache[oldestIndex]);
+            _yamlPreviewSceneCache.RemoveAt(oldestIndex);
+        }
+
+        private static void CloseYamlPreviewSceneCacheEntry(YamlPreviewSceneCacheEntry entry)
+        {
+            if (!YamlPreviewSceneCacheEntryIsUsable(entry))
+                return;
+
+            RestoreRegularActiveScene(entry.Scene);
+            try
+            {
+                EditorSceneManager.ClosePreviewScene(entry.Scene);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[Locus] Failed to close cached YAML preview scene '"
+                    + entry.ScenePath + "': " + ex.Message);
+            }
+        }
+
+        private static void PruneYamlPreviewSceneCache(bool force)
+        {
+            if (_yamlPreviewSceneCache.Count == 0)
+                return;
+
+            double now = EditorApplication.timeSinceStartup;
+            if (!force && now < _yamlPreviewSceneCacheNextSweepAt)
+                return;
+
+            _yamlPreviewSceneCacheNextSweepAt = now + YamlPreviewSceneCacheSweepSeconds;
+            for (int i = _yamlPreviewSceneCache.Count - 1; i >= 0; i--)
+            {
+                var entry = _yamlPreviewSceneCache[i];
+                bool expired = now - entry.LastAccessTime >= YamlPreviewSceneCacheTtlSeconds;
+                if (!expired && YamlPreviewSceneCacheEntryIsUsable(entry))
+                    continue;
+
+                CloseYamlPreviewSceneCacheEntry(entry);
+                _yamlPreviewSceneCache.RemoveAt(i);
+            }
+        }
+
+        private static void ClearYamlPreviewSceneCache()
+        {
+            for (int i = _yamlPreviewSceneCache.Count - 1; i >= 0; i--)
+                CloseYamlPreviewSceneCacheEntry(_yamlPreviewSceneCache[i]);
+            _yamlPreviewSceneCache.Clear();
+            _yamlPreviewSceneCacheNextSweepAt = 0d;
+        }
+
+        private static Task<string> HandleYamlPreviewCacheSelfTest(string json)
+        {
+            var args = string.IsNullOrWhiteSpace(json)
+                ? new YamlPreviewCacheSelfTestArgs()
+                : JsonUtility.FromJson<YamlPreviewCacheSelfTestArgs>(json);
+            return Task.FromResult(RunYamlPreviewCacheSelfTest(args));
+        }
+
+        private static string RunYamlPreviewCacheSelfTest(YamlPreviewCacheSelfTestArgs args)
+        {
+            int requestedSamples = args.sample_count <= 0 ? 5 : Math.Min(args.sample_count, 50);
+            int seed = args.seed != 0 ? args.seed : unchecked((int)DateTime.UtcNow.Ticks);
+            var report = new YamlPreviewCacheSelfTestReport
+            {
+                unity_version = Application.unityVersion,
+                seed = seed,
+#if UNITY_2023_1_OR_NEWER
+                mode = "preview-live-parity",
+                preview_supported = true,
+#else
+                mode = "cold-fallback-safety",
+                preview_supported = false,
+#endif
+            };
+
+            var candidates = new List<string>();
+            foreach (string guid in AssetDatabase.FindAssets("t:Scene", new[] { "Assets" }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!string.IsNullOrEmpty(path)
+                    && path.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)
+                    && !IsRegularSceneLoaded(path))
+                    candidates.Add(path);
+            }
+
+            candidates.Sort(StringComparer.Ordinal);
+            var random = new System.Random(seed);
+            for (int i = candidates.Count - 1; i > 0; i--)
+            {
+                int swap = random.Next(i + 1);
+                string value = candidates[i];
+                candidates[i] = candidates[swap];
+                candidates[swap] = value;
+            }
+
+            report.candidate_count = candidates.Count;
+            report.sample_count = Math.Min(requestedSamples, candidates.Count);
+            if (report.sample_count == 0)
+            {
+                report.skipped = 1;
+                report.cases.Add(new YamlPreviewCacheSelfTestCase
+                {
+                    scene_path = "",
+                    status = "skipped",
+                    message = "No unloaded scene assets were found under Assets/.",
+                });
+                return JsonUtility.ToJson(report, true);
+            }
+
+            try
+            {
+                for (int i = 0; i < report.sample_count; i++)
+                    RunYamlPreviewCacheSelfTestCase(candidates[i], report);
+            }
+            finally
+            {
+                ClearYamlPreviewSceneCache();
+            }
+
+            return JsonUtility.ToJson(report, true);
+        }
+
+        private static void RunYamlPreviewCacheSelfTestCase(
+            string scenePath,
+            YamlPreviewCacheSelfTestReport report)
+        {
+            var result = new YamlPreviewCacheSelfTestCase { scene_path = scenePath };
+            report.cases.Add(result);
+            ClearYamlPreviewSceneCache();
+
+            var activeBefore = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            int regularSceneCountBefore = CountLoadedRegularScenes();
+            int previewSceneCountBefore = EditorSceneManager.previewSceneCount;
+            var readArgs = new ReadYamlArgs
+            {
+                file_path = scenePath,
+                max_nodes = 250,
+            };
+
+            try
+            {
+#if UNITY_2023_1_OR_NEWER
+                string openedOutput = ExecuteReadYaml(readArgs, UnityYamlModeList);
+                string hitOutput = ExecuteReadYaml(readArgs, UnityYamlModeList);
+                bool openedBanner = openedOutput.StartsWith(
+                    "[source: Unity Editor preview scene (saved asset, cache=opened)]",
+                    StringComparison.Ordinal);
+                bool hitBanner = hitOutput.StartsWith(
+                    "[source: Unity Editor preview scene (saved asset, cache=hit)]",
+                    StringComparison.Ordinal);
+                bool cacheBodiesMatch = string.Equals(
+                    RemoveYamlSourceBanner(openedOutput),
+                    RemoveYamlSourceBanner(hitOutput),
+                    StringComparison.Ordinal);
+                bool previewOpened = EditorSceneManager.previewSceneCount
+                    == previewSceneCountBefore + 1;
+                bool activePreserved = ActiveSceneMatches(activeBefore);
+                bool regularScenesPreserved = CountLoadedRegularScenes() == regularSceneCountBefore;
+
+                ClearYamlPreviewSceneCache();
+                bool previewClosed = EditorSceneManager.previewSceneCount == previewSceneCountBefore;
+
+                UnityEngine.SceneManagement.Scene liveScene =
+                    default(UnityEngine.SceneManagement.Scene);
+                string liveOutput = null;
+                try
+                {
+                    liveScene = EditorSceneManager.OpenScene(
+                        scenePath,
+                        OpenSceneMode.Additive);
+                    RestoreRegularActiveScene(liveScene, activeBefore);
+                    liveOutput = ExecuteReadYaml(readArgs, UnityYamlModeList);
+                }
+                finally
+                {
+                    if (liveScene.IsValid()
+                        && liveScene.isLoaded
+                        && !EditorSceneManager.IsPreviewScene(liveScene))
+                        EditorSceneManager.CloseScene(liveScene, true);
+                    RestoreRegularActiveScene(
+                        default(UnityEngine.SceneManagement.Scene),
+                        activeBefore);
+                }
+
+                bool liveBodyMatches = string.Equals(
+                    RemoveYamlSourceBanner(openedOutput),
+                    RemoveYamlSourceBanner(liveOutput),
+                    StringComparison.Ordinal);
+                bool cleanupPreserved = ActiveSceneMatches(activeBefore)
+                    && CountLoadedRegularScenes() == regularSceneCountBefore;
+
+                var failures = new List<string>();
+                if (!openedBanner) failures.Add("first cold read did not open preview cache");
+                if (!hitBanner) failures.Add("second cold read did not hit preview cache");
+                if (!cacheBodiesMatch) failures.Add("cache hit output differs from cache open output");
+                if (!previewOpened) failures.Add("preview scene count did not increase by one");
+                if (!previewClosed) failures.Add("preview scene did not close during cleanup");
+                if (!activePreserved) failures.Add("cold read changed the active scene");
+                if (!regularScenesPreserved) failures.Add("cold read changed regular loaded scenes");
+                if (!liveBodyMatches) failures.Add("preview and live hierarchy outputs differ");
+                if (!cleanupPreserved) failures.Add("live comparison did not restore scene state");
+#else
+                string coldOutput = ExecuteReadYaml(readArgs, UnityYamlModeList);
+                bool usedColdFallback = coldOutput.StartsWith(
+                    "__ERROR__: scene not loaded in editor, falling back to YAML parsing",
+                    StringComparison.Ordinal);
+                bool activePreserved = ActiveSceneMatches(activeBefore);
+                bool regularScenesPreserved = CountLoadedRegularScenes() == regularSceneCountBefore;
+                bool previewScenesPreserved = EditorSceneManager.previewSceneCount
+                    == previewSceneCountBefore;
+
+                var failures = new List<string>();
+                if (!usedColdFallback) failures.Add("unloaded scene did not use disk YAML fallback");
+                if (!activePreserved) failures.Add("cold fallback changed the active scene");
+                if (!regularScenesPreserved) failures.Add("cold fallback changed regular loaded scenes");
+                if (!previewScenesPreserved) failures.Add("cold fallback changed preview scenes");
+#endif
+
+                if (failures.Count == 0)
+                {
+                    result.status = "passed";
+                    result.message = "ok";
+                    report.passed++;
+                }
+                else
+                {
+                    result.status = "failed";
+                    result.message = string.Join("; ", failures.ToArray());
+                    report.failed++;
+                }
+            }
+            catch (Exception ex)
+            {
+                result.status = "failed";
+                result.message = ex.GetType().Name + ": " + ex.Message;
+                report.failed++;
+            }
+            finally
+            {
+                ClearYamlPreviewSceneCache();
+            }
+        }
+
+        private static bool IsRegularSceneLoaded(string scenePath)
+        {
+            for (int i = 0; i < EditorSceneManager.sceneCount; i++)
+            {
+                var scene = EditorSceneManager.GetSceneAt(i);
+                if (scene.IsValid()
+                    && scene.isLoaded
+                    && !EditorSceneManager.IsPreviewScene(scene)
+                    && string.Equals(scene.path, scenePath, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private static int CountLoadedRegularScenes()
+        {
+            int count = 0;
+            for (int i = 0; i < EditorSceneManager.sceneCount; i++)
+            {
+                var scene = EditorSceneManager.GetSceneAt(i);
+                if (scene.IsValid() && scene.isLoaded && !EditorSceneManager.IsPreviewScene(scene))
+                    count++;
+            }
+            return count;
+        }
+
+        private static bool ActiveSceneMatches(UnityEngine.SceneManagement.Scene expected)
+        {
+            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            return active.IsValid() == expected.IsValid()
+                && (!expected.IsValid() || active.handle == expected.handle);
+        }
+
+        private static string RemoveYamlSourceBanner(string output)
+        {
+            if (string.IsNullOrEmpty(output)
+                || !output.StartsWith("[source: ", StringComparison.Ordinal))
+                return output ?? "";
+            int newline = output.IndexOf('\n');
+            return newline >= 0 ? output.Substring(newline + 1) : "";
+        }
+
+        /// <summary>
+        /// One-line provenance banner so the model can tell live editor state
+        /// (possibly unsaved / play-mode) apart from disk YAML output.
+        /// </summary>
+        private static string BuildLiveSourceBanner(bool isDirty)
+        {
+            var traits = new List<string>();
+            if (EditorApplication.isPlaying)
+                traits.Add("play mode — runtime hierarchy");
+            if (isDirty)
+                traits.Add("unsaved changes");
+            string suffix = traits.Count > 0 ? " (" + string.Join(", ", traits) + ")" : "";
+            return "[source: live Unity Editor" + suffix + "]\n";
+        }
+
+        private static string BuildPreviewSourceBanner(bool cacheHit)
+        {
+            return "[source: Unity Editor preview scene (saved asset, cache="
+                + (cacheHit ? "hit" : "opened") + ")]\n";
         }
 
         private static string ReadSceneContents(
@@ -188,17 +724,61 @@ namespace Locus
             string scenePath,
             string objectPath,
             ReadYamlOptions options,
-            string mode)
+            string mode,
+            YamlPreviewSceneCacheEntry previewEntry = null,
+            bool previewCacheHit = false)
         {
-            var roots = scene.GetRootGameObjects();
+            var roots = previewEntry != null ? previewEntry.Roots : scene.GetRootGameObjects();
+            string banner = previewEntry != null
+                ? BuildPreviewSourceBanner(previewCacheHit)
+                : BuildLiveSourceBanner(scene.isDirty);
 
             if (mode == UnityYamlModeRead)
-                return ReadGameObjectDetail(roots, objectPath, scenePath, options);
+                return PrependBannerUnlessError(banner, ReadGameObjectDetail(roots, objectPath, scenePath, options));
 
             if (mode == UnityYamlModeSearch)
-                return BuildHierarchySearchResults(roots, scenePath, options);
+            {
+                var searchRoots = previewEntry != null
+                    ? GetOrBuildPreviewHierarchySnapshot(previewEntry, false)
+                    : null;
+                return PrependBannerUnlessError(
+                    banner,
+                    BuildHierarchySearchResults(roots, scenePath, options, searchRoots));
+            }
 
-            return BuildHierarchySummary(roots, scenePath, options);
+            var summaryRoots = previewEntry != null
+                ? GetOrBuildPreviewHierarchySnapshot(previewEntry, true)
+                : null;
+            return PrependBannerUnlessError(
+                banner,
+                BuildHierarchySummary(roots, scenePath, options, summaryRoots));
+        }
+
+        private static List<HierarchySummaryNode> GetOrBuildPreviewHierarchySnapshot(
+            YamlPreviewSceneCacheEntry entry,
+            bool foldBones)
+        {
+            if (foldBones)
+            {
+                if (entry.SummaryRoots == null)
+                    entry.SummaryRoots = BuildHierarchySummaryNodes(
+                        entry.Roots,
+                        CollectBoneTransforms(entry.Roots));
+                return entry.SummaryRoots;
+            }
+
+            if (entry.SearchRoots == null)
+                entry.SearchRoots = BuildHierarchySummaryNodes(
+                    entry.Roots,
+                    new HashSet<Transform>());
+            return entry.SearchRoots;
+        }
+
+        private static string PrependBannerUnlessError(string banner, string output)
+        {
+            if (output == null || output.StartsWith("__ERROR__", StringComparison.Ordinal))
+                return output;
+            return banner + output;
         }
 
         // ───────────────── Prefab reading ─────────────────
@@ -217,26 +797,28 @@ namespace Locus
                 && prefabStage.prefabContentsRoot != null)
             {
                 var stageRoot = prefabStage.prefabContentsRoot;
+                string banner = BuildLiveSourceBanner(prefabStage.scene.isDirty);
                 if (mode == UnityYamlModeRead)
-                    return ReadGameObjectDetail(new[] { stageRoot }, objectPath, prefabPath, options);
+                    return PrependBannerUnlessError(banner, ReadGameObjectDetail(new[] { stageRoot }, objectPath, prefabPath, options));
 
                 if (mode == UnityYamlModeSearch)
-                    return BuildHierarchySearchResults(new[] { stageRoot }, prefabPath, options);
+                    return PrependBannerUnlessError(banner, BuildHierarchySearchResults(new[] { stageRoot }, prefabPath, options));
 
-                return BuildHierarchySummary(new[] { stageRoot }, prefabPath, options);
+                return PrependBannerUnlessError(banner, BuildHierarchySummary(new[] { stageRoot }, prefabPath, options));
             }
 
             var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (prefabAsset == null)
                 return "__ERROR__: failed to load prefab: " + prefabPath;
 
+            string assetBanner = "[source: live Unity Editor (imported prefab asset)]\n";
             if (mode == UnityYamlModeRead)
-                return ReadGameObjectDetail(new[] { prefabAsset }, objectPath, prefabPath, options);
+                return PrependBannerUnlessError(assetBanner, ReadGameObjectDetail(new[] { prefabAsset }, objectPath, prefabPath, options));
 
             if (mode == UnityYamlModeSearch)
-                return BuildHierarchySearchResults(new[] { prefabAsset }, prefabPath, options);
+                return PrependBannerUnlessError(assetBanner, BuildHierarchySearchResults(new[] { prefabAsset }, prefabPath, options));
 
-            return BuildHierarchySummary(new[] { prefabAsset }, prefabPath, options);
+            return PrependBannerUnlessError(assetBanner, BuildHierarchySummary(new[] { prefabAsset }, prefabPath, options));
         }
 
         // ───────────────── Hierarchy summary ─────────────────
@@ -264,6 +846,12 @@ namespace Locus
             public bool MatchFieldValue;
             public int SerializedFieldMaxDepth = DefaultSerializedFieldMaxDepth;
             public int SerializedMaxArrayItems = DefaultSerializedMaxArrayItems;
+            /// <summary>
+            /// Remaining component-walk allowance for match_fields searches;
+            /// decremented per SerializedObject visit (main-thread work).
+            /// </summary>
+            public int SerializedSearchBudget = 20000;
+            public bool SearchBudgetExhausted;
             public List<string> ComponentFilters = new List<string>();
             public List<string> MatchFieldLabels = new List<string>();
 
@@ -309,9 +897,13 @@ namespace Locus
                 {
                     try
                     {
+                        // MatchTimeout guards the editor main thread against
+                        // catastrophic-backtracking patterns; matching runs
+                        // per node on potentially long field values.
                         options.QueryRegex = new Regex(
                             options.Query.Substring(3),
-                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                            TimeSpan.FromSeconds(2)
                         );
                     }
                     catch
@@ -533,7 +1125,11 @@ namespace Locus
             public List<HierarchySummaryNode> Members = new List<HierarchySummaryNode>();
         }
 
-        private static string BuildHierarchySummary(GameObject[] roots, string filePath, ReadYamlOptions options)
+        private static string BuildHierarchySummary(
+            GameObject[] roots,
+            string filePath,
+            ReadYamlOptions options,
+            List<HierarchySummaryNode> hierarchySnapshot = null)
         {
             var sb = new StringBuilder();
             bool isScene = filePath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase);
@@ -554,25 +1150,15 @@ namespace Locus
             if (!string.IsNullOrEmpty(optionLine))
                 sb.AppendLine(optionLine);
 
-            var boneTransforms = new HashSet<Transform>();
-            if (roots.Length > 1)
-            {
-                foreach (var root in roots)
-                {
-                    foreach (var smr in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-                    {
-                        if (smr.bones == null) continue;
-                        foreach (var bone in smr.bones)
-                            if (bone != null) boneTransforms.Add(bone);
-                    }
-                }
-            }
-
+            // Bone folding applies to single-root prefabs too — a lone
+            // character prefab is exactly where a 200-node bone tree drowns
+            // the summary.
             sb.AppendLine();
             sb.AppendLine("── Hierarchy ──");
             sb.AppendLine();
 
-            var summaryRoots = BuildHierarchySummaryNodes(roots, boneTransforms);
+            var summaryRoots = hierarchySnapshot
+                ?? BuildHierarchySummaryNodes(roots, CollectBoneTransforms(roots));
 
             summaryRoots = ApplyHierarchyOptions(summaryRoots, options);
             if (summaryRoots.Count == 0)
@@ -598,26 +1184,32 @@ namespace Locus
             return sb.ToString();
         }
 
+        private static HashSet<Transform> CollectBoneTransforms(GameObject[] roots)
+        {
+            var boneTransforms = new HashSet<Transform>();
+            foreach (var root in roots)
+            {
+                foreach (var smr in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                {
+                    if (smr.bones == null) continue;
+                    foreach (var bone in smr.bones)
+                        if (bone != null) boneTransforms.Add(bone);
+                }
+            }
+            return boneTransforms;
+        }
+
         private static string BuildHierarchySearchResults(
             GameObject[] roots,
             string filePath,
-            ReadYamlOptions options)
+            ReadYamlOptions options,
+            List<HierarchySummaryNode> hierarchySnapshot = null)
         {
-            var boneTransforms = new HashSet<Transform>();
-            if (roots.Length > 1)
-            {
-                foreach (var root in roots)
-                {
-                    foreach (var smr in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-                    {
-                        if (smr.bones == null) continue;
-                        foreach (var bone in smr.bones)
-                            if (bone != null) boneTransforms.Add(bone);
-                    }
-                }
-            }
-
-            var summaryRoots = BuildHierarchySummaryNodes(roots, boneTransforms);
+            // No bone folding for search: a folded bone subtree has no child
+            // nodes, so anything under it would be unsearchable (false
+            // negatives for bone names / attachments hanging off bones).
+            var summaryRoots = hierarchySnapshot
+                ?? BuildHierarchySummaryNodes(roots, new HashSet<Transform>());
             if (!string.IsNullOrEmpty(options.PathPrefix))
                 summaryRoots = SelectPathPrefixRoots(summaryRoots, options.PathPrefix);
 
@@ -648,6 +1240,12 @@ namespace Locus
             {
                 sb.AppendLine();
                 sb.AppendLine("... (" + (matches.Count - shown) + " more matches hidden by limit)");
+            }
+
+            if (options.SearchBudgetExhausted)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Note: serialized-field matching stopped early (component budget exhausted); results may be incomplete. Narrow with path_prefix.");
             }
 
             return sb.ToString();
@@ -1007,6 +1605,15 @@ namespace Locus
             List<HierarchySummaryNode> siblings,
             string segment)
         {
+            // Literal names win over ordinal syntax so an object actually
+            // named "Enemy[2]" stays reachable even next to duplicate
+            // "Enemy" siblings.
+            foreach (var node in siblings)
+            {
+                if (node.Name == segment)
+                    return node;
+            }
+
             string name;
             int ordinal;
             if (TryParseIndexedSegment(segment, out name, out ordinal))
@@ -1022,11 +1629,9 @@ namespace Locus
                 }
             }
 
-            foreach (var node in siblings)
-            {
-                if (node.Name == segment)
-                    return node;
-            }
+            string trimmed = segment.Trim();
+            if (trimmed != segment)
+                return FindSummaryNodeInSiblings(siblings, trimmed);
 
             return null;
         }
@@ -1103,7 +1708,16 @@ namespace Locus
                 return false;
 
             if (options.QueryRegex != null)
-                return options.QueryRegex.IsMatch(value);
+            {
+                try
+                {
+                    return options.QueryRegex.IsMatch(value);
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    return false;
+                }
+            }
 
             return ContainsIgnoreCase(value, options.Query.ToLowerInvariant());
         }
@@ -1120,11 +1734,27 @@ namespace Locus
             if (go == null || (!options.MatchFieldName && !options.MatchFieldValue))
                 return false;
 
+            // Field matching walks a SerializedObject per component on the
+            // main thread; on ten-thousand-object scenes an unbounded walk
+            // freezes the editor for the full request. The budget trades
+            // completeness for responsiveness and is reported in the output.
+            if (options.SerializedSearchBudget <= 0)
+            {
+                options.SearchBudgetExhausted = true;
+                return false;
+            }
+
             var components = go.GetComponents<Component>();
             foreach (var comp in components)
             {
                 if (comp == null)
                     continue;
+
+                if (--options.SerializedSearchBudget <= 0)
+                {
+                    options.SearchBudgetExhausted = true;
+                    return false;
+                }
 
                 SerializedObject so;
                 try
@@ -1136,13 +1766,20 @@ namespace Locus
                     continue;
                 }
 
-                var prop = so.GetIterator();
-                bool enterChildren = true;
-                while (prop.NextVisible(enterChildren))
+                try
                 {
-                    enterChildren = false;
-                    if (SerializedPropertyMatchesSearch(prop, options, 0))
-                        return true;
+                    var prop = so.GetIterator();
+                    bool enterChildren = true;
+                    while (prop.NextVisible(enterChildren))
+                    {
+                        enterChildren = false;
+                        if (SerializedPropertyMatchesSearch(prop, options, 0))
+                            return true;
+                    }
+                }
+                finally
+                {
+                    so.Dispose();
                 }
             }
 
@@ -1170,8 +1807,9 @@ namespace Locus
                     return true;
             }
 
-            if (prop.propertyType != SerializedPropertyType.Generic
-                || genericDepth >= options.SerializedFieldMaxDepth)
+            bool recursable = prop.propertyType == SerializedPropertyType.Generic
+                || prop.propertyType == SerializedPropertyType.ManagedReference;
+            if (!recursable || genericDepth >= options.SerializedFieldMaxDepth)
             {
                 return false;
             }
@@ -1470,7 +2108,10 @@ namespace Locus
             sb.AppendLine("  Tag: " + target.tag);
             if (PrefabUtility.IsPartOfAnyPrefab(target))
             {
-                var srcObj = PrefabUtility.GetCorrespondingObjectFromOriginalSource(target);
+                // Direct source, not the original root of the variant chain:
+                // a variant instance should report the variant asset it was
+                // instantiated from.
+                var srcObj = PrefabUtility.GetCorrespondingObjectFromSource(target);
                 if (srcObj != null)
                 {
                     string srcPath = AssetDatabase.GetAssetPath(srcObj);
@@ -1502,16 +2143,18 @@ namespace Locus
                     sb.AppendLine("  Enabled: " + (isEnabled ? "true" : "false"));
                 AppendWorldTransformFields(sb, comp);
 
-                var so = new SerializedObject(comp);
-                var prop = so.GetIterator();
-                bool enterChildren = true;
-
-                while (prop.NextVisible(enterChildren))
+                using (var so = new SerializedObject(comp))
                 {
-                    enterChildren = false;
-                    if (prop.name == "m_Enabled")
-                        continue;
-                    FormatSerializedProperty(sb, prop, 1, options, 0, null);
+                    var prop = so.GetIterator();
+                    bool enterChildren = true;
+
+                    while (prop.NextVisible(enterChildren))
+                    {
+                        enterChildren = false;
+                        if (prop.name == "m_Enabled")
+                            continue;
+                        FormatSerializedProperty(sb, prop, 1, options, 0, null);
+                    }
                 }
             }
 
@@ -1543,27 +2186,53 @@ namespace Locus
             if (grouped.Count == 0)
                 return;
 
+            // Heavily-overridden instance roots (rigged characters) can carry
+            // thousands of PropertyModifications; cap the dump so one section
+            // can't dominate the reply.
+            const int maxPrintedOverrides = 300;
+            int printed = 0;
+            int suppressed = 0;
+
             sb.AppendLine();
             sb.AppendLine("── Prefab Overrides ──");
             foreach (var entry in grouped)
             {
+                if (printed >= maxPrintedOverrides)
+                {
+                    suppressed += entry.Value.Count;
+                    continue;
+                }
+
                 sb.AppendLine();
                 sb.AppendLine("--- " + entry.Key + " ---");
                 foreach (var modification in entry.Value)
                 {
+                    if (printed >= maxPrintedOverrides)
+                    {
+                        suppressed++;
+                        continue;
+                    }
+                    printed++;
+
                     if (modification.objectReference != null)
                     {
                         sb.AppendLine("  " + modification.propertyPath + " = {" + FormatObjectReference(modification.objectReference) + "}");
                     }
                     else if (!string.IsNullOrEmpty(modification.value))
                     {
-                        sb.AppendLine("  " + modification.propertyPath + " = " + modification.value);
+                        sb.AppendLine("  " + modification.propertyPath + " = " + FormatStringForDisplay(modification.value));
                     }
                     else
                     {
                         sb.AppendLine("  " + modification.propertyPath + " = {none}");
                     }
                 }
+            }
+
+            if (suppressed > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  ... (" + suppressed + " more overrides hidden; use detail='prefab_overrides' for the structured disk-side summary)");
             }
         }
 
@@ -1627,7 +2296,10 @@ namespace Locus
                         + (isLast ? "   " : "│  ")
                         + "... ("
                         + hidden
-                        + " child nodes hidden by max_depth)"
+                        // read always shows one child level; max_depth is a
+                        // list-mode option and retrying with it here does
+                        // nothing — point at the actual drill-down instead.
+                        + " descendants; read the child's object_path for detail)"
                     );
             }
         }
@@ -1666,6 +2338,9 @@ namespace Locus
                 case SerializedPropertyType.Generic:
                     FormatGenericSerializedProperty(sb, prop, indentLevel, options, genericDepth, name);
                     break;
+                case SerializedPropertyType.ManagedReference:
+                    FormatManagedReferenceProperty(sb, prop, indentLevel, options, genericDepth, name);
+                    break;
                 case SerializedPropertyType.Integer:
                     sb.AppendLine(indent + name + ": " + prop.intValue);
                     break;
@@ -1676,7 +2351,7 @@ namespace Locus
                     sb.AppendLine(indent + name + ": " + prop.floatValue.ToString("G5"));
                     break;
                 case SerializedPropertyType.String:
-                    sb.AppendLine(indent + name + ": \"" + prop.stringValue + "\"");
+                    sb.AppendLine(indent + name + ": \"" + FormatStringForDisplay(prop.stringValue) + "\"");
                     break;
                 case SerializedPropertyType.Enum:
                     sb.AppendLine(indent + name + ": " + FormatSerializedEnumValue(prop));
@@ -1722,6 +2397,83 @@ namespace Locus
                     sb.AppendLine(indent + name + ": [" + prop.propertyType + "]");
                     break;
             }
+        }
+
+        /// <summary>
+        /// SerializeReference (polymorphic) fields: show the concrete type
+        /// and expand children like a Generic — previously these printed an
+        /// opaque "[ManagedReference]", leaving state machines / ability
+        /// configs unreadable in live mode. Reference cycles are bounded by
+        /// the same depth cap as Generic recursion.
+        /// </summary>
+        private static void FormatManagedReferenceProperty(
+            StringBuilder sb,
+            SerializedProperty prop,
+            int indentLevel,
+            ReadYamlOptions options,
+            int genericDepth,
+            string name)
+        {
+            string indent = new string(' ', indentLevel * 2);
+            string fullTypename = null;
+            try
+            {
+                fullTypename = prop.managedReferenceFullTypename;
+            }
+            catch
+            {
+            }
+
+            if (string.IsNullOrEmpty(fullTypename))
+            {
+                sb.AppendLine(indent + name + ": [SerializeReference] null");
+                return;
+            }
+
+            // "AssemblyName Namespace.Type" → keep the type part.
+            int space = fullTypename.LastIndexOf(' ');
+            string typeName = space >= 0 ? fullTypename.Substring(space + 1) : fullTypename;
+
+            if (genericDepth >= options.SerializedFieldMaxDepth)
+            {
+                sb.AppendLine(
+                    indent + name + ": [SerializeReference: " + typeName
+                    + "] (children hidden by max_field_depth=" + options.SerializedFieldMaxDepth + ")");
+                return;
+            }
+
+            sb.AppendLine(indent + name + ": [SerializeReference: " + typeName + "]");
+            var children = CollectVisibleChildProperties(prop);
+            foreach (var child in children)
+                FormatSerializedProperty(sb, child, indentLevel + 1, options, genericDepth + 1, null);
+        }
+
+        /// <summary>
+        /// Long / multi-line string values: cap the length and escape line
+        /// breaks so a stored blob can't flood the reply or fake the
+        /// "--- Component ---" section structure of this line-oriented format.
+        /// </summary>
+        private static string FormatStringForDisplay(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value ?? "";
+
+            const int maxChars = 2048;
+            string result = value;
+            bool truncated = false;
+            if (result.Length > maxChars)
+            {
+                result = result.Substring(0, maxChars);
+                truncated = true;
+            }
+            result = result
+                .Replace("\\", "\\\\")
+                .Replace("\r\n", "\\n")
+                .Replace("\n", "\\n")
+                .Replace("\r", "\\n");
+            if (truncated)
+                result += "… (" + value.Length + " chars total)";
+            return result;
         }
 
         private static void FormatGenericSerializedProperty(
@@ -1867,9 +2619,18 @@ namespace Locus
 
         private static GameObject FindGameObjectInSiblings(GameObject[] siblings, string segment)
         {
+            // Literal match first (untrimmed — names with leading/trailing
+            // spaces are real and the ⟦ ⟧ display wrapping exists to expose
+            // them), then ordinal syntax, then a trimmed retry for tolerance.
+            foreach (var go in siblings)
+            {
+                if (go.name == segment)
+                    return go;
+            }
+
             string name;
             int ordinal;
-            if (TryParseIndexedSegment(segment.Trim(), out name, out ordinal))
+            if (TryParseIndexedSegment(segment, out name, out ordinal))
             {
                 int seen = 0;
                 foreach (var go in siblings)
@@ -1882,20 +2643,25 @@ namespace Locus
                 }
             }
 
-            foreach (var go in siblings)
-            {
-                if (go.name == segment.Trim())
-                    return go;
-            }
+            string trimmed = segment.Trim();
+            if (trimmed != segment)
+                return FindGameObjectInSiblings(siblings, trimmed);
 
             return null;
         }
 
         private static GameObject FindGameObjectInSiblings(Transform parent, string segment)
         {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i).gameObject;
+                if (child.name == segment)
+                    return child;
+            }
+
             string name;
             int ordinal;
-            if (TryParseIndexedSegment(segment.Trim(), out name, out ordinal))
+            if (TryParseIndexedSegment(segment, out name, out ordinal))
             {
                 int seen = 0;
                 for (int i = 0; i < parent.childCount; i++)
@@ -1909,12 +2675,9 @@ namespace Locus
                 }
             }
 
-            for (int i = 0; i < parent.childCount; i++)
-            {
-                var child = parent.GetChild(i).gameObject;
-                if (child.name == segment.Trim())
-                    return child;
-            }
+            string trimmed = segment.Trim();
+            if (trimmed != segment)
+                return FindGameObjectInSiblings(parent, trimmed);
 
             return null;
         }
@@ -1930,7 +2693,7 @@ namespace Locus
             if (PrefabUtility.IsAnyPrefabInstanceRoot(go))
             {
                 count++;
-                var prefabAsset = PrefabUtility.GetCorrespondingObjectFromOriginalSource(go);
+                var prefabAsset = PrefabUtility.GetCorrespondingObjectFromSource(go);
                 if (prefabAsset != null)
                 {
                     string assetPath = AssetDatabase.GetAssetPath(prefabAsset);
@@ -1992,7 +2755,9 @@ namespace Locus
             if (!PrefabUtility.IsPartOfAnyPrefab(go))
                 return null;
 
-            var source = PrefabUtility.GetCorrespondingObjectFromOriginalSource(go);
+            // Direct source keeps variant instances attributed to the variant
+            // asset instead of the base prefab at the bottom of the chain.
+            var source = PrefabUtility.GetCorrespondingObjectFromSource(go);
             if (source == null)
                 return null;
 
@@ -2004,40 +2769,63 @@ namespace Locus
         /// </summary>
         private static string GetHierarchyPath(GameObject go)
         {
+            // Segments carry the same 1-based [n] ordinal as list/search
+            // paths when siblings share a name, so a reference label pasted
+            // into object_path resolves to the same object it labeled.
             var parts = new List<string>();
             Transform t = go.transform;
             while (t != null)
             {
-                parts.Add(t.name);
+                parts.Add(IndexedSegmentForTransform(t));
                 t = t.parent;
             }
             parts.Reverse();
             return string.Join("/", parts);
         }
 
+        private static string IndexedSegmentForTransform(Transform t)
+        {
+            string name = t.name;
+            int total = 0;
+            int ordinal = 0;
+
+            var parent = t.parent;
+            if (parent != null)
+            {
+                for (int i = 0; i < parent.childCount; i++)
+                {
+                    var sibling = parent.GetChild(i);
+                    if (sibling.name != name)
+                        continue;
+                    total++;
+                    if (sibling == t)
+                        ordinal = total;
+                }
+            }
+            else
+            {
+                var scene = t.gameObject.scene;
+                if (scene.IsValid() && scene.isLoaded)
+                {
+                    foreach (var root in scene.GetRootGameObjects())
+                    {
+                        if (root.name != name)
+                            continue;
+                        total++;
+                        if (root.transform == t)
+                            ordinal = total;
+                    }
+                }
+            }
+
+            return total > 1 && ordinal > 0 ? name + "[" + ordinal + "]" : name;
+        }
+
         /// <summary>
         /// </summary>
         private static string FormatObjectReference(UnityEngine.Object obj)
         {
-            if (obj is Component comp)
-            {
-                string hierarchyPath = GetHierarchyPath(comp.gameObject);
-                return hierarchyPath + "." + comp.GetType().Name;
-            }
-
-            if (obj is GameObject go)
-            {
-                string assetPath = AssetDatabase.GetAssetPath(go);
-                if (!string.IsNullOrEmpty(assetPath) && !assetPath.EndsWith(".unity"))
-                    return go.name + " (" + assetPath + ")";
-                return GetHierarchyPath(go) + " [GameObject]";
-            }
-
-            string path = AssetDatabase.GetAssetPath(obj);
-            if (!string.IsNullOrEmpty(path))
-                return obj.name + " (" + path + ")";
-
-            return obj.name + " [" + obj.GetType().Name + "]";
+            return SerializedObjectReferenceDisplay(obj);
         }
 
         /// <summary>
@@ -2049,6 +2837,8 @@ namespace Locus
                 parts.Add("Static");
             if (!go.activeSelf)
                 parts.Add("Inactive");
+            if ((go.hideFlags & HideFlags.HideInHierarchy) != 0)
+                parts.Add("Hidden");
             if (go.tag != "Untagged" && !string.IsNullOrEmpty(go.tag))
                 parts.Add("Tag:" + go.tag);
             if (go.layer != 0)

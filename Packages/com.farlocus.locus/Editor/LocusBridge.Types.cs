@@ -49,6 +49,7 @@ namespace Locus
         {
             public string target;
             public string windowTitle;
+            public int maxLongEdge = 1280;
         }
 
         [Serializable]
@@ -61,6 +62,13 @@ namespace Locus
             public int height;
             public int originalWidth;
             public int originalHeight;
+            public int sourceWidth;
+            public int sourceHeight;
+            public int outputWidth;
+            public int outputHeight;
+            public int maxLongEdge;
+            public float pixelsPerPoint;
+            public string captureArea;
             public string mimeType;
         }
 
@@ -73,6 +81,12 @@ namespace Locus
             public float progress;
             public int revision;
             public string source;
+            public string waitKind;
+            public string waitTarget;
+            public string waitCondition;
+            public int sourceLine;
+            public string sourceText;
+            public int waitedMs;
         }
 
         public sealed class ScriptGlobals
@@ -115,7 +129,8 @@ namespace Locus
             /// <summary>
             /// Serialize a Unity object (or any object) to JSON and append it to the result buffer.
             /// Uses EditorJsonUtility for UnityEngine.Object types (preserves serialized fields,
-            /// references, etc.), falls back to JsonUtility for plain C# objects.
+            /// references, etc.), and LocusJson for plain C# objects, anonymous types,
+            /// properties, dictionaries, and other general-purpose JSON values.
             /// This is the preferred way to return structured data to the agent.
             /// </summary>
             public void printJson(object obj)
@@ -131,16 +146,18 @@ namespace Locus
                 {
                     string json;
                     if (obj is UnityEngine.Object uObj)
-                        json = EditorJsonUtility.ToJson(uObj, true);
+                        json = EditorJsonUtility.ToJson(uObj, false);
                     else
-                        json = JsonUtility.ToJson(obj, true);
+                        json = Locus.Json.LocusJson.Serialize(obj);
 
                     _output.AppendLine(json);
                 }
                 catch (Exception ex)
                 {
-                    _output.Append("[printJson error: ").Append(ex.Message).Append("] ")
-                           .AppendLine(obj.ToString());
+                    Type errorType = ex.GetType();
+                    _output.Append("[printJson error: ")
+                           .Append(errorType.FullName ?? errorType.Name)
+                           .AppendLine("]");
                 }
             }
 

@@ -15,9 +15,19 @@ namespace Locus
         public sealed class SerializedPropertySnapshot
         {
             public string propertyPath;
+            public string semanticPath;
+            public string nodeKind;
+            public string canonicalPath;
             public SerializedPropertyBindingTarget bindingTarget;
+            public SerializedPropertyBindingTarget referenceTarget;
             public string displayName;
             public string name;
+            public string hierarchyOriginalName = "";
+            public string hierarchyPrefabSource = "";
+            public string hierarchyComponentSignature = "";
+            public bool prefabOverride;
+            public bool isPrefabInstance;
+            public string prefabSource = "";
             public string type;
             public string valueType;
             public string fieldTypeFullName;
@@ -28,12 +38,15 @@ namespace Locus
             public bool hasChildren;
             public bool isArray;
             public int arraySize;
+            public int visibleChildCount;
+            public bool childrenTruncated;
             public bool isFlagsEnum;
             public int enumValueIndex;
             public long enumValueFlag;
             public SerializedEnumOption[] enumOptions;
             public SerializedPropertySnapshot[] children;
             public bool isManagedReference;
+            public long managedReferenceId;
             public string managedReferenceFullTypename;
             public string managedReferenceFieldTypename;
             public string managedReferenceDisplayName;
@@ -50,6 +63,24 @@ namespace Locus
             public string referenceTypeFullName;
             public string referenceTypeAssembly;
             public SerializedPropertyAttributeInfo[] attributes;
+            public PropertyTreeSubassetEntry[] subassets;
+            public PropertyTreeDisplaySection[] displaySections;
+        }
+
+        public sealed class PropertyTreeSubassetEntry
+        {
+            public string segment;
+            public string displayName;
+            public string type;
+            public string typeFullName;
+            public SerializedPropertyBindingTarget target;
+            public PropertyTreeSubassetEntry[] children;
+        }
+
+        public sealed class PropertyTreeDisplaySection
+        {
+            public string title;
+            public string[] lines;
         }
 
         public sealed class SerializedPropertyBindingTarget
@@ -259,6 +290,10 @@ namespace Locus
             return new SerializedPropertySnapshot
             {
                 propertyPath = "",
+                semanticPath = "",
+                nodeKind = "object",
+                canonicalPath = "",
+                referenceTarget = null,
                 displayName = string.IsNullOrEmpty(name) ? type.Name : name,
                 name = name,
                 type = type.Name,
@@ -271,6 +306,8 @@ namespace Locus
                 hasChildren = children.Count > 0,
                 isArray = false,
                 arraySize = -1,
+                visibleChildCount = children.Count,
+                childrenTruncated = false,
                 isFlagsEnum = false,
                 enumValueIndex = -1,
                 enumValueFlag = 0,
@@ -468,8 +505,8 @@ namespace Locus
                     return SerializedEnumDisplayName(prop);
                 case SerializedPropertyType.ObjectReference:
                     if (prop.objectReferenceValue == null)
-                        return "";
-                    return SerializedObjectReferencePath(prop.objectReferenceValue);
+                        return "None";
+                    return SerializedObjectReferenceDisplay(prop.objectReferenceValue);
                 case SerializedPropertyType.Vector2:
                     return FormatVector(prop.vector2Value);
                 case SerializedPropertyType.Vector3:
@@ -640,9 +677,37 @@ namespace Locus
             {
                 string name = obj.name ?? "";
                 if (!string.IsNullOrWhiteSpace(name))
-                    return path.TrimEnd('/') + "/" + name.Trim();
+                    return path.TrimEnd('/') + "/" + name.Trim()
+                        .Replace("~", "~0")
+                        .Replace("/", "~1");
             }
             return path;
+        }
+
+        private static string SerializedObjectReferenceDisplay(UnityEngine.Object obj)
+        {
+            if (obj == null)
+                return "None";
+
+            Component component = obj as Component;
+            if (component != null)
+                return GetHierarchyPath(component.gameObject) + "." + component.GetType().Name;
+
+            GameObject go = obj as GameObject;
+            if (go != null)
+            {
+                string gameObjectAssetPath = AssetDatabase.GetAssetPath(go);
+                if (!string.IsNullOrEmpty(gameObjectAssetPath)
+                    && !gameObjectAssetPath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+                    return go.name + " (" + gameObjectAssetPath + ")";
+                return GetHierarchyPath(go) + " [GameObject]";
+            }
+
+            string path = SerializedObjectReferencePath(obj);
+            if (!string.IsNullOrEmpty(path))
+                return path;
+
+            return (obj.name ?? "") + " [" + obj.GetType().Name + "]";
         }
 
         private static UnityEngine.Object ResolveSerializedObjectReference(
@@ -946,8 +1011,17 @@ namespace Locus
             var snapshot = new SerializedPropertySnapshot
             {
                 propertyPath = prop.propertyPath,
+                semanticPath = "",
+                nodeKind = isArray
+                    ? "array"
+                    : (isObjectReference ? "reference" : "property"),
+                canonicalPath = "",
+                referenceTarget = isObjectReference
+                    ? SerializedObjectReferenceTarget(prop)
+                    : null,
                 displayName = prop.displayName,
                 name = prop.name,
+                prefabOverride = prop.prefabOverride,
                 type = prop.propertyType.ToString(),
                 valueType = prop.propertyType.ToString(),
                 fieldTypeFullName = FieldTypeFullName(fieldType),
@@ -957,6 +1031,8 @@ namespace Locus
                 editable = IsSerializedPropertyWritable(prop),
                 isArray = isArray,
                 arraySize = arraySize,
+                visibleChildCount = 0,
+                childrenTruncated = false,
                 isFlagsEnum = !dynamicSchema && isEnum && IsFlagsEnum(prop),
                 enumValueIndex = isEnum ? prop.enumValueIndex : -1,
                 enumValueFlag = isEnum ? SerializedEnumNumericValue(prop) : 0,
@@ -965,6 +1041,9 @@ namespace Locus
                     : new SerializedEnumOption[0],
                 children = new SerializedPropertySnapshot[0],
                 isManagedReference = isManagedReference,
+                managedReferenceId = isManagedReference
+                    ? SerializedManagedReferenceId(prop)
+                    : 0,
                 managedReferenceFullTypename = isManagedReference ? prop.managedReferenceFullTypename ?? "" : "",
                 managedReferenceFieldTypename = isManagedReference ? prop.managedReferenceFieldTypename ?? "" : "",
                 managedReferenceDisplayName = isManagedReference ? ManagedReferenceDisplayName(prop.managedReferenceFullTypename) : "",
@@ -989,11 +1068,90 @@ namespace Locus
                 attributes = SerializedFieldAttributes(fieldInfo)
             };
 
-            if (depth < maxDepth)
+            bool compactValue = IsSerializedPropertyCompactValue(prop.propertyType);
+            if (depth < maxDepth && !compactValue)
                 snapshot.children = SnapshotChildren(prop, depth, maxDepth, maxArrayItems, isArray, arraySize, dynamicSchema);
 
-            snapshot.hasChildren = snapshot.children != null && snapshot.children.Length > 0;
+            snapshot.visibleChildCount = snapshot.children != null ? snapshot.children.Length : 0;
+            snapshot.childrenTruncated = !compactValue && (isArray
+                ? arraySize > snapshot.visibleChildCount
+                : depth >= maxDepth && prop.hasVisibleChildren);
+            snapshot.hasChildren = !compactValue && (prop.hasVisibleChildren
+                || (isArray && arraySize > 0)
+                || snapshot.referenceTarget != null
+                || snapshot.visibleChildCount > 0);
             return snapshot;
+        }
+
+        private static bool IsSerializedPropertyCompactValue(SerializedPropertyType propertyType)
+        {
+            switch (propertyType)
+            {
+                case SerializedPropertyType.Vector2:
+                case SerializedPropertyType.Vector3:
+                case SerializedPropertyType.Vector4:
+                case SerializedPropertyType.Quaternion:
+                case SerializedPropertyType.Color:
+                case SerializedPropertyType.Rect:
+                case SerializedPropertyType.Vector2Int:
+                case SerializedPropertyType.Vector3Int:
+                case SerializedPropertyType.RectInt:
+                case SerializedPropertyType.Bounds:
+                case SerializedPropertyType.BoundsInt:
+                case SerializedPropertyType.AnimationCurve:
+                case SerializedPropertyType.Gradient:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static long SerializedManagedReferenceId(SerializedProperty prop)
+        {
+            if (prop == null || prop.propertyType != SerializedPropertyType.ManagedReference)
+                return 0;
+            try
+            {
+                return prop.managedReferenceId;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static SerializedPropertyBindingTarget SerializedObjectReferenceTarget(
+            SerializedProperty prop)
+        {
+            UnityEngine.Object referenced = prop != null ? prop.objectReferenceValue : null;
+            UnityEngine.Object owner = prop != null && prop.serializedObject != null
+                ? prop.serializedObject.targetObject
+                : null;
+            if (referenced == null || owner == null)
+                return null;
+
+            string ownerPath = (AssetDatabase.GetAssetPath(owner) ?? "").Trim().Replace('\\', '/');
+            string referencedPath = (AssetDatabase.GetAssetPath(referenced) ?? "").Trim().Replace('\\', '/');
+            if (string.IsNullOrWhiteSpace(ownerPath)
+                || string.IsNullOrWhiteSpace(referencedPath)
+                || !string.Equals(ownerPath, referencedPath, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            long localFileId;
+            if (!TryGetLocalFileId(referenced, out localFileId) || localFileId == 0)
+                return null;
+
+            Type referencedType = referenced.GetType();
+            return new SerializedPropertyBindingTarget
+            {
+                kind = "asset",
+                path = referencedPath,
+                targetFileId = localFileId,
+                targetTypeFullName = FieldTypeFullName(referencedType),
+                targetTypeAssembly = FieldTypeAssembly(referencedType),
+                targetTypeName = referencedType.Name ?? "",
+                propertyPath = ""
+            };
         }
 
         private static SerializedPropertySnapshot[] SnapshotChildren(
