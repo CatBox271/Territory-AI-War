@@ -2748,20 +2748,29 @@ MonoBehaviour:
       - serializedVersion: 3
         time: 0
         value: 0
-        inSlope: 0.125
-        outSlope: 0.125
-        tangentMode: 34
+        inSlope: 0.08451049
+        outSlope: 0.08451049
+        tangentMode: 0
         weightedMode: 0
         inWeight: 0
-        outWeight: 0.33333334
+        outWeight: 0.27096942
+      - serializedVersion: 3
+        time: 12
+        value: 1
+        inSlope: 0.25869635
+        outSlope: 0.25869635
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0.012221575
+        outWeight: 0.06405633
       - serializedVersion: 3
         time: 40
         value: 5
-        inSlope: 0.125
-        outSlope: 0.125
-        tangentMode: 34
+        inSlope: 0.07033407
+        outSlope: 0.07033407
+        tangentMode: 0
         weightedMode: 0
-        inWeight: 0.33333334
+        inWeight: 0.06258049
         outWeight: 0
       m_PreInfinity: 2
       m_PostInfinity: 2
@@ -2973,7 +2982,7 @@ MonoBehaviour:
   TowelDefaultBullets: 262144
   basicBallPrefab: {fileID: 2741485188931532298, guid: 5d1c6af57d89db441b4186adbf0c8bc1, type: 3}
   bounceRate: 0.5
-  useAIDecision: 0
+  useAIDecision: 1
   propLimit: 5
 --- !u!1 &638774368
 GameObject:
@@ -4916,7 +4925,11 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 203889114743462745, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
       propertyPath: m_text
-      value: "\xD78"
+      value: "\xD764"
+      objectReference: {fileID: 0}
+    - target: {fileID: 203889114743462745, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: m_fontStyle
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2866861109412881631, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
       propertyPath: m_Name
@@ -4924,7 +4937,31 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7041557001800106869, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
       propertyPath: Times
-      value: 8
+      value: 64
+      objectReference: {fileID: 0}
+    - target: {fileID: 7815141729575686748, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 1.5691793
+      objectReference: {fileID: 0}
+    - target: {fileID: 7815141729575686748, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 1.8263556
+      objectReference: {fileID: 0}
+    - target: {fileID: 7815141729575686748, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 0.65
+      objectReference: {fileID: 0}
+    - target: {fileID: 7815141729575686748, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: m_ConstrainProportionsScale
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 8455248085928534798, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: times
+      value: 0.65
+      objectReference: {fileID: 0}
+    - target: {fileID: 8455248085928534798, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
+      propertyPath: Refresh
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8992258395687461325, guid: 9ed2fbfd79bbd0a4eb8bb0510844a668, type: 3}
       propertyPath: m_LocalPosition.x
@@ -6222,7 +6259,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_LocalScale.x
-      value: 1.8989129
+      value: 1.8113431
       objectReference: {fileID: 0}
     - target: {fileID: 9053751718362533022, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_Name

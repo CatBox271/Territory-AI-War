@@ -5,6 +5,7 @@ using UnityEngine;
 public class WidthEditor : MonoBehaviour
 {
     public bool Refresh;
+    public float times = 1;
 
     private void OnValidate()
     {
@@ -13,6 +14,6 @@ public class WidthEditor : MonoBehaviour
             1 / transform.lossyScale.x,
             1 / transform.lossyScale.y,
             1 / transform.lossyScale.z
-        );
+        ) * times;
     }
 }

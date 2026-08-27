@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class BallPainter : MonoBehaviour, IStageValue
 {
-    private SpriteRenderer sp;
+    public SpriteRenderer sp;
     public Rigidbody2D rb;
     public Collider2D col;
     [field: SerializeField] public int stage { get; set; }
@@ -26,7 +26,7 @@ public class BallPainter : MonoBehaviour, IStageValue
     void Awake()
     {
         canvas = FindObjectOfType<TerritoryCanvas>();
-        sp = GetComponent<SpriteRenderer>();
+        if (sp == null) sp = GetComponent<SpriteRenderer>();
         rb = GetComponent<Rigidbody2D>();
         config = MapConfig.Instance;
     }
@@ -98,7 +98,7 @@ public class BallPainter : MonoBehaviour, IStageValue
     void ColorSet()
     {
         Color col = MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball);
-        sp.color = col;
+        if(sp != null)sp.color = col;
         col += Color.white * 0.15f;
         col.a = 0.75f; TR.startColor = col;
         col.a = 0.25f; TR.endColor = col;

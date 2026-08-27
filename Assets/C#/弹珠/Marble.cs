@@ -21,7 +21,7 @@ public class Marble : MonoBehaviour
     public uint ValueExponent => valueExponent;
     private uint valueExponent;
     private uint lastExponent;
-    private SpriteRenderer sr;
+    public SpriteRenderer sr;
     private Rigidbody2D rb;
     private TrailRenderer tr;
     private CircleCollider2D col;
@@ -48,7 +48,7 @@ public class Marble : MonoBehaviour
 
     void Awake()
     {
-        sr = GetComponent<SpriteRenderer>();
+        if(sr == null)sr = GetComponent<SpriteRenderer>();
         rb = GetComponent<Rigidbody2D>();
         col = GetComponent<CircleCollider2D>();
         tr = GetComponentInChildren<TrailRenderer>();
