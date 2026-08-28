@@ -173,7 +173,7 @@ Rigidbody2D:
   m_LinearDrag: 0
   m_AngularDrag: 0.05
   m_GravityScale: 0.5
-  m_Material: {fileID: 6200000, guid: 3df1a7d2933d75e459627fcd1a813789, type: 2}
+  m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -204,30 +204,30 @@ MonoBehaviour:
     m_Curve:
     - serializedVersion: 3
       time: 0
-      value: 0.25
-      inSlope: 0.0084999995
-      outSlope: 0.0084999995
-      tangentMode: 34
+      value: 0.18015178
+      inSlope: 0.0012013783
+      outSlope: 0.0012013783
+      tangentMode: 0
       weightedMode: 0
       inWeight: 0
-      outWeight: 0.33333334
+      outWeight: 0.14208515
     - serializedVersion: 3
       time: 20
-      value: 0.42
-      inSlope: 0.009964286
-      outSlope: 0.009964286
-      tangentMode: 34
+      value: 0.4525604
+      inSlope: 0.0088166585
+      outSlope: 0.0088166585
+      tangentMode: 0
       weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
+      inWeight: 0.09438038
+      outWeight: 0.230996
     - serializedVersion: 3
       time: 27
       value: 0.5
-      inSlope: 0.011428573
-      outSlope: 0.011428573
-      tangentMode: 34
+      inSlope: 0.0028051129
+      outSlope: 0.0028051129
+      tangentMode: 0
       weightedMode: 0
-      inWeight: 0.33333334
+      inWeight: 0.31892285
       outWeight: 0.33333334
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -255,6 +255,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   shakingAim: {fileID: 2082123089619072944}
+  value:
+    curve:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
 --- !u!1 &9026055536894575632
 GameObject:
   m_ObjectHideFlags: 0

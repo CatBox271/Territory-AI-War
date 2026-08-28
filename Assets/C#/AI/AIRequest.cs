@@ -119,6 +119,7 @@ public class DeepSeekMessage
         this.content = content;
     }
 
+    [JsonIgnore]
     public DeepSeekMessage Clone { get => JsonConvert.DeserializeObject<DeepSeekMessage>(JsonConvert.SerializeObject(this)); }
 
     public bool ShouldSerializename()
@@ -606,6 +607,13 @@ public class DeepSeekTokenizer
 /// </summary>
 public class AIRequest : MonoBehaviour
 {
+    public static AIRequest Instance;
+
+    private void Awake()
+    {
+        Instance = this;
+    }
+
     /// <summary>
     /// 上下文容量
     /// </summary>

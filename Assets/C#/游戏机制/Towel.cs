@@ -269,6 +269,7 @@ public class Towel : MonoBehaviour, IStageValue
 
         if (val / minVal < defaultNum) defaultNum = (int)(val / minVal).ToLong();
         else if (val / defaultNum > maxVal) defaultNum = (int)(val / maxVal).ToLong();
+        if (defaultNum == 0) defaultNum = 1;
         int bv = (int)(val / defaultNum).ToLong();
         float da = angle / (defaultNum + 1);
         float sa = angle * -0.5f;
