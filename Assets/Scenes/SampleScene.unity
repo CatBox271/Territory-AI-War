@@ -6127,6 +6127,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _frame_rate: 60
   _cycleInterval: 10
+  reactionSystem: {fileID: 0}
 --- !u!1001 &1059564635
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -7855,6 +7856,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 25280547d8621624ab4a9e6517efbc7c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  stage: -1
 --- !u!4 &1420501334
 Transform:
   m_ObjectHideFlags: 0
@@ -8472,13 +8474,13 @@ MonoBehaviour:
   Shooter: {fileID: 1791575980}
   Shooter2: {fileID: 0}
   spawnArea: {fileID: 2113856713}
-  initialMarbleCount: 3
+  initialMarbleCount: 2
   initialSpawnDelay: 0
-  spawnInterval: 2.5
-  SpawnTimer: 0
   initialValueExponent: 1
   startValueExponent: 10
   gravity: 0.2
+  upgradePerEmptySlotPerSecond: 1
+  upgradeCost: 100
 --- !u!1 &1508170505
 GameObject:
   m_ObjectHideFlags: 0

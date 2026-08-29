@@ -126,7 +126,7 @@ public class MapConfig : MonoBehaviour
             ExecutePropEffect(top.stage, top.item, top.value);//溢出（内部触发OnPropPop）
         }
     }
-    public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null)//这里需要添加ItemType作为目标。
+    public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null, WeaponKind? anyChoice = null)//anyChoice 只对【任意】生效；null=原来的随机
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
 
@@ -137,7 +137,21 @@ public class MapConfig : MonoBehaviour
         }
         OnPropOut?.Invoke(new PropInfo(itemName, val, stage, aim_pos));
 
-        switch (itemName)
+        WeaponKind effectKind = itemName;
+        if (effectKind == WeaponKind.任意)
+        {
+            // AI 指定了具体武器就用指定的；否则维持原来的随机逻辑。
+            effectKind = anyChoice ?? (WeaponKind)Random.Range(0, 4);
+            if (effectKind == WeaponKind.任意)
+                effectKind = (WeaponKind)Random.Range(0, 4);
+        }
+
+        ExecuteWeaponEffect(effectKind, towel, val);
+    }
+
+    private static void ExecuteWeaponEffect(WeaponKind kind, Towel towel, HugeInt val)
+    {
+        switch (kind)
         {
             case WeaponKind.霰弹:
                 towel.ShotGun(val);
@@ -150,15 +164,6 @@ public class MapConfig : MonoBehaviour
                 break;
             case WeaponKind.大球:
                 towel.SpawnBigBall(val);
-                break;
-            case WeaponKind.任意:
-                switch (Random.Range(0, 4))
-                {
-                    case 0: towel.ShotGun(val); break;
-                    case 1: towel.value += val; break;
-                    case 2: towel.shield_value += val; break;
-                    case 3: towel.SpawnBigBall(val); break;
-                }
                 break;
         }
     }
