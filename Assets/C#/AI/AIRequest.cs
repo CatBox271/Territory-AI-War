@@ -7,6 +7,7 @@ using Newtonsoft.Json;
 using UnityEngine.Networking;
 using System.Text;
 using System.Linq;
+using System.Threading.Tasks;
 using System.IO;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Serialization;
@@ -209,7 +210,7 @@ public class DeepSeekRequest
 
 public interface Itool
 {
-    public IEnumerator DealToolCallsCoroutine(List<ToolCall> toolCalls, Action<List<DeepSeekMessage>> onComplete);
+    System.Threading.Tasks.Task<List<DeepSeekMessage>> DealToolCallsAsync(List<ToolCall> toolCalls);
 }
 
 // 添加ThinkingConfig类
@@ -605,15 +606,8 @@ public class DeepSeekTokenizer
 /// <summary>
 /// 包含给AI发消息的基础支持
 /// </summary>
-public class AIRequest : MonoBehaviour
+public static class AIRequest
 {
-    public static AIRequest Instance;
-
-    private void Awake()
-    {
-        Instance = this;
-    }
-
     /// <summary>
     /// 上下文容量
     /// </summary>
@@ -631,7 +625,7 @@ public class AIRequest : MonoBehaviour
         return JsonConvert.DeserializeObject<List<DeepSeekMessage>>(JsonConvert.SerializeObject(input));
     }
 
-    public void SendRequest(RequestInfo requestInfo)
+    public static void SendRequest(RequestInfo requestInfo)
     {
         // 非 DeepSeek 模型去掉专属/不支持字段
         bool isDeepSeek = requestInfo.request.model.ToLower().Contains("deepseek");
@@ -661,16 +655,16 @@ public class AIRequest : MonoBehaviour
         //判断流式
         if (requestInfo.request.stream)
         {
-            StartCoroutine(SendingStream(jsonData, requestInfo));
+            _ = SendStreamAsync(jsonData, requestInfo);
         }
         else
         {
-            StartCoroutine(Sending(jsonData, requestInfo));
+            _ = SendAsync(jsonData, requestInfo);
         }
     }
 
     //非流式
-    IEnumerator Sending(string jsonData, RequestInfo requestInfo)
+    private static async Task SendAsync(string jsonData, RequestInfo requestInfo)
     {
         // 创建UnityWebRequest
         var url = requestInfo.apiUrl;
@@ -684,7 +678,8 @@ public class AIRequest : MonoBehaviour
         request.SetRequestHeader("Authorization", $"Bearer {key}");
 
         // 发送请求
-        yield return request.SendWebRequest();
+        request.SendWebRequest();
+        while (!request.isDone) await Task.Yield();
 
         // 处理响应
         if (request.result == UnityWebRequest.Result.Success)
@@ -697,7 +692,6 @@ public class AIRequest : MonoBehaviour
                 var back_message = response.choices[0].message;
                 string aiResponse = back_message.content;
                 string after_thinking = back_message.reasoning_content;
-                //if (!string.IsNullOrEmpty(after_thinking)) print("思考:" + after_thinking);
 
                 if (back_message.tool_calls != null && back_message.tool_calls.Count > 0)
                 {
@@ -706,22 +700,19 @@ public class AIRequest : MonoBehaviour
 
                     if (requestInfo.toolkit != null)
                     {
-                        // 关键修改：等待工具调用完成
-                        yield return StartCoroutine(requestInfo.toolkit.DealToolCallsCoroutine(back_message.tool_calls, (newMessages) =>
+                        var newMessages = await requestInfo.toolkit.DealToolCallsAsync(back_message.tool_calls);
+                        if (newMessages != null && newMessages.Count > 0)
                         {
-                            if (newMessages != null && newMessages.Count > 0)
+                            if (requestInfo.back_tool)
                             {
-                                if (requestInfo.back_tool)
-                                {
-                                    requestInfo.AddMessage(newMessages);
-                                    SendRequest(requestInfo);
-                                }
-                                else
-                                {
-                                    requestInfo.onResponse?.Invoke(newMessages);
-                                }
+                                requestInfo.AddMessage(newMessages);
+                                SendRequest(requestInfo);
                             }
-                        }));
+                            else
+                            {
+                                requestInfo.onResponse?.Invoke(newMessages);
+                            }
+                        }
                     }
                     else
                     {
@@ -749,10 +740,8 @@ public class AIRequest : MonoBehaviour
         request.Dispose();
     }
 
-    //流式
-    IEnumerator SendingStream(string jsonData, RequestInfo requestInfo)
+    private static async Task SendStreamAsync(string jsonData, RequestInfo requestInfo)
     {
-        //SLManager.instance.ExportToJson(jsonData, "", System.DateTime.Now.ToShortTimeString().Replace(":", "-"));
         var url = requestInfo.apiUrl;
         var key = requestInfo.apiKey;
         UnityWebRequest request = new UnityWebRequest(url, "POST");
@@ -760,8 +749,6 @@ public class AIRequest : MonoBehaviour
 
         StringBuilder final_content = new StringBuilder();
         StringBuilder final_thinking = new StringBuilder();
-
-        // 工具调用相关缓存
         Dictionary<int, StringBuilder> toolCallArguments = new Dictionary<int, StringBuilder>();
         Dictionary<int, ToolCall> toolCalls = new Dictionary<int, ToolCall>();
         bool hasToolCalls = false;
@@ -771,7 +758,6 @@ public class AIRequest : MonoBehaviour
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = new StreamDownloadHandler(
             onDataReceived: (jsonData) => {
-                // 处理每个 chunk
                 try
                 {
                     var chunk = JsonConvert.DeserializeObject<DeepSeekChunk>(jsonData);
@@ -780,30 +766,24 @@ public class AIRequest : MonoBehaviour
                         var delta = chunk.choices[0].delta;
                         var finish_reason = chunk.choices[0].finish_reason;
 
-                        // 1. 处理普通文本内容
                         if (!string.IsNullOrEmpty(delta.content))
                         {
                             final_content.Append(delta.content);
                             requestInfo.messages[^1].content = final_content.ToString();
                         }
 
-                        // 2. 处理思考内容
                         if (!string.IsNullOrEmpty(delta.reasoning_content))
                         {
                             final_thinking.Append(delta.reasoning_content);
                             requestInfo.messages[^1].reasoning_content = final_thinking.ToString();
                         }
 
-                        // 3. 处理工具调用
                         if (delta.tool_calls != null && delta.tool_calls.Count > 0)
                         {
                             hasToolCalls = true;
-
                             foreach (var tc in delta.tool_calls)
                             {
                                 int index = tc.index;
-
-                                // 初始化或更新工具调用信息
                                 if (!toolCalls.ContainsKey(index))
                                 {
                                     toolCalls[index] = new ToolCall
@@ -819,25 +799,12 @@ public class AIRequest : MonoBehaviour
                                     toolCallArguments[index] = new StringBuilder();
                                 }
 
-                                // 累积 arguments
                                 if (tc.function != null && !string.IsNullOrEmpty(tc.function.arguments))
                                 {
                                     toolCallArguments[index].Append(tc.function.arguments);
                                     toolCalls[index].function.arguments = toolCallArguments[index].ToString();
                                 }
                             }
-                        }
-
-                        // 4. 检查结束状态
-                        if (finish_reason == "stop")
-                        {
-                            // 正常结束，没有工具调用
-                            // 在 onComplete 中处理
-                        }
-                        else if (finish_reason == "tool_calls")
-                        {
-                            // 工具调用结束，需要执行工具
-                            // 注意：这里不能在流式回调中直接启动协程，需要延迟处理
                         }
                     }
                 }
@@ -851,93 +818,76 @@ public class AIRequest : MonoBehaviour
                 requestInfo.onError?.Invoke(error);
             },
             onComplete: () => {
-
-                // 判断是否有工具调用
-                if (hasToolCalls && toolCalls.Count > 0)
-                {
-                    // 将工具调用信息添加到消息中
-                    var toolCallsList = toolCalls.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList();
-
-                    // 创建带工具调用的 AssistantMessage
-                    var assistantMessage = new DeepSeekMessage(){
-                        role = "assistant",
-                        reasoning_content = final_thinking.ToString(),
-                        content = final_content.ToString(),
-                        tool_calls = toolCallsList
-                    };
-
-                    // 替换最后一条消息（之前添加的占位消息）
-                    if (requestInfo.messages.Count > 0 && requestInfo.messages[^1].role == "assistant")
-                    {
-                        requestInfo.messages[^1] = assistantMessage;
-                    }
-
-                    // 执行工具调用
-                    // 注意：需要启动协程，这里使用 Unity 的 MonoBehaviour 来启动
-                    if (requestInfo.toolkit != null)
-                    {
-                        // 假设 useTool 是 MonoBehaviour，通过回调执行
-                        var toolHandler = requestInfo.toolkit; // 获取工具处理器
-                        StartCoroutine(
-                                toolHandler.DealToolCallsCoroutine(toolCallsList, (newMessages) =>
-                                {
-                                    print("工具结果" + newMessages[0].content);
-                                    if (newMessages != null && newMessages.Count > 0)
-                                    {
-                                        if (requestInfo.back_tool)
-                                        {
-                                            requestInfo.AddMessage(newMessages);
-                                            print(requestInfo.request.messages[^1]);
-                                            SendRequest(requestInfo);
-                                        }
-                                        else
-                                        {
-                                            requestInfo.onResponse?.Invoke(null);
-                                        }
-                                    }
-                                })
-                            );
-                    }
-                    else
-                    {
-                        Debug.LogError("useTool 未初始化");
-                        requestInfo.onError?.Invoke("工具处理器未初始化");
-                    }
-                }
-                else
-                {
-                    // 没有工具调用，正常完成
-                    var assistantMessage = new DeepSeekMessage() {
-                        role = "assistant",
-                        reasoning_content = final_thinking.ToString(),
-                        content = final_content.ToString()
-                    };
-
-                    // 替换最后一条消息（之前添加的占位消息）
-                    if (requestInfo.messages.Count > 0 && requestInfo.messages[^1].role == "assistant")
-                    {
-                        requestInfo.messages[^1] = assistantMessage;
-                    }
-                    // 回调完整内容
-                    requestInfo.onResponse?.Invoke(new() { assistantMessage.Clone });
-                }
-
-                // 清理缓存
-                toolCallArguments.Clear();
-                toolCalls.Clear();
             }
         );
 
         request.SetRequestHeader("Content-Type", "application/json");
         request.SetRequestHeader("Authorization", $"Bearer {key}");
 
-        yield return request.SendWebRequest();
+        request.SendWebRequest();
+        while (!request.isDone) await Task.Yield();
 
         if (request.result != UnityWebRequest.Result.Success)
         {
             requestInfo.onError?.Invoke($"API Error: {request.error}");
+            request.Dispose();
+            return;
         }
 
+        if (hasToolCalls && toolCalls.Count > 0)
+        {
+            var toolCallsList = toolCalls.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList();
+            var assistantMessage = new DeepSeekMessage() {
+                role = "assistant",
+                reasoning_content = final_thinking.ToString(),
+                content = final_content.ToString(),
+                tool_calls = toolCallsList
+            };
+
+            if (requestInfo.messages.Count > 0 && requestInfo.messages[^1].role == "assistant")
+            {
+                requestInfo.messages[^1] = assistantMessage;
+            }
+
+            if (requestInfo.toolkit != null)
+            {
+                var newMessages = await requestInfo.toolkit.DealToolCallsAsync(toolCallsList);
+                if (newMessages != null && newMessages.Count > 0)
+                {
+                    if (requestInfo.back_tool)
+                    {
+                        requestInfo.AddMessage(newMessages);
+                        SendRequest(requestInfo);
+                    }
+                    else
+                    {
+                        requestInfo.onResponse?.Invoke(null);
+                    }
+                }
+            }
+            else
+            {
+                Debug.LogError("useTool 未初始化");
+                requestInfo.onError?.Invoke("工具处理器未初始化");
+            }
+        }
+        else
+        {
+            var assistantMessage = new DeepSeekMessage() {
+                role = "assistant",
+                reasoning_content = final_thinking.ToString(),
+                content = final_content.ToString()
+            };
+
+            if (requestInfo.messages.Count > 0 && requestInfo.messages[^1].role == "assistant")
+            {
+                requestInfo.messages[^1] = assistantMessage;
+            }
+            requestInfo.onResponse?.Invoke(new() { assistantMessage.Clone });
+        }
+
+        toolCallArguments.Clear();
+        toolCalls.Clear();
         request.Dispose();
     }
 
@@ -949,7 +899,7 @@ public class AIRequest : MonoBehaviour
     /// <param name="systemMessage">不写默认原始系统消息</param>
     /// <param name="characterSetting">不写默认原始角色设定消息</param>
     /// <returns></returns>
-    public List<DeepSeekMessage> GetOptimizedContext(List<DeepSeekMessage> _message, bool thinking, int maxTokens = -1)
+    public static List<DeepSeekMessage> GetOptimizedContext(List<DeepSeekMessage> _message, bool thinking, int maxTokens = -1)
     {
         //MaxTokens == -2 代表全部取用
         if (maxTokens == -1) maxTokens = MaxTokens;
@@ -1064,14 +1014,14 @@ public class AIRequest : MonoBehaviour
     /// <param name="optimized">输入的列表</param>
     /// <param name="all">要插入的系统消息</param>
     /// <param name="lastcount">导数第几个插入</param>
-    public void InsertSystemMessages(List<DeepSeekMessage> optimized, List<string> all)
+    public static void InsertSystemMessages(List<DeepSeekMessage> optimized, List<string> all)
     {
         for (int i = all.Count - 1; i > -1; i--)
         {
             optimized.Insert(0, new DeepSeekMessage("system", all[i]));
         }
     }
-    public void InsertUserMessages(List<DeepSeekMessage> optimized, List<string> all, int index = 0)
+    public static void InsertUserMessages(List<DeepSeekMessage> optimized, List<string> all, int index = 0)
     {
         for (int i = all.Count - 1; i > -1; i--)
         {

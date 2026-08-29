@@ -56,6 +56,7 @@ public class MapConfig : MonoBehaviour
     public float TowelTimes = 0.1f;
     public float BallTimes = 0.1f;
     public float BulletTimes = 0.2f;
+    public float DarkTimes = -0.1f;
 
     [Header("Physics")]
     public float BulletImpactForce = 0.1f;
@@ -71,7 +72,7 @@ public class MapConfig : MonoBehaviour
     [Header("Bounce")]
     public float bounceRate = 0.5f;
 
-    public enum ColorStage { Default, Towel, Ball, Bullet }
+    public enum ColorStage { Default, Towel, Ball, Bullet,Dark }
 
     public Color GetColor(int stage, ColorStage kind = ColorStage.Default)
     {
@@ -82,6 +83,7 @@ public class MapConfig : MonoBehaviour
             case ColorStage.Towel: c += TowelTimes * Color.white; break;
             case ColorStage.Ball: c += BallTimes * Color.white; break;
             case ColorStage.Bullet: c += BulletTimes * Color.white; break;
+            case ColorStage.Dark: c += DarkTimes * Color.white; break;
         }
         c.a = 1;
         return c;
@@ -91,7 +93,7 @@ public class MapConfig : MonoBehaviour
     public bool useAIDecision = false;
 
     [Header("Props")]
-    public int propLimit = 5;
+    public int propLimit = 0;
     public List<PropEntry>[] teamProps;
 
     //监听道具入栈出栈
@@ -116,7 +118,7 @@ public class MapConfig : MonoBehaviour
             OnPropIn?.Invoke(new PropInfo(item, value, stage));
         }
         // 超出上限，自动使用最新存入的道具（栈顶）
-        while (teamProps[stage].Count >= propLimit || (!useAIDecision && teamProps[stage].Count > 0))
+        while (teamProps[stage].Count > propLimit || (!useAIDecision && teamProps[stage].Count > 0))
         {
             int last = teamProps[stage].Count - 1;
             var top = teamProps[stage][last];

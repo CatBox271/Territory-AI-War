@@ -4,6 +4,8 @@ using UnityEngine;
 
 public class TerritoryCanvas : MonoBehaviour
 {
+    public static TerritoryCanvas Instance { get; private set; }
+
     public ComputeShader initCompute;
     public ComputeShader paintCompute;
     public ComputeShader clearFlagCompute;
@@ -24,6 +26,7 @@ public class TerritoryCanvas : MonoBehaviour
     void Awake()
     {
         config = MapConfig.Instance;
+        Instance = this;
         dataRT = CreateRT();
         displayRT = CreateRT();
         flagRT = CreateRT(RenderTextureFormat.RFloat);
@@ -284,5 +287,6 @@ public class TerritoryCanvas : MonoBehaviour
         if (flagRT) flagRT.Release();
         if (bulletDisplayRT) bulletDisplayRT.Release();
         if (territoryMap.IsCreated) territoryMap.Dispose();
+        if (Instance == this) Instance = null;
     }
 }

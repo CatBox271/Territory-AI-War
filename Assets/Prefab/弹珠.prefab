@@ -197,7 +197,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   stage: 0
-  outlineWidth: 0.125
+  outlineWidth: 0.3
   enchantMaterial: {fileID: 2100000, guid: 1fe0d2d8d1ae7e4419d896c177788ae9, type: 2}
   Value2Size:
     serializedVersion: 2
@@ -212,6 +212,33 @@ MonoBehaviour:
       inWeight: 0
       outWeight: 0.14208515
     - serializedVersion: 3
+      time: 3.0138109
+      value: 0.23944943
+      inSlope: 0.018367685
+      outSlope: 0.018367685
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.17001508
+    - serializedVersion: 3
+      time: 8.48058
+      value: 0.28546974
+      inSlope: 0.00668619
+      outSlope: 0.00668619
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 10.069593
+      value: 0.29856634
+      inSlope: 0.01795201
+      outSlope: 0.01795201
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
       time: 20
       value: 0.4525604
       inSlope: 0.0088166585
@@ -221,13 +248,13 @@ MonoBehaviour:
       inWeight: 0.09438038
       outWeight: 0.230996
     - serializedVersion: 3
-      time: 27
-      value: 0.5
-      inSlope: 0.0028051129
-      outSlope: 0.0028051129
+      time: 30
+      value: 0.56
+      inSlope: 0.01299267
+      outSlope: 0.01299267
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.31892285
+      inWeight: 0.28417912
       outWeight: 0.33333334
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -506,7 +533,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 354M
+  m_text: 4M
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: f3328a2926ae3994a94a47ab095aa740, type: 2}
   m_sharedMaterial: {fileID: -7073026908005886744, guid: f3328a2926ae3994a94a47ab095aa740, type: 2}
@@ -533,8 +560,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 8.78
-  m_fontSizeBase: 8.78
+  m_fontSize: 8.95
+  m_fontSizeBase: 8.95
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 18

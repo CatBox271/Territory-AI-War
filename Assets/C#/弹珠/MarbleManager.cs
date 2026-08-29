@@ -80,7 +80,7 @@ public class MarbleManager : MonoBehaviour
             m.stage = stage;
             m.SetInitialValue(startValueExponent);
             //注册到InformGeter供AI数据收集
-            InformGeter.AddMarble(stage, m);
+            InformGetter.AddMarble(stage, m);
         }
 
         if (shooterComp != null)

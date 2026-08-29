@@ -7,7 +7,9 @@ public class MessageDisplayer : MonoBehaviour
 
     [Header("圆形布局")]
     public float circleRadius = 2f;
-
+    [Header("字体显示速度")]
+    public float charDuration = 0.1f;
+    public float charInterval = 0.01f;
     private TextMeshPro _text;
     private FieldArrivalModifier _anim;
     private Transform _textPool;
@@ -33,6 +35,9 @@ public class MessageDisplayer : MonoBehaviour
 
         _text.text = content;
         _text.alpha = 1f;
+
+        _anim.charDuration = charDuration;
+        _anim.charInterval = charInterval;
 
         Vector3 circlePoint = CircleIntersection(transform.position);
         _text.transform.position = circlePoint;

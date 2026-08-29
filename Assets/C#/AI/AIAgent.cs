@@ -12,140 +12,68 @@ using System;
 /// </summary>
 public class AIAgent : MonoBehaviour
 {
+    #region 视频流程
+    
+    [SerializeField] private float _frame_rate = 60;
     [SerializeField] private float _cycleInterval = 2f;
-    private AIRequest _aiRequest;
-    [SerializeField] private MessageDisplayer _messageDisplayer;
 
-    private const string API_URL = "https://api.deepseek.com/chat/completions";
-    private const string MODEL = "deepseek-v4-flash";
-
-    private bool _isRunning;
+    public static bool _isRunning;
     private bool _isWaiting;
-    private MonoCharacter[] _characters;
     private int _round;
     private bool _start = false;
-    private string _apiKey = "";
-    private string _lastReply = "";
 
-    #region 初始化
-
-    //工具
-    private static readonly Tool[] TOOLS = new[]
-    {
-        new Tool
-        {
-            type = "function",
-            function = new Function
-            {
-                name = "shout_to_other",
-                description = "向另一个AI喊话, 用于挑衅、结盟、威胁等。",
-                parameters = new Dictionary<string, object>
-                {
-                    ["type"] = "object",
-                    ["properties"] = new Dictionary<string, object>
-                    {
-                        ["target"] = new Dictionary<string, object> { ["type"] = "integer", ["description"] = "目标AI编号(1-4)，不能是自己" },
-                        ["message"] = new Dictionary<string, object> { ["type"] = "string", ["description"] = "喊话内容，最多20字" }
-                    },
-                    ["required"] = new[] { "target", "message" }
-                }
-            }
-        }
-    };
-    //初始设定
-    private static readonly string[] PERSONALITIES =
-    {
-        "你是1号AI，性格好斗激进，喜欢挑衅其他AI。你说话简短有力，经常用感叹号。",
-        "你是2号AI，性格谨慎保守，说话总是犹豫不决。你喜欢分析利弊",
-        "你是3号AI，性格圆滑世故，喜欢结盟和谈条件。你说话礼貌但暗藏心机。",
-        "你是4号AI，性格混乱不可预测，经常说莫名其妙的话。你喜欢打断别人，说话跳跃。",
-    };
-    //初始名字
-    private static readonly string[] NAMES = { "1号", "2号", "3号", "4号" };
-
-    void SetDefaultSetting()
-    {
-        _characters = new MonoCharacter[4];
-        for (int i = 0; i < 4; i++)
-        {
-            _characters[i] = new();
-            _characters[i].Creat(NAMES[i], PERSONALITIES[i]);
-        }
-    }
-
-    private string LoadApiKey()
+    private static string LoadApiKey()
     {
         var keyPath = Path.Combine(Application.persistentDataPath, "Key.txt");
         if (File.Exists(keyPath))
-        {
-            var key = File.ReadAllText(keyPath).Trim();
-            print($"[AIAgent] API key loaded from {keyPath}");
-            return key;
-        }
+            return File.ReadAllText(keyPath).Trim();
 
         Debug.LogError($"[AIAgent] Key.txt not found at {keyPath}");
         return "";
     }
 
-    private void Awake()
-    {
-        _apiKey = LoadApiKey();
-        if (_aiRequest == null)
-            _aiRequest = GetComponent<AIRequest>() ?? FindObjectOfType<AIRequest>();
-        SetDefaultSetting();
-    }
-
-    #endregion
-
-    #region 循环控制
     private void Start()
     {
         CapturePause.Capture = GetComponent<RenderHeads.Media.AVProMovieCapture.CaptureBase>() ?? FindObjectOfType<RenderHeads.Media.AVProMovieCapture.CaptureBase>();
-        _aiRequest = AIRequest.Instance;
-        if (_messageDisplayer == null)
-            _messageDisplayer = FindObjectOfType<MessageDisplayer>();
     }
 
     private void Update()
     {
+        StartCycle();
+    }
 
+    public void StartCycle()
+    {
         if (CapturePause.IsCapturing)
         {
             if (!_start)
             {
                 _start = true;
-                StartCycle();
+                if (_isRunning) return;
+                _isRunning = true;
+                _round = 0;
+                RunCycleLoop();
             }
         }
-    }
-
-    private void OnDestroy()
-    {
-        _isRunning = false;
-    }
-    public void StartCycle()
-    {
-        if (_isRunning) return;
-        if (string.IsNullOrEmpty(_apiKey)) return;
-        _isRunning = true;
-        _round = 0;
-        RunCycleLoop();
     }
     public void StopCycle()
     {
         _isRunning = false;
     }
 
-    #endregion
-
     private async void RunCycleLoop()
     {
         while (_isRunning)
         {
-            print($"[AIAgent] Round {_round + 1}  rendering for {_cycleInterval}s");
-            await Task.Delay((int)(_cycleInterval * 1000));//实际判断延迟
-            if (!_isRunning) break;
+            //每间隔视频的一段_cycleInterval时间暂停
+            //如果这里就开始数据收集呢？
+            var tcs = new TaskCompletionSource<bool>();
+            TestAIAsyncWithRecord(() => { tcs.SetResult(true); });
+            await WaitInterval(_cycleInterval);
 
+            print($"[AIAgent] Round {_round + 1}  rendering for {_cycleInterval}s");
+
+            if (!_isRunning) break;
             if (_isWaiting)
             {
                 print("[AIAgent] Previous round still waiting, skipping");
@@ -156,156 +84,187 @@ public class AIAgent : MonoBehaviour
             _round++;
 
             CapturePause.Pause();
-            //实际执行
+            //past实际执行
+            //await RunAIAnalysic(null);
 
-            for (int i = 0; i < _characters.Length; i++)
-            {
-                if (!_isRunning) break;
-
-                var character = _characters[i];
-                var situation = new StringBuilder();
-                InformGeter.GetInfo(situation, i + 1);
-                character.AddContent("当前战局：\n" + situation, "user");
-
-                bool ok = await RequestAIAsync(character);
-                if (!ok) Debug.LogWarning($"[AIAgent] {character.ai_name} 请求失败");
-            }
+            await tcs.Task;
+            //等它完成
 
             CapturePause.Resume();
             _isWaiting = false;
         }
     }
-
-    private void OnGUI()
+    private void TestAIAsyncWithRecord(Action complete)
     {
-        if (string.IsNullOrEmpty(_lastReply)) return;
-
-        GUI.color = Color.white;
-        GUI.backgroundColor = new Color(0f, 0f, 0f, 0.6f);
-        GUI.Box(new Rect(10f, 10f, 700f, 60f), _lastReply);
+        _ = RunAIAnalysic(complete);
     }
-    private void OnAIResponse(MonoCharacter character, List<DeepSeekMessage> msgs)
-    {
-        if (msgs == null || msgs.Count == 0) return;
 
-        foreach (var msg in msgs)
-        {
-            if (msg == null) continue;
-
-            if (!string.IsNullOrEmpty(msg.reasoning_content))
-                print($"[AIAgent] {character.ai_name} 思考: {msg.reasoning_content}");
-
-            if (!string.IsNullOrEmpty(msg.content))
-            {
-                print($"[AIAgent] {character.ai_name} 回复: {msg.content}");
-                _lastReply = $"{character.ai_name}: {msg.content}";
-                if (_messageDisplayer != null)
-                    _messageDisplayer.Say(msg.content);
-            }
-        }
-    }
-    private Task<bool> RequestAIAsync(MonoCharacter character)
+    //启动一个seconds协程，因为async的delay是渲染花的实际时间不是游戏内时间
+    private async Task WaitInterval(float seconds)
     {
         var tcs = new TaskCompletionSource<bool>();
-
-        var request = new DeepSeekRequest
+        StartCoroutine(TimeClock(seconds,() => 
         {
-            model = MODEL,
-            stream = false,
-            thinking = new ThinkingConfig(true),
-            reasoning_effort = "high",
-            messages = character.messages,
-            tools = new List<Tool>(TOOLS)
-        };
-
-        var requestInfo = new RequestInfo(
-            request,
-            msgs =>
-            {
-                OnAIResponse(character, msgs);
-                tcs.TrySetResult(true);
-            },
-            error =>
-            {
-                Debug.LogError($"[AIAgent] {character.ai_name} 请求错误: {error}");
-                tcs.TrySetResult(false);
-            },
-            new AIAgentToolkit(this),
-            true)
-        {
-            apiUrl = API_URL,
-            apiKey = _apiKey
-        };
-
-        _aiRequest.SendRequest(requestInfo);
-        return tcs.Task;
+            tcs.SetResult(true);
+        }));
+        await tcs.Task;
+    }
+    //游戏内时间
+    IEnumerator TimeClock(float seconds,Action end)
+    {
+        yield return new WaitForSeconds(seconds);
+        end?.Invoke();
     }
 
-    private class AIAgentToolkit : Itool
+    private void OnDestroy()
     {
-        private readonly AIAgent _owner;
+        _isRunning = false;
+    }
 
-        public AIAgentToolkit(AIAgent owner)
+    //以后需要做个角色管理器
+
+    private CharacterCard TestCard = new("T-1", "你是一个战术推演机器", 1, "255|000|000|255", "https://api.deepseek.com/v1/chat/completions");
+
+    private async Task RunAIAnalysic(Action complete)
+    {
+        StringBuilder builder = new();
+        InformGetter.GetInfo(builder, TestCard.position);
+        await TestCard.SendRequest(builder.ToString());
+        complete?.Invoke();
+    }
+
+    #endregion
+
+    #region 实际执行
+
+    //先做一个角色卡
+
+    public class CharacterCard
+    {
+        private static string world = @"一、世界观： 1.在数字世界的大陆上，纷争、冲突蔓延着。为了掌握世界，各色各种性格的领袖，将使用不同的攻击、防御方式、结盟或中立、亦或者按兵不动的外交策略，达成击败所有敌人的最终目的并让自己的领地颜色填满大陆。
+二、地图和玩家： 1.地图为1024*1024像素即1M的正方形区域，地图的每一角都有一个玩家，共四位，你是其中一位。
+三、底层逻辑： 1.同队数值叠加，敌方数值抵消。
+四、填色机制： 1.地图的每一个像素代表单位1，当你发射大球或者子弹时大球和子弹的数值会等量的涂抹在地图上，当数值涂抹完道具就消失。 2.大球会吸收子弹，同队子弹会叠加到大球的数值上，敌方子弹会抵消大球的数值。大球数值越大面积越大，质量越大速度越慢。 3.每个玩家都有一个护盾，护盾能物理阻挡敌方子弹和大球，也遵循【三】，护盾不会阻挡自己的大球和子弹。 4.当敌人攻击到你的炮塔时，你立刻毙命。
+五、弹珠台： 弹珠台中每队会有等量的弹珠，从8开始。当弹珠经过障碍落入倍乘区后，弹珠的数值会更具落入的区域×2、×4、×8,其中×2面积最大，×8最小，倍乘后弹珠会回到上方初始位置重新滚落。 当弹珠经过中间落到道具选择区后，你就能选择并获得一个根据弹珠数值的道具了。
+六、道具选择及使用：(无)
+七、领土面积说明 0号阵营是默认的无主领土,不必在意。
+
+你要做什么：
+1.你的一切信息都是滞后10s的，你要用过时的信息，做出超前的决策。
+2.你的思考时间充裕，游戏会在你思考的时候暂停，但是你收到的已经是10s前的信息了。
+";
+        private static string character_mode_prompt = @"【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
+1. 请以角色第一人称进行内心独白，用括号包裹内心活动，例如“（心想：……）”或“(内心OS：……)”
+2. 用第一人称描写角色的内心感受，例如“我心想”“我觉得”“我暗自”等
+3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复
+
+在你的思考过程外，正式回答content内：
+不要出现你的任何思考的心里话！
+你的content内容限制为50字以内。
+只需纯文本和emoji，
+禁止markdown或者富文本
+";
+
+        public string name = "";
+        public string oc = "";
+        public string url = "";
+        public int position = -1;//地图上的位置//派系记得告诉AI
+        public string color;//派系颜色,000~255 RGBA中间|分割，完整的为如122|122|122|255，
+        public DeepSeekRequest request = new() {
+            
+        };
+        [JsonIgnore]//这样应该不会重复
+        public List<DeepSeekMessage> history = new();
+        public CharacterCard() { }
+
+        public CharacterCard(string name,string oc,int position, string color,string url)
         {
-            _owner = owner;
+            this.name = name;
+            this.oc = oc;
+            this.position = position;
+            this.color = color;
+            this.url = url;
+            Reset();
         }
 
-        public IEnumerator DealToolCallsCoroutine(List<ToolCall> toolCalls, Action<List<DeepSeekMessage>> onComplete)
+        public void Reset()
         {
-            var results = new List<DeepSeekMessage>();
-            foreach (var tc in toolCalls)
-            {
-                string resultText;
-                try
+            history.Clear();
+            history.Add(new DeepSeekMessage("system", $"{world}\n\n你叫{name}\n{oc}\n\n{character_mode_prompt}"));
+            request.messages = history;
+        }
+
+        public async Task SendRequest(string inform)
+        {
+            history.Add(new DeepSeekMessage("user", inform));
+            //结果等待器
+            var tcs = new TaskCompletionSource<bool>();
+
+            RequestInfo info = new(
+                request,
+                msgs =>
                 {
-                    var args = JsonConvert.DeserializeObject<Dictionary<string, object>>(tc.function.arguments ?? "{}") ?? new Dictionary<string, object>();
-                    switch (tc.function.name)
+                    ReceiveResponse(msgs);   // 在这里解析
+                    tcs.TrySetResult(true);
+                },
+                error =>
+                {
+                    ReceiveError(error);
+                    tcs.TrySetResult(false);
+                });
+
+            info.apiKey = AIAgent.LoadApiKey();
+            info.apiUrl = url;
+
+            try
+            {
+                AIRequest.SendRequest(info);
+            }
+            catch (Exception ex)
+            {
+                ReceiveError(ex.Message);
+                tcs.TrySetResult(false);
+                return;
+            }
+            await tcs.Task;
+            Save();
+        }
+
+        private void ReceiveResponse(List<DeepSeekMessage> messages)
+        {
+            if (!_isRunning) return;
+            foreach (DeepSeekMessage message in messages)
+            {
+                if (message.role == "assistant")
+                {
+                    var all_towel = Towel.AllTowel;
+                    if (all_towel.TryGetValue(position, out Towel towel))
                     {
-                        case "shout_to_other":
-                            int target = args.TryGetValue("target", out var targetObj) ? System.Convert.ToInt32(targetObj) : 0;
-                            string message = args.TryGetValue("message", out var msgObj) ? System.Convert.ToString(msgObj) : "";
-                            _owner.Shout(target, message);
-                            resultText = "ok";
-                            break;
-                        default:
-                            resultText = "unknown tool: " + tc.function.name;
-                            break;
+                        towel.Say(message.content);
                     }
                 }
-                catch (System.Exception ex)
-                {
-                    resultText = "error: " + ex.Message;
-                }
-
-                results.Add(new DeepSeekMessage("tool", resultText) { tool_call_id = tc.id });
             }
-
-            onComplete?.Invoke(results);
-            yield break;
         }
-    }
-
-    private void Shout(int target, string message)
-    {
-        if (target < 1 || target > _characters.Length)
+        private void ReceiveError(string error)
         {
-            Debug.LogWarning($"[AIAgent] 无效目标 {target}");
-            return;
+            Debug.LogError("AI请求错误:"+error);
         }
-
-        _characters[target - 1].AddContent(message);
-    }
-
-
-    /// <summary>将喊话内容注入其他人的 history</summary>
-    private void Broadcast(string content)
-    {
-        foreach (var mono in _characters)
+        #region SL
+        public void Save()
         {
-            mono.AddContent(content);
+            SLManager.ExportToJson(this, "Characters", name);
         }
+        public static bool Load(string name,out CharacterCard card)
+        {
+            card = SLManager.ImportFromJson<CharacterCard>("Characters", name);
+            if (card.request.messages != null)
+            {
+                card.history = card.request.messages;
+            }
+            if (card == null) return false;
+            return true;
+        }
+        #endregion
     }
-
-
-
+    #endregion
 }

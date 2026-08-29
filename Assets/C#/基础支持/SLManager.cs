@@ -41,9 +41,6 @@ public class SLManager : MonoBehaviour
             string actualFileName = string.IsNullOrEmpty(fileName) ?
                 GenerateDefaultFileName() : fileName;
 
-            if (!actualFileName.EndsWith(".json"))
-                actualFileName += ".json";
-
             string basePath = persistentDataPath;
 
             if (!string.IsNullOrEmpty(folderPath))
