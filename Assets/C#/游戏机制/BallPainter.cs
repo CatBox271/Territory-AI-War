@@ -17,6 +17,14 @@ public class BallPainter : MonoBehaviour, IStageValue
     public CurveTransform AcelerationCurve;
     public TrailRenderer TR;
 
+    [Header("速度控制")]
+    [Tooltip("从0加速到目标速度的时间")]
+    public float fastA;
+    [Tooltip("基于从0加速到目标速度计算所得的加速度，不过是负的")]
+    public float slowA;
+    [Tooltip("受击加速暂停")]
+    public float hurt_fast_pause;
+
     private TerritoryCanvas canvas;
     private MapConfig config;
     private Vector2 lastWorldPos;
@@ -67,7 +75,7 @@ public class BallPainter : MonoBehaviour, IStageValue
 
         if (curSpeed < aimSpeed)
             rb.AddForce(dir * rb.mass * AcelerationCurve.Evaluate(value));
-        else if (curSpeed > aimSpeed * 1.25f)
+        else if (curSpeed > aimSpeed)
             rb.AddForce(dir * rb.mass * (aimSpeed - curSpeed) * 0.25f);
 
         Vector2 cur = transform.position;

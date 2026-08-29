@@ -173,7 +173,7 @@ public class DeepSeekRequest
     public bool stream = false;
     public string reasoning_effort;
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-    public ThinkingConfig thinking = new(false);
+    public ThinkingConfig thinking = new(true);
 
     public bool ShouldSerializethinking()
     {
@@ -627,19 +627,24 @@ public static class AIRequest
 
     public static void SendRequest(RequestInfo requestInfo)
     {
+        // 在发送副本上做字段裁剪，绝不修改 CharacterCard 的 history。
+        // 否则每次发送都会把历史 assistant 消息的 reasoning_content 清空，
+        // 保存时只会剩下最后一条思考。
+        DeepSeekRequest outgoingRequest = requestInfo.request.DeepCopy();
+
         // 非 DeepSeek 模型去掉专属/不支持字段
-        bool isDeepSeek = requestInfo.request.model.ToLower().Contains("deepseek");
+        bool isDeepSeek = outgoingRequest.model.ToLower().Contains("deepseek");
         if (!isDeepSeek)
         {
-            requestInfo.request.thinking = null;
-            requestInfo.request.reasoning_effort = null;
-            requestInfo.request.tools = null;
-            requestInfo.request.tool_choice = null;
+            outgoingRequest.thinking = null;
+            outgoingRequest.reasoning_effort = null;
+            outgoingRequest.tools = null;
+            outgoingRequest.tool_choice = null;
         }
 
-        // 统一 reasoning_content：thinking 开启时补空，关闭时清掉
-        bool thinkingOn = requestInfo.request.thinking != null && requestInfo.request.thinking.type == "enabled";
-        foreach (var msg in requestInfo.request.messages)
+        // 统一 reasoning_content：thinking 开启时补空，关闭时清掉（只改发送副本）
+        bool thinkingOn = outgoingRequest.thinking != null && outgoingRequest.thinking.type == "enabled";
+        foreach (var msg in outgoingRequest.messages)
         {
             if (msg.role == "assistant")
             {
@@ -650,7 +655,7 @@ public static class AIRequest
             }
         }
 
-        string jsonData = JsonConvert.SerializeObject(requestInfo.request, json_serializer_settings);
+        string jsonData = JsonConvert.SerializeObject(outgoingRequest, json_serializer_settings);
 
         //判断流式
         if (requestInfo.request.stream)
