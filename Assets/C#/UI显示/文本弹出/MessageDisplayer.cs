@@ -33,6 +33,9 @@ public class MessageDisplayer : MonoBehaviour
             _anim = go.GetComponent<FieldArrivalModifier>();
         }
 
+        var towel = GetComponentInParent<Towel>();
+        if (towel != null && MapConfig.Instance != null)
+            _text.color = MapConfig.Instance.GetColor(towel.stage, MapConfig.ColorStage.Bullet);
         _text.text = content;
         _text.alpha = 1f;
 

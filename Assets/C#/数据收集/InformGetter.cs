@@ -19,6 +19,10 @@ public class InformGetter : MonoBehaviour
     //guid → Transform 全局查找表，供AI指令通过guid定位对象
     public static Dictionary<string, Transform> GuidToTransform = new();
 
+    // 伤害统计子系统：target 阵营 -> (source 阵营 -> 伤害值)。
+    // 阵营私有：GetInfo 只输出请求方自己的受击统计，输出完成后整体清空。
+    public static Dictionary<int, List<DamageSourceInfo>> DamageStats = new();
+
     #region 注册
     //注册一个新弹珠，由MarbleManager在生成时调用
     public static void AddMarble(int stage, Marble m)
@@ -40,10 +44,33 @@ public class InformGetter : MonoBehaviour
                 GuidToTransform[item.guid] = item.item;
         }
     }
+
+    /// <summary>记录一次伤害：targetStage 是受击方，sourceStage 是伤害来源。</summary>
+    public static void AddDamage(int targetStage, int sourceStage, string sourceGuid, string sourceDesc, HugeInt damage)
+    {
+        if (targetStage == sourceStage || damage <= 0) return;
+
+        if (!DamageStats.TryGetValue(targetStage, out var list))
+        {
+            list = new List<DamageSourceInfo>();
+            DamageStats[targetStage] = list;
+        }
+
+        DamageSourceInfo entry = list.Find(e => e.sourceStage == sourceStage && e.sourceGuid == sourceGuid && e.sourceDesc == sourceDesc);
+        if (entry == null)
+        {
+            entry = new DamageSourceInfo { sourceStage = sourceStage, sourceGuid = sourceGuid, sourceDesc = sourceDesc, damage = 0 };
+            list.Add(entry);
+        }
+        entry.damage += damage;
+    }
     #endregion
     //获得目标stage能获得的全部信息
     public static void GetInfo(StringBuilder builder, int stage)
     {
+        //自己的道具栈放最前面，AI 第一眼就能看到
+        GetInfoProp(builder, stage);
+
         //全局可见信息
         foreach (var key in Oitems.Keys)
         {
@@ -55,8 +82,10 @@ public class InformGetter : MonoBehaviour
             if (key != stage) continue;
             GetInfoMarble(builder, key);
         }
-        GetInfoProp(builder, stage);
+        AppendUpgradeProgress(builder, stage);
         AppendTerritoryArea(builder);
+        AppendDamageInfo(builder, stage);
+        ClearDamageStats();
     }
 
     #region 领土面积
@@ -103,6 +132,46 @@ public class InformGetter : MonoBehaviour
     }
     #endregion
 
+
+    /// <summary>把请求方自己受到的伤害统计拼进 AI 上下文（阵营私有）。</summary>
+
+    /// <summary>附加请求方自己的弹珠升级进度（空槽升级）。</summary>
+    private static void AppendUpgradeProgress(StringBuilder builder, int stage)
+    {
+        var mm = MarbleManager.Instance;
+        if (mm == null || !mm.TryGetUpgradeInfo(stage, out float progress, out float cost)) return;
+
+        builder.AppendLine(); builder.Append("{");
+        builder.Append("当前己方弹珠升级进度: ");
+        builder.Append(progress.ToString("0.#"));
+        builder.Append(" / ");
+        builder.Append(cost.ToString("0.#"));
+        builder.AppendLine(); builder.Append("}");
+    }
+    private static void AppendDamageInfo(StringBuilder builder, int stage)
+    {
+        if (!DamageStats.TryGetValue(stage, out var list) || list.Count == 0) return;
+
+        builder.AppendLine(); builder.Append("{");
+        builder.Append(stage); builder.Append("号阵营受击统计: ");
+        foreach (var entry in list)
+        {
+            builder.AppendLine(); builder.Append("(");
+            builder.Append("来源 "); builder.Append(entry.sourceDesc);
+            if (!string.IsNullOrEmpty(entry.sourceGuid))
+            {
+                builder.Append(" guid:"); builder.Append(entry.sourceGuid);
+            }
+            builder.Append(" 伤害 "); builder.Append(entry.damage.ToShortString());
+            builder.Append(")");
+        }
+        builder.AppendLine(); builder.Append("}");
+    }
+
+    public static void ClearDamageStats()
+    {
+        DamageStats.Clear();
+    }
     #region 收集整合
     //获得目标key的信息
     private static void GetInfoOKey(StringBuilder builder, int key)
@@ -163,7 +232,7 @@ public class InformGetter : MonoBehaviour
         var props = MapConfig.Instance.teamProps[stage];
         if (props.Count <= 0) return;
         builder.AppendLine(); builder.Append("{");
-        builder.Append(stage); builder.Append("号阵营道具栈: ");
+        builder.Append("当前己方道具栈(上限:"); builder.Append(MapConfig.Instance.propLimit); builder.Append("): ");
         foreach (var p in props)
         {
             builder.AppendLine(); builder.Append("(");
@@ -180,7 +249,17 @@ public class InformGetter : MonoBehaviour
         Iitems = new();
         MarbleItems = new();
         GuidToTransform = new();
+        DamageStats = new();
     }
+}
+
+
+public class DamageSourceInfo
+{
+    public int sourceStage;
+    public string sourceGuid = "";
+    public string sourceDesc = "";
+    public HugeInt damage = 0;
 }
 
 //接下来实际的获取逻辑在InformGeter里，ItemPos不需要任何计算。
@@ -236,7 +315,7 @@ public class ItemType //对象类
     {
         //自动生成一个guid
         kind = OutputMode.Full;
-        guid = System.Guid.NewGuid().ToString("N");
+        guid = ((uint)Iitem.GetInstanceID()).ToString("x8");
         description = Idescription;
         item = Iitem;
         stageValue = IstageValue;
@@ -318,7 +397,7 @@ public class MarbleType
 
     public MarbleType(Marble m)
     {
-        guid = System.Guid.NewGuid().ToString("N");
+        guid = ((uint)m.gameObject.GetInstanceID()).ToString("x8");
         stage = m.stage;
         valueExponent = m.ValueExponent;
         valueStr = HugeInt.Pow(2, (int)valueExponent).ToShortString();

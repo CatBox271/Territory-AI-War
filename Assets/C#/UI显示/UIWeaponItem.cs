@@ -141,6 +141,13 @@ public class UIWeaponItem : MonoBehaviour
     }
 
     /// <summary>锁定状态：名字=锁定，数值=剩余解锁倒计时，并播放入场。锁定态不加特效。</summary>
+
+    /// <summary>设置名字/数值文字颜色（由 WeaponsDisplayer 按阵营传入）。</summary>
+    public void SetTextColor(Color color)
+    {
+        if (nameText != null) nameText.color = color;
+        if (valueText != null) valueText.color = color;
+    }
     public void SetLocked(string timeText)
     {
         if (nameText != null) nameText.text = "锁定";

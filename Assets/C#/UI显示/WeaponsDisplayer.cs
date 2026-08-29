@@ -95,6 +95,7 @@ public class WeaponsDisplayer : MonoBehaviour
 
         Color campColor = config.GetColor(camp, MapConfig.ColorStage.Dark);
 
+
         for (int a = 0; a < list.Count; a++)
         {
             SpriteRenderer sr = list[a].sp;

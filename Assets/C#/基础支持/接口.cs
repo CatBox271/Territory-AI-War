@@ -6,6 +6,9 @@ using UnityEngine;
 public interface IStageValue
 {
     public int stage { get; set; }
+    public int hurtSourceStage { get; set; }
+    public string hurtSourceGuid { get; set; }
+    public string hurtSourceDesc { get; set; }
     public HugeInt value { get; set; }
 
     public void WhileBeHit(int _stage, HugeInt _value);
@@ -16,10 +19,13 @@ public interface IStageValue
         value = _value;
     }
 
-    public HugeInt Hit(int _stage, HugeInt _value)
+    public HugeInt Hit(int _stage, HugeInt _value, string sourceGuid = "", string sourceDesc = "")
     {
         HugeInt cost = 0;
         if (stage == _stage) return cost;
+        hurtSourceStage = _stage;
+        hurtSourceGuid = sourceGuid;
+        hurtSourceDesc = sourceDesc;
         if (value > _value)
         {
             cost = _value;
@@ -32,6 +38,7 @@ public interface IStageValue
             WhileBeHit(_stage, cost);
             value = 0;
         }
+        InformGetter.AddDamage(stage, _stage, sourceGuid, sourceDesc, cost);
         return cost;
     }
 
