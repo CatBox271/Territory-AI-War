@@ -7,6 +7,7 @@ public class MessageDisplayer : MonoBehaviour
 
     [Header("圆形布局")]
     public float circleRadius = 2f;
+    public Vector3 relativePos = new();
     [Header("字体显示速度")]
     public float charDuration = 0.1f;
     public float charInterval = 0.01f;
@@ -55,6 +56,10 @@ public class MessageDisplayer : MonoBehaviour
     {
         Vector3 dir = center.normalized;
         if (dir.sqrMagnitude < 0.0001f) dir = Vector3.up;
-        return center - dir * circleRadius;
+        Vector3 r = relativePos;
+        //以第一个左上角为初始
+        if (center.x > 0) r.x *= -1;
+        if (center.y < 0) r.y *= -1;
+        return center - dir * circleRadius + r;
     }
 }

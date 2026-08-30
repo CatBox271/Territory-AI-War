@@ -1428,6 +1428,7 @@ GameObject:
   - component: {fileID: 166247402}
   - component: {fileID: 166247401}
   - component: {fileID: 166247400}
+  - component: {fileID: 166247403}
   m_Layer: 5
   m_Name: Circle (15)
   m_TagString: Untagged
@@ -1551,6 +1552,50 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &166247403
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 166247398}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5eb513894db6bad49a38f98d191fe8b2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Xscale: -0.4
+  Yscale: 1
+  X:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0.11197035
+      outSlope: 0.11197035
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.0751913
+    - serializedVersion: 3
+      time: 15
+      value: 1
+      inSlope: 0.21043251
+      outSlope: 0.21043251
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.039024927
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  Y:
+    serializedVersion: 2
+    m_Curve: []
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &178326152
 GameObject:
   m_ObjectHideFlags: 0
@@ -10350,9 +10395,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speed: 173
+  guard_speed: 1800
   angleRange: {x: -90, y: 90}
   loop: 0
   active: 1
+  guardMode: 1
+  guardRadius: 4
+  guardUpdateInterval: 0.2
+  guardCompute: {fileID: 0}
 --- !u!4 &1797298655 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8992258395687461325, guid: 72cefbcffba962c4d803cefc4233cde3, type: 3}
@@ -11724,6 +11774,7 @@ GameObject:
   - component: {fileID: 2028775388}
   - component: {fileID: 2028775387}
   - component: {fileID: 2028775386}
+  - component: {fileID: 2028775389}
   m_Layer: 5
   m_Name: Circle (6)
   m_TagString: Untagged
@@ -11847,6 +11898,50 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &2028775389
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2028775384}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5eb513894db6bad49a38f98d191fe8b2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Xscale: 0.4
+  Yscale: 1
+  X:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0.11197035
+      outSlope: 0.11197035
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.0751913
+    - serializedVersion: 3
+      time: 15
+      value: 1
+      inSlope: 0.21043251
+      outSlope: 0.21043251
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.039024927
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  Y:
+    serializedVersion: 2
+    m_Curve: []
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &2053489139
 GameObject:
   m_ObjectHideFlags: 0

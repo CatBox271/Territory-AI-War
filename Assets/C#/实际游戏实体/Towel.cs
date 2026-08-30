@@ -251,9 +251,6 @@ public class Towel : MonoBehaviour, IStageValue
         }
         var rb = ob.GetComponent<Rigidbody2D>();
         if (rb != null) {
-        var dv = ob.GetComponentInChildren<DisplayValue>();
-        if (dv != null)
-            dv.SetOutline(Color.black, 0.2f);
 
                 rb.velocity = transform.up * bigBallSpeed;
         }

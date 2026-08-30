@@ -7,7 +7,7 @@ public class AimController : MonoBehaviour
 {
     public AutoRotater auto;
     public Towel towel;
-    private float MaxDis = 4f;
+    public float MaxDis = 4f;
     private float SqrDis;
     private float MaxAimTime = 12f;
     ItemType aim;

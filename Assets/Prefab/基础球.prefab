@@ -325,6 +325,7 @@ MonoBehaviour:
   rb: {fileID: 3767908013893368130}
   col: {fileID: 6864175156454396675}
   <stage>k__BackingField: 2
+  guid: 
   baseWorldRadius: 0.5
   attackPower: 1
   ScaleChangeSpeed: 3
@@ -431,6 +432,9 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   TR: {fileID: 622875075528979609}
+  fastA: 0
+  slowA: 0
+  hurt_fast_pause: 0
 --- !u!114 &2128266677755943854
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -643,7 +647,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2180264, guid: 2e498d1c8094910479dc3e1b768306a4, type: 2}
+  - {fileID: 2100000, guid: 848fa083c80047bd93630b8b8d362087, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -688,7 +692,7 @@ MonoBehaviour:
   m_text: 16K
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 2e498d1c8094910479dc3e1b768306a4, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 2e498d1c8094910479dc3e1b768306a4, type: 2}
+  m_sharedMaterial: {fileID: 2100000, guid: 848fa083c80047bd93630b8b8d362087, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []

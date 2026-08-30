@@ -46,6 +46,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   MonoText: {fileID: 1804877961324344624, guid: 0ba1d4353aef04e45a93d48f4b1a2507, type: 3}
   circleRadius: 2.2
+  relativePos: {x: 0, y: -0.8, z: 0}
+  charDuration: 0.1
+  charInterval: 0.01
 --- !u!1 &1997610200187619198
 GameObject:
   m_ObjectHideFlags: 0
@@ -353,9 +356,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speed: 30
+  guard_speed: 180
   angleRange: {x: 0, y: 360}
   loop: 1
   active: 1
+  guardMode: 1
+  guardRadius: 2
+  guardUpdateInterval: 0.2
+  guardCompute: {fileID: 7200000, guid: b63ecda2ccb94b768325f38abd37093b, type: 3}
 --- !u!114 &7866295218095374167
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -370,6 +378,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   auto: {fileID: 618785998335546845}
   towel: {fileID: 6080560076359578667}
+  MaxDis: 4
 --- !u!1 &2721065759024970260
 GameObject:
   m_ObjectHideFlags: 0
@@ -583,7 +592,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 8da143643363403a83d5bf9a492ae90a, type: 2}
+  - {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -922,7 +931,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 8f9a7335535f4d30863f30f689485563, type: 2}
+  - {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

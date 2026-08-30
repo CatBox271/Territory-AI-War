@@ -1,0 +1,29 @@
+#pragma kernel CSFindNearest
+
+RWTexture2D<float2> DataResult;
+RWStructuredBuffer<uint> Result;
+uint _Resolution;
+int2 _SelfPos;
+int _SelfStage;
+int _RadiusPx;
+
+[numthreads(8, 8, 1)]
+void CSFindNearest(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= (int)_Resolution || (int)id.y >= (int)_Resolution) return;
+
+    int2 p = (int2)id.xy;
+    int2 d = p - _SelfPos;
+    int distSq = d.x * d.x + d.y * d.y;
+    if (distSq > _RadiusPx * _RadiusPx) return;
+
+    uint stage = (uint)(DataResult[p].r * 255.0 + 0.5);
+    if (stage == (uint)_SelfStage) return;
+
+    // 所有非本阵营领土（含 0 号黑色中立）都按距离平等竞争，谁近选谁
+    uint dist = (uint)round(sqrt((float)distSq));
+    if (dist >= 512u) dist = 511u;
+
+    uint key = (dist << 20) | ((uint)p.x << 10) | (uint)p.y;
+    InterlockedMin(Result[0], key);
+}
