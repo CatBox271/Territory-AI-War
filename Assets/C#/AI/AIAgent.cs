@@ -17,7 +17,6 @@ public class AIAgent : MonoBehaviour
     #region 视频流程
     
     [SerializeField] private float _cycleInterval = 2f;
-    public int speechBlockEvery = 2; // 每隔几轮禁止一次发言；2=允许禁止允许禁止
     private ReactionSystem reactionSystem;//行动系统：AI 工具在这里
 
 
@@ -494,7 +493,6 @@ cards.Add(new CharacterCard("耶罗",
 
 ## 行动与发言约束
 - 沉默指 content 极简克制（可用。。。或嗯。表达），游戏行动仍必须照常调用工具。
-- 系统会按节奏禁言某些轮次；被禁言轮次的内容不会公开给其他 AI。
 ";
         private static string character_mode_prompt = @"【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
 1. 请以角色第一人称进行内心独白，用括号包裹内心活动，例如“（心想：……）”或“(内心OS：……)”
@@ -719,10 +717,8 @@ cards.Add(new CharacterCard("耶罗",
         private const int k = 5;    // 保留最近完整轮数，与 last_round_index 的 5 对应
         private const float b = 30f; // DeepSeek 未命中/命中价格比
 
-        private int speechCounter;
         private bool openingRetryMode;
         private List<DeepSeekMessage> openingLastMessages;
-        private bool suppressSpeechRound;
         private int n_0_index = 1;//排除系统消息
         private List<int> last_round_index = new();
 
@@ -790,15 +786,6 @@ cards.Add(new CharacterCard("耶罗",
 
             last_round_index.Add(history.Count);
             if (last_round_index.Count > 5) last_round_index.RemoveAt(0);
-
-            // 每隔 speechBlockEvery 轮禁止一次发言：被禁止的轮次 content 不显示、不 Say，但工具照常。
-            suppressSpeechRound = speechCounter >= AIAgent.Instance.speechBlockEvery - 1;
-            if (suppressSpeechRound) speechCounter = 0;
-            else speechCounter++;
-            if (suppressSpeechRound)
-            {
-                inform += "\r\n\r\n【系统禁言】本轮是禁言轮（控制发言频率），content 不会公开，下轮也别引用。工具照常；无行动就 [skip]。";
-            }
 
             int startTokens = EstimateHistoryTokens(history);
             history.Add(new DeepSeekMessage("user", inform));
@@ -955,7 +942,6 @@ cards.Add(new CharacterCard("耶罗",
                 {
                     string content = message.content;
                     if (string.IsNullOrWhiteSpace(content)) continue;
-                    if (suppressSpeechRound) continue; // 本轮禁止公屏发言，不显示也不 Say
                     if (content.Contains("[skip]")) continue;
 
                     InformGetter.SetAIContent(position, content);
