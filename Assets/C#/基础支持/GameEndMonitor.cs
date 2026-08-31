@@ -3,7 +3,8 @@ using RenderHeads.Media.AVProMovieCapture;
 using UnityEngine;
 
 /// <summary>
-/// 地图涂满自动结束组件：
+/// 录制 + 地图涂满自动结束组件：
+/// 开局自动启动录制（CapturePause.Capture 未赋值时自动查找并回填）；
 /// 定期扫描 TerritoryCanvas 的领地网格，当某个非 0 阵营把整张地图涂满时，
 /// 自动停止 AI 循环、停止录制并结束游戏（冻结全局时间）。
 /// 提供测试按钮（OnGUI 游戏视口左上角）与右键菜单入口，可直接结束录制并结束游戏。
@@ -17,6 +18,9 @@ public class GameEndMonitor : MonoBehaviour
 
     [Tooltip("是否在游戏视口左上角显示测试按钮")]
     public bool showTestButton = true;
+
+    [Tooltip("开局是否自动启动录制（对已录制的状态幂等，不会重复启动）")]
+    public bool startRecordingOnStart = true;
 
     [Tooltip("结束后延迟多少秒退出应用；0 = 不退出（编辑器里始终不退出）")]
     public float quitDelaySeconds = 0f;
@@ -34,6 +38,40 @@ public class GameEndMonitor : MonoBehaviour
     private void OnDestroy()
     {
         if (Instance == this) Instance = null;
+    }
+
+    private void Start()
+    {
+        if (startRecordingOnStart)
+            StartRecording();
+    }
+
+    /// <summary>
+    /// 启动录制（幂等）：优先复用 CapturePause.Capture，未赋值时按与 AIAgent 相同的方式
+    /// 查找场景中的 CaptureBase 并回填。若录制组件自身的 _captureOnStart 已经启动，这里不会重复启动。
+    /// </summary>
+    [ContextMenu("启动录制")]
+    public void StartRecording()
+    {
+        var capture = CapturePause.Capture;
+        if (capture == null)
+            capture = FindObjectOfType<CaptureBase>();
+        if (capture == null)
+        {
+            Debug.LogWarning("[GameEndMonitor] 未找到录制组件（CaptureBase），录制未启动");
+            return;
+        }
+        if (CapturePause.Capture == null)
+            CapturePause.Capture = capture;
+        if (capture.IsCapturing())
+        {
+            Debug.Log("[GameEndMonitor] 录制已在运行，无需启动");
+            return;
+        }
+        if (capture.StartCapture())
+            Debug.Log("[GameEndMonitor] 录制已启动");
+        else
+            Debug.LogError("[GameEndMonitor] 录制启动失败（StartCapture 返回 false）");
     }
 
     private void Update()

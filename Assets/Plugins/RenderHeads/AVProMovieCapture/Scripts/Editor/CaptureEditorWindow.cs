@@ -1,4 +1,4 @@
-﻿#if UNITY_EDITOR
+#if UNITY_EDITOR
 #if UNITY_5_4_OR_NEWER || (UNITY_5 && !UNITY_5_0)
 	#define AVPRO_MOVIECAPTURE_WINDOWTITLE_51
 	#define AVPRO_MOVIECAPTURE_GRAPHICSDEVICETYPE_51
@@ -693,7 +693,7 @@ namespace RenderHeads.Media.AVProMovieCapture.Editor
 		{
 			if (_icon == null)
 			{
-				_icon = Resources.Load<Texture2D>("AVProMovieCaptureIcon");
+				_icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Plugins/RenderHeads/AVProMovieCapture/Scripts/Editor/AVProMovieCaptureIcon.png");
 			}
 
 			if (!_isCreated)
@@ -1251,7 +1251,7 @@ namespace RenderHeads.Media.AVProMovieCapture.Editor
 
 			if (_icon == null)
 			{
-				_icon = Resources.Load<Texture2D>("AVProMovieCaptureIcon");
+				_icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Plugins/RenderHeads/AVProMovieCapture/Scripts/Editor/AVProMovieCaptureIcon.png");
 			}
 			if (_icon != null)
 			{

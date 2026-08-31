@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEditor;
-using UnityEditorInternal;
 
 public class WallManager : MonoBehaviour
 {
@@ -42,7 +41,7 @@ public class WallManager : MonoBehaviour
                     pos.x = (father.width - self.width) / -2f;
                 }
             }
-            print(pos);
+            
             return pos;
         }
     }
