@@ -276,7 +276,7 @@ public class InformGetter : MonoBehaviour
         if (dist <= EnemyTerritoryDangerDistance) builder.Append("【危险：距离3】");
         builder.Append("，相对方向 "); builder.Append(dirText);
         builder.AppendLine();
-        builder.AppendLine("(附近存在敌方领土时，你的子弹可以朝该方向长驱直入，快速涂下更多领地)");
+        builder.AppendLine("(附近存在敌方领土时，敌方的子弹会长驱直入！炮塔有子弹时会自动处理,所以不要控制炮塔去处理这个事情啦，不过大球，霰弹等有指向性的道具还是可以用来消灭敌方领土的。如想要弄死对方请使用对方炮塔的坐标而不是这个)");
         builder.Append("}");
     }
 

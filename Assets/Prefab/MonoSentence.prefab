@@ -188,7 +188,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   charDuration: 0.5
-  charInterval: 0.05
+  charInterval: 0.1
   positionCurve:
     serializedVersion: 2
     m_Curve:

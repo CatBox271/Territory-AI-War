@@ -212,7 +212,15 @@ public class BulletManager : MonoBehaviour
                         {
                             var o = bullets[prev];
                             if (o.alive != 0 && o.stage != b.stage)
-                            { b.alive = 0; b.value = 0; o.alive = 0; o.value = 0; bullets[prev] = o; killed = true; break; }
+                            {
+                                int cancel = Mathf.Min(b.value, o.value);
+                                b.value -= cancel;
+                                o.value -= cancel;
+                                if (b.value <= 0) { b.alive = 0; b.value = 0; }
+                                if (o.value <= 0) { o.alive = 0; o.value = 0; }
+                                bullets[prev] = o;
+                                if (b.alive == 0) { killed = true; break; }
+                            }
                         }
                     }
                     nx = gx; ny = gy + d;
@@ -223,7 +231,15 @@ public class BulletManager : MonoBehaviour
                         {
                             var o = bullets[prev];
                             if (o.alive != 0 && o.stage != b.stage)
-                            { b.alive = 0; b.value = 0; o.alive = 0; o.value = 0; bullets[prev] = o; killed = true; break; }
+                            {
+                                int cancel = Mathf.Min(b.value, o.value);
+                                b.value -= cancel;
+                                o.value -= cancel;
+                                if (b.value <= 0) { b.alive = 0; b.value = 0; }
+                                if (o.value <= 0) { o.alive = 0; o.value = 0; }
+                                bullets[prev] = o;
+                                if (b.alive == 0) { killed = true; break; }
+                            }
                         }
                     }
                 }

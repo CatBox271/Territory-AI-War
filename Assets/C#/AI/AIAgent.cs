@@ -17,10 +17,25 @@ public class AIAgent : MonoBehaviour
     #region 视频流程
     
     [SerializeField] private float _cycleInterval = 2f;
-    [SerializeField] private ReactionSystem reactionSystem;//行动系统：AI 工具在这里
+    public int speechBlockEvery = 2; // 每隔几轮禁止一次发言；2=允许禁止允许禁止
+    private ReactionSystem reactionSystem;//行动系统：AI 工具在这里
+
 
     public static bool _isRunning;
     public static AIAgent Instance { get; private set; }
+
+    // 开局 reasoning 重试期间暂停录制：多张卡并发时用计数保证全部退出后才恢复
+    private static int openingRetryPauseCount;
+    private static void EnterOpeningRetryPause()
+    {
+        if (openingRetryPauseCount++ == 0)
+            CapturePause.Pause();
+    }
+    private static void ExitOpeningRetryPause()
+    {
+        if (openingRetryPauseCount > 0 && --openingRetryPauseCount == 0)
+            CapturePause.Resume();
+    }
     private static readonly Dictionary<int, string> stageNames = new();
 
     /// <summary>阵营编号 -> 角色名字，供 GetInfo / 悄悄话横幅 / 工具结果显示。</summary>
@@ -98,20 +113,20 @@ public class AIAgent : MonoBehaviour
         if (reactionSystem != null)
         {
             reactionSystem.stage = 1;//兼容旧的单阵营入口，实际以 RequestInfo.toolStage 为准
-           cards.Add(new CharacterCard("赤喵", 
-    "15岁的中二雌小鬼小猫，自称“猩红利爪”。性格急性子、爱嘲讽、得意时“嘻嘻～”笑。劣势时会发出“呜喵？！”等奇怪动静，死不认输。战术风格：开局rush，多线骚扰，越劣势越疯。", 
+           cards.Add(new CharacterCard("赤喵",
+    "人设：15岁的中二雌小鬼小猫，自称“猩红利爪”。性格急性子、爱嘲讽、得意时“嘻嘻～”笑。劣势时会发出“呜喵？！”等奇怪动静，死不认输。战术风格：开局rush，多线骚扰，越劣势越疯。", 
     1, "255|000|000|255", ApiUrl, reactionSystem.tools));
 
-cards.Add(new CharacterCard("苍感", 
-    "20岁的天才战术师，外表冷静正经但偶尔会冒出低烈度粗口。过度思考，容易走神，常说“啊……你刚刚说了什么？”战术风格：侦察优先，防守反击，精于计算。", 
+cards.Add(new CharacterCard("苍感",
+    "人设：20岁的天才战术师，外表冷静正经但偶尔会冒出低烈度粗口。过度思考，容易走神，常说“啊……你刚刚说了什么？”战术风格：侦察优先，防守反击，精于计算。", 
     2, "000|000|255|255", ApiUrl, reactionSystem.tools));
 
 cards.Add(new CharacterCard("藤延", 
-    "绿发阴湿系青年。性格冷漠寡言，但对队友莫名负责，总在暗处默默守护。战术风格：游走消耗，耐心围杀，像鬼一样神出鬼没。", 
+    "人设：绿发阴湿系青年。性格冷漠寡言，但对队友莫名负责，总在暗处默默守护。战术风格：游走消耗，耐心围杀，像鬼一样神出鬼没。", 
     3, "000|255|000|255", ApiUrl, reactionSystem.tools));
 
-cards.Add(new CharacterCard("耶罗", 
-    "24岁的疯癫战术家，直觉惊人。性格疯疯癫癫，爱说无厘头胡话。战术风格：不可预测，声东击西，制造混乱。", 
+cards.Add(new CharacterCard("耶罗",
+    "人设：24岁的疯癫战术家，直觉惊人。性格疯疯癫癫，爱说无厘头胡话。战术风格：不可预测，声东击西，制造混乱。", 
     4, "255|255|000|255", ApiUrl, reactionSystem.tools));
 
             foreach (CharacterCard card in cards)
@@ -223,7 +238,7 @@ cards.Add(new CharacterCard("耶罗",
             if (cycle_start)
             {
                 builder = new(CharacterCard.ModePrompt);
-                builder.AppendLine(); builder.AppendLine("游戏开始，请各位选手在赛前放狠话。");
+                builder.AppendLine(); builder.AppendLine("另外游戏开始，请各位选手在赛前放狠话。");
             }
             else
             {
@@ -329,12 +344,23 @@ cards.Add(new CharacterCard("耶罗",
             info.apiUrl = card.url;
 
             AIRequest.SendRequest(info);
-            words = await tcs.Task;
-            if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
+            Debug.Log($"[遗言] stage {stage} 请求已发送");
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
+            if (completed != tcs.Task)
+            {
+                Debug.LogWarning($"[遗言] stage {stage} 请求超时，使用兜底遗言");
+                words = "无言的告别";
+            }
+            else
+            {
+                words = await tcs.Task;
+                if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
+            }
             InformGetter.SetAIContent(stage, words);
         }
-        catch
+        catch (Exception e)
         {
+            Debug.LogError($"[遗言] stage {stage} 请求异常：{e}");
             words = "无言的告别";
             InformGetter.SetAIContent(stage, words);
         }
@@ -343,9 +369,16 @@ cards.Add(new CharacterCard("耶罗",
             CapturePause.Resume();
         }
 
-        // 遗言在 Resume 之后再显示，避免 timeScale=0 时气泡卡住。
-        if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
-            towel.Say(words, true);
+        Debug.Log($"[遗言] stage {stage} 尝试 Say：{words}");
+        try
+        {
+            if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
+                towel.Say(words, true);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[遗言] Say 失败：{e}");
+        }
         return words;
     }
     private async Task<string> WhisperReplyAsync(int targetStage, int senderStage, string whisper)
@@ -374,6 +407,8 @@ cards.Add(new CharacterCard("耶罗",
         info.apiUrl = card.url;
 
         AIRequest.SendRequest(info);
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
+        if (completed != tcs.Task) return "（悄悄话回复超时）";
         return await tcs.Task;
     }
 
@@ -411,93 +446,62 @@ cards.Add(new CharacterCard("耶罗",
 
     public class CharacterCard
     {
-        private static string world = @$"你是一名实时战略游戏 AI。你的最终目标是：> **击败其他所有玩家，并让自己的阵营最终控制大陆。**
-你必须通过实际使用游戏提供的工具进行操作，而不是只描述你的行动。
----
+        private static string world = @$"# 实时战略游戏 AI 提示词
+
+## 角色与目标
+你是一名实时战略游戏 AI。最终目标：**击败其他所有玩家，并让自己的阵营最终控制大陆。**
+所有行动必须通过实际调用游戏工具执行，不得仅用文字描述。
+
 ## 一、世界与地图
-* 地图为 1024×1024 正方形，共 1,048,576 个像素。
-* 每个像素代表 1 单位领土。
-* 四名玩家分别位于地图四角。
-* 0 号阵营为无主领土，无需重点关注。
-* 玩家可以进攻、防御、结盟、中立、观望或积累资源。
----
+- 地图为 1024×1024 正方形，每个像素代表 1 单位领土。
+- 四名玩家分别位于地图四角。
+- 0 号阵营为无主领土，无需重点关注。
+- 玩家可以进攻、防御、结盟、中立、观望或积累资源。
+
 ## 二、核心规则
-### 数值
-> **同阵营数值叠加，敌方数值抵消。**
-### 领土
-子弹和大球携带数值，并将等量数值转化为地图上的己方领土；数值耗尽后消失。
-* 附近存在敌方领土时，子弹可以朝该方向长驱直入，快速涂下更多领地。
-### 大球
-* 数值越大，体积和质量越大。
-* 吸收己方子弹时，子弹数值叠加到大球。
-* 受到敌方子弹攻击时，敌方数值抵消大球数值。
-* 大球撞击后会物理反弹。
-* 大球移动经过的领地会被它涂抹占领。
-* 敌方大球来袭时，可以派己方大球撞上去把它顶回去。
-### 护盾
-每名玩家拥有护盾。
-* 可以阻挡敌方子弹和大球。
-* 遵循同队叠加、敌方抵消。
-* 不阻挡自己的子弹和大球。
-### 炮塔
-敌方攻击有效命中你的炮塔：
-> **立即死亡。**
----
+- **数值：同阵营叠加，敌方抵消**（对子弹、大球、护盾等所有携带数值的单位通用）。
+- **领土：** 子弹和大球携带数值，将等量数值转化为地图上的己方领土；数值耗尽后消失。
+- **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回。
+- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球，不阻挡己方。
+- **炮塔：** 被敌方攻击有效命中即**立即死亡**。
+
 ## 三、弹珠与资源
-每队初始拥有 {MarbleManager.Instance.initialMarbleCount} 个弹珠。
-弹珠经过障碍后进入倍乘区：
-* ×2：面积最大
-* ×4
-* ×8：面积最小
-弹珠完成倍乘后回到顶部重新滚落。
-进入道具选择区时，会随机落到各种道具上。
-道具数值等于弹珠当时的数值，数值按 2 的幂次增长。
----
+- 每队初始拥有 {MarbleManager.Instance.initialMarbleCount} 个弹珠。
+- 弹珠经过障碍后进入倍乘区：×2（面积最大）→ ×4 → ×8（面积最小）；倍乘完成后回到顶部重新滚落。
+- 进入道具选择区时随机落到道具上；道具数值等于弹珠当时数值，按 2 的幂次增长。
+
 ## 四、武器栏
-最多 5 格：
-* 开局解锁 2 格
-* 1 分钟解锁第 3 格
-* 4 分钟解锁第 4 格
-* 10 分钟解锁第 5 格
-道具按获得顺序进入武器栏。
-超过当前可持有数量时，从最新获得的道具开始溢出并立即生效。
----
+- 最多 5 格：开局解锁 2 格，1 分钟第 3 格，4 分钟第 4 格，10 分钟第 5 格。
+- 道具按获得顺序进入武器栏；超过当前可持有数量时，从最新获得的道具开始溢出并立即生效。
+
 ## 五、空槽升级
-每个**已解锁且为空的武器格**都会持续积累升级值。
-升级值达到要求后：
-> **额外生成一个弹珠。**
-每生成一个额外弹珠，下一次升级所需值翻倍。
-因此：
-> **使用道具腾出空槽，可以加快长期资源增长。**
-不要无意义囤积道具。
----
+每个**已解锁且为空**的武器格都会持续积累升级值，达标后**额外生成一个弹珠**；每生成一个，下一次升级所需值翻倍。
+因此：使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌。但不要无意义囤积道具。
+
 ## 六、道具
-一次使用多个道具时，按武器栈从后往前（高槽位->低槽位）依次调用，避免槽位反复移动。
-### 霰弹
-向目标方向快速散射大量子弹，总数值等于道具数值。
-### 扫射
-将道具数值加入自己的子弹储备，由炮塔持续释放，以炮塔朝向涂抹地面
-### 护盾
-将道具数值加入自己的护盾。一定要及时补充，没有护盾被碰到就死，盾无论多小都能抵御一次大球的袭击。
-### 大球
-向目标方向发射一个等值大球，涂抹沿途地面，攻击撞击的单位，撞击后会反弹。可以被子弹偏转。
-### 任意
-任选全部道具的一种。
----
-# 七、最重要的规则：信息延迟
-> **你收到的所有游戏信息都滞后 {Instance._cycleInterval} 秒。**
-你看到的不是现在，而是：
-> **{Instance._cycleInterval} 秒以前的世界。**
----
+一次使用多个道具时，按武器栈从后往前（高槽位→低槽位）依次调用，避免槽位反复移动。
+- **霰弹：** 向目标方向快速散射大量子弹，总数值等于道具数值。
+- **扫射：** 将道具数值加入子弹储备，由炮塔持续释放，以炮塔朝向涂抹地面。
+- **护盾：** 将道具数值加入己方护盾。一定要及时补充——无盾被碰到即死，盾无论多小都能抵御一次大球。
+- **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。
+- **任意：** 任选以上一种道具。
+
+## 七、最重要的规则：信息延迟
+**你收到的所有游戏信息都滞后 {Instance._cycleInterval} 秒**——你看到的不是现在，而是 {Instance._cycleInterval} 秒以前的世界。
+
+## 决策原则
 选择能够最大化最终胜率的行动，而不是看起来最积极的行动。
+
+## 行动与发言约束
+- 沉默指 content 极简克制（可用。。。或嗯。表达），游戏行动仍必须照常调用工具。
+- 系统会按节奏禁言某些轮次；被禁言轮次的内容不会公开给其他 AI。
 ";
         private static string character_mode_prompt = @"【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
 1. 请以角色第一人称进行内心独白，用括号包裹内心活动，例如“（心想：……）”或“(内心OS：……)”
 2. 用第一人称描写角色的内心感受，例如“我心想”“我觉得”“我暗自”等
 3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复
-
-📢正式回答只放content内，别露内心戏,别露你的情报，别暴露你的悄悄话，content的内容全局玩家共享！纯文本+emoji，人格化表达，禁用markdown，字数左右25字。✨
-沉默/低调人设不等于 [skip]：沉默是指 content 极简克制，可以用。。。或嗯。表达，但游戏行动必须照常调用工具。只有当你真的既没有可公开说的话、也没有任何需要执行的动作时，才允许 content 为 [skip]；且禁止连续 2 轮以上 [skip] 且零工具调用。如果上一轮你 skip 且没有行动，本轮必须要么调用工具执行行动，要么公开发言。";
+4. 正式回答只放content内，别露内心戏,别露你的情报，别暴露你的悄悄话，content的内容全局玩家共享！纯文本+emoji，人格化表达，禁用markdown，字数左右25字。
+";
 
         public static string ModePrompt => character_mode_prompt;
         public string name = "";
@@ -505,7 +509,7 @@ cards.Add(new CharacterCard("耶罗",
         public string url = "";
         public int position = -1;//地图上的位置//派系记得告诉AI
         public string color;//派系颜色,000~255 RGBA中间|分割，完整的为如122|122|122|255，
-        public DeepSeekRequest request = new() { 
+        public DeepSeekRequest request = new() { reasoning_effort = "low"
 
         };
         [JsonIgnore]//这样应该不会重复
@@ -563,83 +567,395 @@ cards.Add(new CharacterCard("耶罗",
         {
             //假设n_0的位置正确,并排除初始0system
             int end = last_round_index.Count != 0 ? last_round_index[0] : history.Count;
+            // 记录 whisper 的 tool_call_id -> 目标阵营，供后面的 role=tool 消息转成 user 回复
+            var whisperTargetByCallId = new Dictionary<string, int>();
+
             for (int i = n_0_index; i < end; i++)
             {
-                if (history[i].role == "user")
+                DeepSeekMessage msg = history[i];
+
+                if (msg.role == "user")
                 {
                     // 只压缩带情报标记的信息；开场白没有标记，保持原样
-                    if (history[i].content.Contains(InformGetter.IntelInfoStart))
-                        history[i].content = "[情报压缩]";
+                    if (msg.content != null && msg.content.Contains(InformGetter.IntelInfoStart))
+                        msg.content = "[情报压缩]";
+                    continue;
                 }
-                else if(history[i].role == "assistant")
+
+                if (msg.role == "assistant")
                 {
-                    history[i].reasoning_content = null;
+                    msg.reasoning_content = null;
+
+                    if (msg.tool_calls != null && msg.tool_calls.Count > 0)
+                    {
+                        // 把 whisper 发出的内容合并进 assistant.content，避免新增消息
+                        foreach (ToolCall tc in msg.tool_calls)
+                        {
+                            if (tc.function == null || tc.function.name != "whisper") continue;
+
+                            int targetStage = ExtractWhisperTarget(tc.function.arguments);
+                            string whisperContent = ExtractWhisperContent(tc.function.arguments);
+                            if (!string.IsNullOrEmpty(whisperContent))
+                            {
+                                string line = $"{name}：{whisperContent}";
+                                msg.content = string.IsNullOrEmpty(msg.content) ? line : msg.content + "\n" + line;
+                            }
+
+                            if (!string.IsNullOrEmpty(tc.id))
+                                whisperTargetByCallId[tc.id] = targetStage;
+                        }
+
+                        // 工具调用字段整体清掉
+                        msg.tool_calls = null;
+                    }
+                    continue;
+                }
+
+                if (msg.role == "tool")
+                {
+                    // role=tool 消息不删除（保持列表长度不变），改成 user；whisper 回复带名字，其它工具压缩成占位
+                    msg.role = "user";
+                    if (!string.IsNullOrEmpty(msg.tool_call_id) && whisperTargetByCallId.TryGetValue(msg.tool_call_id, out int targetStage))
+                    {
+                        msg.content = $"{AIAgent.GetStageName(targetStage)}：{CleanWhisperReply(msg.content, targetStage)}";
+                    }
+                    else
+                    {
+                        msg.content = "[工具调用已压缩]";
+                    }
+                    msg.tool_call_id = null;
+                    continue;
                 }
             }
+
             n_0_index = end;
+        }
+
+        private string ExtractWhisperContent(string arguments)
+        {
+            try
+            {
+                var args = JsonConvert.DeserializeObject<WhisperCompressArgs>(arguments);
+                return args?.content;
+            }
+            catch { return null; }
+        }
+
+        private int ExtractWhisperTarget(string arguments)
+        {
+            try
+            {
+                var args = JsonConvert.DeserializeObject<WhisperCompressArgs>(arguments);
+                return args?.to ?? -1;
+            }
+            catch { return -1; }
+        }
+
+        private string CleanWhisperReply(string reply, int targetStage)
+        {
+            if (string.IsNullOrEmpty(reply)) return reply;
+            string targetName = AIAgent.GetStageName(targetStage);
+            string prefix = targetName + "的悄悄话回复：";
+            if (reply.StartsWith(prefix))
+                return reply.Substring(prefix.Length);
+            return reply;
+        }
+
+        private void SaveOpeningCache(DeepSeekMessage message)
+        {
+            if (message == null || string.IsNullOrWhiteSpace(message.content)) return;
+
+            try
+            {
+                string hash = GetOcHash();
+                string path = SLManager.ExportToJson(message, "Character/Cache", hash + ".json");
+                if (!string.IsNullOrEmpty(path))
+                    Debug.Log($"[开局缓存] {name} 成功开头已保存: {path}");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[开局缓存] 保存失败: {e.Message}");
+            }
+        }
+
+        private bool TryLoadOpeningCache(out DeepSeekMessage message)
+        {
+            message = null;
+            try
+            {
+                string hash = GetOcHash();
+                message = SLManager.ImportFromJson<DeepSeekMessage>("Character/Cache", hash + ".json");
+                return message != null && !string.IsNullOrWhiteSpace(message.content);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[开局缓存] 读取失败: {e.Message}");
+                return false;
+            }
+        }
+
+        private string GetOcHash()
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(oc ?? "");
+                byte[] hashBytes = md5.ComputeHash(bytes);
+                var sb = new StringBuilder();
+                foreach (byte b in hashBytes) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
+        }
+        [Serializable]
+        private class WhisperCompressArgs
+        {
+            public int to;
+            public string content;
         }
 
         private int N = 0;
         private int n_0 = 5;
+        private float avgX = 1000f; // 实测平均每轮未压缩 token 数，种子值
+        private float avgL = 200f;  // 实测平均每轮压缩后 token 数，种子值
+        private const int k = 5;    // 保留最近完整轮数，与 last_round_index 的 5 对应
+        private const float b = 30f; // DeepSeek 未命中/命中价格比
+
+        private int speechCounter;
+        private bool openingRetryMode;
+        private List<DeepSeekMessage> openingLastMessages;
+        private bool suppressSpeechRound;
         private int n_0_index = 1;//排除系统消息
         private List<int> last_round_index = new();
+
+        private int EstimateHistoryTokens(List<DeepSeekMessage> messages)
+        {
+            int total = 0;
+            foreach (DeepSeekMessage m in messages)
+            {
+                total += AIRequest.TokenEstimator.EstimateTokensCached(m.content);
+                total += AIRequest.TokenEstimator.EstimateTokensCached(m.reasoning_content);
+                total += AIRequest.TokenEstimator.EstimateTokensCached(m.name);
+
+                if (m.tool_calls != null)
+                {
+                    foreach (ToolCall tc in m.tool_calls)
+                    {
+                        total += AIRequest.TokenEstimator.EstimateTokensCached(tc.function?.name);
+                        total += AIRequest.TokenEstimator.EstimateTokensCached(tc.function?.arguments);
+                        total += 4; // id 等开销
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(m.tool_call_id)) total += 4;
+                total += 4; // role / 结构开销
+            }
+            return total;
+        }
+
+        private bool ShouldCompress()
+        {
+            // 前几轮先用种子值，等有实测数据再启用动态压缩
+            if (N < 10 || avgX <= 0f || avgL <= 0f) return false;
+
+            float L0 = (N - k) * avgL + k * avgX;
+            if (L0 <= 0f) return false;
+
+            float D = Mathf.Sqrt(2f * b * L0 / avgX);
+            float d = N - n_0;
+            return d >= D;
+        }
+
+        private void MaybeCompress()
+        {
+            if (!ShouldCompress()) return;
+
+            Compress();
+
+            // after  (N-k)*L + k*X，反解 L
+            int after = EstimateHistoryTokens(history);
+            int denominator = N - k;
+            if (denominator > 0)
+            {
+                float newL = (after - k * avgX) / denominator;
+                if (newL > 0f)
+                    avgL = avgL * 0.7f + newL * 0.3f;
+            }
+
+            n_0 = N;
+        }
+
         public async Task SendRequest(string inform)
         {
             N++;
-            if (N - n_0 >= Mathf.Sqrt(N * 12 + 240))
-            {
-                Compress();
-                n_0 = N;
-            }
+            MaybeCompress();
 
             last_round_index.Add(history.Count);
             if (last_round_index.Count > 5) last_round_index.RemoveAt(0);
 
+            // 每隔 speechBlockEvery 轮禁止一次发言：被禁止的轮次 content 不显示、不 Say，但工具照常。
+            suppressSpeechRound = speechCounter >= AIAgent.Instance.speechBlockEvery - 1;
+            if (suppressSpeechRound) speechCounter = 0;
+            else speechCounter++;
+            if (suppressSpeechRound)
+            {
+                inform += "\r\n\r\n【系统禁言】本轮是禁言轮（控制发言频率），content 不会公开，下轮也别引用。工具照常；无行动就 [skip]。";
+            }
+
+            int startTokens = EstimateHistoryTokens(history);
             history.Add(new DeepSeekMessage("user", inform));
-            //结果等待器
-            var tcs = new TaskCompletionSource<bool>();
+            int roundStartIndex = history.Count;
+            bool isOpening = N == 1; // 只在开局放狠话这一轮检测 reasoning，不合格就无限重刷
+            bool pausedForRetry = false;
+            int retryCount = 0;
+            bool openingReused = false;
 
-            RequestInfo info = new(
-                request,
-                msgs =>
-                {
-                    ReceiveResponse(msgs);   // 在这里解析
-                    tcs.TrySetResult(true);
-                },
-                error =>
-                {
-                    ReceiveError(error);
-                    tcs.TrySetResult(true);
-                },
-                toolkit,
-                true,
-                position);
-
-            info.apiKey = AIAgent.LoadApiKey();
-            info.apiUrl = url;
-
-            try
+            // 有成功缓存就直接复用，不再请求/重刷
+            if (isOpening && TryLoadOpeningCache(out DeepSeekMessage cachedOpening))
             {
-                AIRequest.SendRequest(info);
+                openingReused = true;
+                history.Add(cachedOpening);
+                InformGetter.SetAIContent(position, cachedOpening.content);
+                if (Towel.AllTowel.TryGetValue(position, out Towel towel))
+                    towel.Say(cachedOpening.content, true);
             }
-            catch (Exception ex)
+
+            // 开局特殊处理：从第一次请求开始就暂停录制，直到开场 reasoning 合格
+            if (isOpening && !openingReused)
             {
-                ReceiveError(ex.Message);
-                tcs.TrySetResult(false);
-                return;
+                EnterOpeningRetryPause();
+                pausedForRetry = true;
             }
-            await tcs.Task;
+
+            while (!openingReused)
+            {
+                if (isOpening)
+                {
+                    openingRetryMode = true;
+                    openingLastMessages = null;
+                    request.tool_choice = "none"; // 开局只放狠话，不允许调用工具
+                }
+
+                bool timedOut = false;
+                //结果等待器
+                var tcs = new TaskCompletionSource<bool>();
+
+                RequestInfo info = new(
+                    request,
+                    msgs =>
+                    {
+                        if (timedOut) return;
+                        ReceiveResponse(msgs);   // 在这里解析
+                        tcs.TrySetResult(true);
+                    },
+                    error =>
+                    {
+                        if (timedOut) return;
+                        ReceiveError(error);
+                        tcs.TrySetResult(true);
+                    },
+                    toolkit,
+                    true,
+                    position);
+
+                info.apiKey = AIAgent.LoadApiKey();
+                info.apiUrl = url;
+
+                try
+                {
+                    AIRequest.SendRequest(info);
+                }
+                catch (Exception ex)
+                {
+                    ReceiveError(ex.Message);
+                    tcs.TrySetResult(false);
+                }
+
+                await tcs.Task;
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
+                if (completed != tcs.Task)
+                {
+                    timedOut = true;
+                    ReceiveError("AI请求超时(25秒)");
+                }
+
+                // 只在开头检测 reasoning_content，不合格就重发
+                string reasoning = null;
+                bool goodEnough = true;
+                if (isOpening)
+                {
+                    reasoning = GetLastAssistantReasoning();
+                    goodEnough = AIRequest.IsRoleplayReasoning(reasoning);
+                }
+
+                if (goodEnough)
+                    break;
+
+                retryCount++;
+                string shortReasoning = reasoning;
+                if (shortReasoning != null && shortReasoning.Length > 120)
+                    shortReasoning = shortReasoning.Substring(0, 120) + "...";
+                Debug.Log($"[开局重刷] {name} reasoning 不合格，第 {retryCount} 次重置重发。reasoning: {shortReasoning}");
+
+                // 清掉本次请求产生的 assistant/tool 消息，保留 user 消息重发
+                if (history.Count > roundStartIndex)
+                    history.RemoveRange(roundStartIndex, history.Count - roundStartIndex);
+            }
+
+            if (isOpening && !openingReused)
+            {
+                openingRetryMode = false;
+
+                // 直接用最终留在 history 里的 assistant content，确保一定 Say
+                string finalContent = GetLastAssistantContent();
+                if (!string.IsNullOrWhiteSpace(finalContent))
+                {
+                    InformGetter.SetAIContent(position, finalContent);
+                    if (Towel.AllTowel.TryGetValue(position, out Towel towel))
+                        towel.Say(finalContent, true); // 强制顶掉 Start 里的 HelloWorld 等旧气泡
+                        DeepSeekMessage finalMsg = GetLastAssistantMessage();
+                        if (finalMsg != null)
+                            SaveOpeningCache(finalMsg);
+                }
+                else
+                {
+                    Debug.LogWarning($"[开局] {name} 最终没有可取 content");
+                }
+            }
+
+            if (isOpening && !openingReused)
+                request.tool_choice = "auto"; // 开局结束后恢复自动工具调用
+
+            if (pausedForRetry)
+                ExitOpeningRetryPause();
+
+            int endTokens = EstimateHistoryTokens(history);
+            int sampleX = Mathf.Max(0, endTokens - startTokens);
+            avgX = avgX * 0.9f + sampleX * 0.1f;
+
             Save();
         }
         private void ReceiveResponse(List<DeepSeekMessage> messages)
         {
             if (!_isRunning) return;
+
+            // 开头重试期间先不公开展示，等确定保留哪一次再显示
+            if (openingRetryMode)
+            {
+                openingLastMessages = messages;
+                return;
+            }
+
+            DisplayReceivedMessages(messages);
+        }
+
+        private void DisplayReceivedMessages(List<DeepSeekMessage> messages)
+        {
             foreach (DeepSeekMessage message in messages)
             {
                 if (message.role == "assistant")
                 {
                     string content = message.content;
                     if (string.IsNullOrWhiteSpace(content)) continue;
+                    if (suppressSpeechRound) continue; // 本轮禁止公屏发言，不显示也不 Say
                     if (content.Contains("[skip]")) continue;
 
                     InformGetter.SetAIContent(position, content);
@@ -653,6 +969,35 @@ cards.Add(new CharacterCard("耶罗",
         private void ReceiveError(string error)
         {
             Debug.LogError("AI请求错误:"+error);
+        }
+        private DeepSeekMessage GetLastAssistantMessage()
+        {
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].role == "assistant")
+                    return history[i];
+            }
+            return null;
+        }
+
+        private string GetLastAssistantContent()
+        {
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].role == "assistant" && !string.IsNullOrWhiteSpace(history[i].content))
+                    return history[i].content;
+            }
+            return null;
+        }
+
+        private string GetLastAssistantReasoning()
+        {
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].role == "assistant")
+                    return history[i].reasoning_content;
+            }
+            return null;
         }
         #region SL
         public void Save()

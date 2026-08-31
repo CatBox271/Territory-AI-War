@@ -1035,6 +1035,23 @@ public static class AIRequest
             optimized.Insert(index, new DeepSeekMessage("user", all[i]));
         }
     }
+    /// <summary>
+    /// 检测 reasoning_content 是否是符合人设的中文内心独白。
+    /// 合格示例：(内心OS：) / （心想：）；不合格示例：大段英文规划/复盘。
+    /// </summary>
+    public static bool IsRoleplayReasoning(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        // 关键是括号：内心独白必须写成 (内心OS：) / （心想：）这种形式
+        bool hasParen = text.Contains("（") || text.Contains("(");
+        bool hasMarker = text.Contains("内心OS")
+            || text.Contains("心想")
+            || text.Contains("内心独白")
+            || text.Contains("暗自");
+        return hasParen && hasMarker;
+    }
+
     public static class TokenEstimator
     {
         private static DeepSeekTokenizer _tokenizer;
@@ -1043,15 +1060,17 @@ public static class AIRequest
         private static DeepSeekTokenizer GetTokenizer()
         {
             if (_tokenizer != null) return _tokenizer;
-            string path = Path.Combine(Application.streamingAssetsPath, "tokenizer.json");
+            string streamingPath = Path.Combine(Application.streamingAssetsPath, "tokenizer.json");
+            string dataPath = Path.Combine(Application.dataPath, "tokenizer.json");
+            string path = File.Exists(streamingPath) ? streamingPath : dataPath;
             if (File.Exists(path))
             {
                 _tokenizer = new DeepSeekTokenizer(path);
-                Debug.Log("[TokenEstimator] 已加载精确 tokenizer");
+                Debug.Log("[TokenEstimator] 已加载精确 tokenizer: " + path);
             }
             else
             {
-                Debug.LogWarning("[TokenEstimator] tokenizer.json 未找到: " + path);
+                Debug.LogWarning("[TokenEstimator] tokenizer.json 未找到: " + streamingPath + " 或 " + dataPath);
                 _tokenizer = null;
             }
             return _tokenizer;
@@ -1061,10 +1080,16 @@ public static class AIRequest
         {
             if (string.IsNullOrEmpty(text)) return 0;
 
+            // 长文本不缓存，避免把历史/大段回复长期留在内存里
+            if (text.Length > 512)
+                return CountTokens(text);
+
             if (tokenCache.TryGetValue(text, out int cached))
                 return cached;
 
             int tokens = CountTokens(text);
+            if (tokenCache.Count >= 10000)
+                tokenCache.Clear();
             tokenCache[text] = tokens;
             return tokens;
         }

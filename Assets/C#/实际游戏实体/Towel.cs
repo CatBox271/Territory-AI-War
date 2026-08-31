@@ -160,6 +160,7 @@ public class Towel : MonoBehaviour, IStageValue
         // 遗言放在死亡流程最前面：先说完遗言，再开始释放大球
         var lastWords = AIAgent.OnStageDeathAsync(stage, killerStage, killerWeapon);
         while (!lastWords.IsCompleted) yield return null;
+        yield return new WaitForSeconds(1.5f); // 遗言气泡至少显示一会儿，避免立即销毁导致看不到
 
         var marbles = FindObjectsOfType<Marble>();
         foreach (var marble in marbles)
@@ -233,7 +234,7 @@ public class Towel : MonoBehaviour, IStageValue
         var pos = (Vector2)transform.position + Random.insideUnitCircle * BulletPosRandom;
         float maxAngle = bulletRandomSpeed.Evaluate(value);
         var finalDir = (Vector2)(Quaternion.AngleAxis(Random.Range(-maxAngle, maxAngle), Vector3.forward) * dir);
-        BulletManager.Instance.Fire(pos, finalDir, stage, bv, bulletSpeed);
+        BulletManager.Instance.Fire(pos, finalDir, stage, bv, config != null ? config.NormalBulletSpeed : bulletSpeed);
     }
 
     void ShieldTransform()
@@ -314,7 +315,7 @@ public class Towel : MonoBehaviour, IStageValue
         for (int i = 1; i <= defaultNum; i++)
         {
             var dir = Quaternion.AngleAxis(sa + da * i, Vector3.back) * transform.up;
-            BulletManager.Instance.Fire(transform.position, dir, stage, bv, bulletSpeed);
+            BulletManager.Instance.Fire(transform.position, dir, stage, bv, config != null ? config.ShotGunBulletSpeed : bulletSpeed);
         }
     }
 }

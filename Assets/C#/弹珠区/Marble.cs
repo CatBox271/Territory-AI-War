@@ -28,6 +28,7 @@ public class Marble : MonoBehaviour
     private TMP_Text tmp;
     private Coroutine trailCoroutine;
     private Material enchantInstance;
+    private Material outlineMaterial;
     private Vector2 stuckMin, stuckMax;
     private float stuckTime;
 
@@ -104,6 +105,7 @@ public class Marble : MonoBehaviour
     public void SetupOutline()
     {
         var mat = new Material(tmp.fontSharedMaterial);
+        outlineMaterial = mat;
         tmp.fontMaterial = mat;
         mat.SetColor("_OutlineColor", MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball));
         mat.SetFloat("_OutlineWidth", outlineWidth);
@@ -225,5 +227,22 @@ public class Marble : MonoBehaviour
     public void Revalue()
     {
         ApplyValue();
+    }
+
+    void OnDestroy()
+    {
+        if (enchantInstance != null)
+        {
+            if (Application.isPlaying) Destroy(enchantInstance);
+            else DestroyImmediate(enchantInstance);
+            enchantInstance = null;
+        }
+
+        if (outlineMaterial != null)
+        {
+            if (Application.isPlaying) Destroy(outlineMaterial);
+            else DestroyImmediate(outlineMaterial);
+            outlineMaterial = null;
+        }
     }
 }

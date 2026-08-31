@@ -79,6 +79,8 @@ public class MapConfig : MonoBehaviour
     public int ShotGunBulletNum = 512;
     public int ShotGunMinVal = 8;
     public int ShotGunMaxVal = 1073741824;
+    public float ShotGunBulletSpeed = 4f; // 霰弹子弹速度
+    public float NormalBulletSpeed = 4f; // 普通扫射/炮塔自动射击子弹速度
 
     [Header("Towel")]
     public int TowelDefaultBullets = 4096;

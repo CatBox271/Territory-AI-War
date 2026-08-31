@@ -15,6 +15,7 @@ public class DisplayValue : MonoBehaviour
     private StringBuilder sb = new();
     private char[] buf = new char[256];
     private int skip;
+    private Material outlineMaterial;
 
     void Start()
     {
@@ -23,6 +24,7 @@ public class DisplayValue : MonoBehaviour
         if (text != null && outlineWidth > 0)
         {
             var mat = new Material(text.fontSharedMaterial);
+            outlineMaterial = mat;
             text.fontMaterial = mat;
             mat.SetColor("_OutlineColor", outlineColor);
             mat.SetFloat("_OutlineWidth", outlineWidth);
@@ -36,6 +38,7 @@ public class DisplayValue : MonoBehaviour
         if (text == null) TryGetComponent(out text);
         if (text == null) return;
         var mat = new Material(text.fontSharedMaterial);
+        outlineMaterial = mat;
         text.fontMaterial = mat;
         mat.SetColor("_OutlineColor", color);
         mat.SetFloat("_OutlineWidth", width);
@@ -91,5 +94,16 @@ public class DisplayValue : MonoBehaviour
         if (neg) buf[0] = '-';
 
         return new string(buf, 0, totalLen);
+    }
+
+
+    void OnDestroy()
+    {
+        if (outlineMaterial != null)
+        {
+            if (Application.isPlaying) Destroy(outlineMaterial);
+            else DestroyImmediate(outlineMaterial);
+            outlineMaterial = null;
+        }
     }
 }
