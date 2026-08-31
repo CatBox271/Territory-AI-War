@@ -22,10 +22,13 @@ public class MessageDisplayer : MonoBehaviour
             Destroy(_text.gameObject);
     }
 
-    public bool Say(string content)
+    public bool Say(string content, bool force = false)
     {
         if (_anim != null && _anim.IsPlaying)
-            return false;
+        {
+            if (!force) return false;
+            _anim.Stop();
+        }
 
         if (_text == null)
         {
@@ -36,8 +39,8 @@ public class MessageDisplayer : MonoBehaviour
 
         var towel = GetComponentInParent<Towel>();
         if (towel != null && MapConfig.Instance != null)
-            _text.color = MapConfig.Instance.GetColor(towel.stage, MapConfig.ColorStage.Bullet);
-        _text.text = content;
+            _text.color = MapConfig.Instance.GetColor(towel.stage, MapConfig.ColorStage.Bright);
+        _text.text = AIAgent.ColorizeAINames(content);
         _text.alpha = 1f;
 
         _anim.charDuration = charDuration;

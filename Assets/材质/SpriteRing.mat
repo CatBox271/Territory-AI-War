@@ -30,9 +30,9 @@ Material:
     m_Ints: []
     m_Floats:
     - PixelSnap: 0
-    - _RingRadius: 0
-    - _RingThickness: 0
+    - _RingRadius: 0.493
+    - _RingThickness: 0.0113
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _RingColor: {r: 1, g: 1, b: 1, a: 1}
+    - _RingColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []

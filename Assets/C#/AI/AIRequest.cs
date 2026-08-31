@@ -210,7 +210,7 @@ public class DeepSeekRequest
 
 public interface Itool
 {
-    System.Threading.Tasks.Task<List<DeepSeekMessage>> DealToolCallsAsync(List<ToolCall> toolCalls);
+    System.Threading.Tasks.Task<List<DeepSeekMessage>> DealToolCallsAsync(List<ToolCall> toolCalls, int stage = -1);
 }
 
 // 添加ThinkingConfig类
@@ -311,6 +311,7 @@ public class RequestInfo
     public Action<string> onError;
 
     public Itool toolkit;
+    public int toolStage = -1;
     public bool back_tool = true;
 
     public void AddMessage(List<DeepSeekMessage> message)
@@ -329,13 +330,14 @@ public class RequestInfo
     /// <param name="onError"></param>
     /// <param name="toolkit"></param>
     /// <param name="back_tool"></param>
-    public RequestInfo(DeepSeekRequest request, Action<List<DeepSeekMessage>> onResponse, Action<string> onError, Itool toolkit = null, bool back_tool = true)
+    public RequestInfo(DeepSeekRequest request, Action<List<DeepSeekMessage>> onResponse, Action<string> onError, Itool toolkit = null, bool back_tool = true, int toolStage = -1)
     {
         this.request = request;
         this.onResponse = onResponse;
         this.onError = onError;
         this.toolkit = toolkit;
         this.back_tool = back_tool;
+        this.toolStage = toolStage;
     }
 }
 
@@ -705,7 +707,7 @@ public static class AIRequest
 
                     if (requestInfo.toolkit != null)
                     {
-                        var newMessages = await requestInfo.toolkit.DealToolCallsAsync(back_message.tool_calls);
+                        var newMessages = await requestInfo.toolkit.DealToolCallsAsync(back_message.tool_calls, requestInfo.toolStage);
                         if (newMessages != null && newMessages.Count > 0)
                         {
                             if (requestInfo.back_tool)
@@ -856,7 +858,7 @@ public static class AIRequest
 
             if (requestInfo.toolkit != null)
             {
-                var newMessages = await requestInfo.toolkit.DealToolCallsAsync(toolCallsList);
+                var newMessages = await requestInfo.toolkit.DealToolCallsAsync(toolCallsList, requestInfo.toolStage);
                 if (newMessages != null && newMessages.Count > 0)
                 {
                     if (requestInfo.back_tool)

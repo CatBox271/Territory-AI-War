@@ -69,9 +69,11 @@ public class MapConfig : MonoBehaviour
     public float BallTimes = 0.1f;
     public float BulletTimes = 0.2f;
     public float DarkTimes = -0.1f;
+    public float BrightTimes = 0.3f;
 
     [Header("Physics")]
-    public float BulletImpactForce = 0.1f;
+    [Tooltip("子弹并入大球的动量传递系数：1=完全非弹性碰撞（同队按 M+m，敌队按 M-m）")]
+    public float BulletImpactForce = 1f;
     [Header("ShotGun")]
     public float ShotGunAngle = 30f;
     public int ShotGunBulletNum = 512;
@@ -84,7 +86,7 @@ public class MapConfig : MonoBehaviour
     [Header("Bounce")]
     public float bounceRate = 0.5f;
 
-    public enum ColorStage { Default, Towel, Ball, Bullet,Dark }
+    public enum ColorStage { Default, Towel, Ball, Bullet,Dark , Bright }
 
     public Color GetColor(int stage, ColorStage kind = ColorStage.Default)
     {
@@ -96,6 +98,7 @@ public class MapConfig : MonoBehaviour
             case ColorStage.Ball: c += BallTimes * Color.white; break;
             case ColorStage.Bullet: c += BulletTimes * Color.white; break;
             case ColorStage.Dark: c += DarkTimes * Color.white; break;
+            case ColorStage.Bright: c += BrightTimes * Color.white; break;
         }
         c.a = 1;
         return c;

@@ -20,8 +20,6 @@ public class DisplayValue : MonoBehaviour
     {
         aim.TryGetComponent(out stageValue);
         if (text == null) TryGetComponent(out text);
-        if (text != null && MapConfig.Instance != null && stageValue is BallPainter)
-            text.color = MapConfig.Instance.GetText(stageValue.stage);
         if (text != null && outlineWidth > 0)
         {
             var mat = new Material(text.fontSharedMaterial);
@@ -92,6 +90,6 @@ public class DisplayValue : MonoBehaviour
         }
         if (neg) buf[0] = '-';
 
-        return new string(buf);
+        return new string(buf, 0, totalLen);
     }
 }

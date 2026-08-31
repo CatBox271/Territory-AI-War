@@ -450,9 +450,7 @@ public class BulletManager : MonoBehaviour
                 var bp = cachedBalls[hit.targetIndex];
                 if (bp == null) continue;
 
-                float mass = hit.value / 81920000f;
-                var impulse = new Vector2(hit.bulletVelocity.x, hit.bulletVelocity.y) * mass * MapConfig.Instance.BulletImpactForce;
-                if (bp.rb != null) bp.rb.AddForce(impulse, ForceMode2D.Impulse);
+                ApplyBulletImpact(bp, hit);
 
                 if (hit.sameTeam) ((IStageValue)bp).Heal(bullets[hit.bulletIndex].stage, new HugeInt(hit.value));
                 else ((IStageValue)bp).Hit(bullets[hit.bulletIndex].stage, new HugeInt(hit.value), "", $"{bullets[hit.bulletIndex].stage}号阵营子弹");
@@ -474,12 +472,50 @@ public class BulletManager : MonoBehaviour
             {
                 var t = cachedTowelsAll[hit.targetIndex];
                 if (t == null) continue;
-                t.Die();
+                t.Die(bullets[hit.bulletIndex].stage, "子弹");
             }
         }
 
         activeCount = alive;
         return alive;
+    }
+
+
+    /// <summary>子弹并入大球：完全非弹性碰撞。质量直接用 HugeInt value。</summary>
+    /// <remarks>同队质量融合为 M+m；敌队数值相消，按 M-m 计算。</remarks>
+    void ApplyBulletImpact(BallPainter bp, BulletHit hit)
+    {
+        float impact = MapConfig.Instance.BulletImpactForce;
+        if (impact <= 0f || bp.rb == null || hit.value <= 0) return;
+
+        HugeInt M = bp.value;
+        HugeInt m = hit.value;
+        if (M <= 0) return;
+
+        // 敌队子弹会打光大球，速度交给 Hit 处理，不做动量计算。
+        if (!hit.sameTeam && m >= M) return;
+
+        float k = MergeRatio(M, m, hit.sameTeam);
+        if (float.IsInfinity(k)) return;
+
+        Vector2 vBall = bp.rb.velocity;
+        Vector2 vBullet = new Vector2(hit.bulletVelocity.x, hit.bulletVelocity.y);
+
+        // V' = V球 + k*(V弹 - V球)；BulletImpactForce=1 时即完全非弹性碰撞动量守恒。
+        Vector2 vAfter = vBall + (vBullet - vBall) * (k * impact);
+        bp.rb.velocity = vAfter;
+    }
+
+    /// <summary>质量比例 k。同队 k=m/(M+m)；敌队 k=m/(M-m)。</summary>
+    static float MergeRatio(HugeInt M, HugeInt m, bool sameTeam)
+    {
+        const int SCALE = 1000000;
+        HugeInt denom = sameTeam ? M + m : M - m;
+        if (denom <= 0) return float.PositiveInfinity;
+
+        HugeInt scaled = m * SCALE;
+        HugeInt q = scaled / denom;
+        return q.ToFloat() / SCALE;
     }
 
     void RenderBulletPaint(int aliveCount)

@@ -23,17 +23,19 @@ public class BallPainter : MonoBehaviour, IStageValue
 
     [Header("速度控制")]
     [Tooltip("从0加速到目标速度的时间")]
-    public float fastA;
+    public float fastA = 0.5f;
     [Tooltip("基于从0加速到目标速度计算所得的加速度，不过是负的")]
-    public float slowA;
+    public float slowA = 2f;
     [Tooltip("受击加速暂停")]
-    public float hurt_fast_pause;
+    public float hurt_fast_pause = 0.3f;
 
     private TerritoryCanvas canvas;
     private MapConfig config;
     private Vector2 lastWorldPos;
     private HugeInt lastValue = -1;
     private bool hasLast;
+    private Vector2 lastMoveDir = Vector2.right;
+    private float hurtPauseTimer;
 
     void Awake()
     {
@@ -73,14 +75,33 @@ public class BallPainter : MonoBehaviour, IStageValue
             }
         }
 
-        float aimSpeed = SpeedCurve.Evaluate(value);
+        float targetSpeed = SpeedCurve.Evaluate(value);
         float curSpeed = rb.velocity.magnitude;
-        Vector2 dir = curSpeed > 0 ? rb.velocity / curSpeed : Vector2.zero;
+        if (curSpeed > 0.01f) lastMoveDir = rb.velocity / curSpeed;
+        Vector2 dir = curSpeed > 0.01f ? rb.velocity / curSpeed : lastMoveDir;
 
-        if (curSpeed < aimSpeed)
-            rb.AddForce(dir * rb.mass * AcelerationCurve.Evaluate(value));
-        else if (curSpeed > aimSpeed)
-            rb.AddForce(dir * rb.mass * (aimSpeed - curSpeed) * 0.25f);
+        if (hurtPauseTimer > 0f)
+        {
+            hurtPauseTimer = Mathf.Max(0f, hurtPauseTimer - Time.fixedDeltaTime);
+        }
+        else
+        {
+            float speedError = targetSpeed - curSpeed;
+
+            if (speedError > 0f && fastA > 0f)
+            {
+                float deltaV = (targetSpeed / fastA) * Time.fixedDeltaTime;
+                if (deltaV > speedError) deltaV = speedError;
+                rb.AddForce(dir * rb.mass * (deltaV / Time.fixedDeltaTime));
+            }
+            else if (speedError < 0f && slowA > 0f)
+            {
+                float brake = (targetSpeed / slowA) * Time.fixedDeltaTime;
+                float needBrake = -speedError;
+                if (brake > needBrake) brake = needBrake;
+                rb.AddForce(-dir * rb.mass * (brake / Time.fixedDeltaTime));
+            }
+        }
 
         Vector2 cur = transform.position;
         float worldR = Mathf.Max(transform.lossyScale.x, transform.lossyScale.y) * baseWorldRadius;
@@ -142,7 +163,12 @@ public class BallPainter : MonoBehaviour, IStageValue
         value += new HugeInt(amount);
     }
 
-    public void WhileBeHit(int _stage, HugeInt _value) { }
+    public void WhileBeHit(int _stage, HugeInt _value)
+    {
+        // 只有受到实际伤害（数值减少）才暂停加速；治疗（_value<0）不算受击。
+        if (_value > 0 && hurt_fast_pause > 0f)
+            hurtPauseTimer = hurt_fast_pause;
+    }
 
     Vector2 WorldToUV(Vector2 world)
     {

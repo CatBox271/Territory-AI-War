@@ -267,8 +267,8 @@ MonoBehaviour:
   stuckBounceMinY: 3
   stuckBounceMaxY: 8
   shrinkThreshold: 15
-  shrinkRate: 0.0083
-  minShrinkScale: 0.5
+  shrinkRate: 0.1
+  minShrinkScale: 0.1
 --- !u!114 &6891342313085790704
 MonoBehaviour:
   m_ObjectHideFlags: 0

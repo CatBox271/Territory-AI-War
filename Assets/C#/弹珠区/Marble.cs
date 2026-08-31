@@ -66,7 +66,6 @@ public class Marble : MonoBehaviour
 
         if (tmp != null)
         {
-            tmp.color = MapConfig.Instance.GetText(stage);
             UpdateDisplay();
             SetupOutline();
         }
@@ -183,10 +182,10 @@ public class Marble : MonoBehaviour
         scaleMultiplier = 1f;
         ApplyScale();
     }
-
     void FixedUpdate()
     {
         if (rb == null) return;
+
         Vector2 pos = transform.position;
 
         // expand bounding box

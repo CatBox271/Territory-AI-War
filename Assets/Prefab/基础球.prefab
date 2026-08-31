@@ -379,24 +379,24 @@ MonoBehaviour:
       - serializedVersion: 3
         time: 0
         value: 2
-        inSlope: -0.09568229
-        outSlope: -0.09568229
-        tangentMode: 0
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 136
         weightedMode: 0
         inWeight: 0.33333334
-        outWeight: 0.12733942
+        outWeight: 0.33333334
       - serializedVersion: 3
         time: 20.095497
-        value: 0.40383726
-        inSlope: -0.05263612
-        outSlope: -0.05263612
-        tangentMode: 0
+        value: 0.5
+        inSlope: -0.024999999
+        outSlope: -0.024999999
+        tangentMode: 136
         weightedMode: 0
         inWeight: 0.33333334
-        outWeight: 0.1864782
+        outWeight: 0.33333334
       - serializedVersion: 3
         time: 40
-        value: 0.05
+        value: 0.25
         inSlope: 0
         outSlope: 0
         tangentMode: 136
@@ -432,9 +432,9 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   TR: {fileID: 622875075528979609}
-  fastA: 0
-  slowA: 0
-  hurt_fast_pause: 0
+  fastA: 0.5
+  slowA: 2
+  hurt_fast_pause: 0.3
 --- !u!114 &2128266677755943854
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -584,6 +584,7 @@ GameObject:
   - component: {fileID: 5006211971371850014}
   - component: {fileID: 3967913570602742917}
   - component: {fileID: 6357157271336692195}
+  - component: {fileID: 5488662140748159394}
   m_Layer: 0
   m_Name: Text (Legacy)
   m_TagString: Untagged
@@ -608,7 +609,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 32.02, y: 16.8}
+  m_SizeDelta: {x: 29.4, y: 23.6}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &5006211971371850014
 MonoBehaviour:
@@ -689,7 +690,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 16K
+  m_text: 384K
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 2e498d1c8094910479dc3e1b768306a4, type: 2}
   m_sharedMaterial: {fileID: 2100000, guid: 848fa083c80047bd93630b8b8d362087, type: 2}
@@ -716,17 +717,17 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 166.67
+  m_fontSize: 125.75
   m_fontSizeBase: 166.67
   m_fontWeight: 400
-  m_enableAutoSizing: 0
-  m_fontSizeMin: 18
-  m_fontSizeMax: 450
-  m_fontStyle: 1
+  m_enableAutoSizing: 1
+  m_fontSizeMin: 0
+  m_fontSizeMax: 453.56
+  m_fontStyle: 0
   m_HorizontalAlignment: 2
   m_VerticalAlignment: 512
   m_textAlignment: 65535
-  m_characterSpacing: -12.7
+  m_characterSpacing: 0
   m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
@@ -764,3 +765,16 @@ MonoBehaviour:
   m_hasFontAssetChanged: 0
   m_renderer: {fileID: 3967913570602742917}
   m_maskType: 0
+--- !u!114 &5488662140748159394
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7952261177358053116}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 47ee93c8d783bba4c97b33377b99804e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  text: {fileID: 6357157271336692195}

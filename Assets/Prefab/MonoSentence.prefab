@@ -127,12 +127,12 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 45
-  m_fontSizeBase: 25
+  m_fontSize: 28
+  m_fontSizeBase: 28
   m_fontWeight: 400
-  m_enableAutoSizing: 1
-  m_fontSizeMin: 18
-  m_fontSizeMax: 45
+  m_enableAutoSizing: 0
+  m_fontSizeMin: 24
+  m_fontSizeMax: 32
   m_fontStyle: 0
   m_HorizontalAlignment: 2
   m_VerticalAlignment: 512
@@ -266,7 +266,7 @@ MonoBehaviour:
     m_RotationOrder: 4
   randomRotationMax: 360
   fallFadeTime: 0.4
-  charDisplayTime: 0.075
+  charDisplayTime: 0.08
   minDisplayTime: 2
   speedMultiplier: 1
   playOnEnable: 1

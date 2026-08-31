@@ -156,7 +156,7 @@ MonoBehaviour:
   shield: {fileID: 2721065759024970260}
   _shield_value: 1048576
   Radius: 1
-  bulletSpeed: 3.6
+  bulletSpeed: 4
   bigBallSpeed: 1
   bulletCount:
     curve:
@@ -361,7 +361,7 @@ MonoBehaviour:
   loop: 1
   active: 1
   guardMode: 1
-  guardRadius: 2
+  guardRadius: 3
   guardUpdateInterval: 0.2
   guardCompute: {fileID: 7200000, guid: b63ecda2ccb94b768325f38abd37093b, type: 3}
 --- !u!114 &7866295218095374167

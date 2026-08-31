@@ -23,6 +23,18 @@ public class InformGetter : MonoBehaviour
     // 阵营私有：GetInfo 只输出请求方自己的受击统计，输出完成后整体清空。
     public static Dictionary<int, List<DamageSourceInfo>> DamageStats = new();
 
+    // 炮塔控制自动断开提示：阵营 -> 断开原因。GetInfo 输出一次后清除。
+    public static Dictionary<int, string> TurretControlLostReason = new();
+
+    // 每个 AI 最近的公开 content（AIAgent.ReceiveResponse 写入），附加到全局信息里给所有 AI 看。
+    public static Dictionary<int, string> AIContents = new();
+
+    public static void SetAIContent(int stage, string content)
+    {
+        if (stage < 0 || string.IsNullOrWhiteSpace(content)) return;
+        AIContents[stage] = content.Trim();
+    }
+
     #region 注册
     //注册一个新弹珠，由MarbleManager在生成时调用
     public static void AddMarble(int stage, Marble m)
@@ -64,18 +76,34 @@ public class InformGetter : MonoBehaviour
         }
         entry.damage += damage;
     }
+
+    /// <summary>记录一次炮塔控制自动断开（供下一轮 GetInfo 提示 AI）。</summary>
+    public static void NotifyTurretControlLost(int stage, string reason)
+    {
+        if (stage < 0) return;
+        TurretControlLostReason[stage] = reason;
+    }
+
     #endregion
     //获得目标stage能获得的全部信息
-    public static void GetInfo(StringBuilder builder, int stage)
+    public const string IntelInfoStart = "【情报信息开始】";
+    public const string IntelInfoEnd = "【情报信息结束】";
+
+    public static void GetInfo(StringBuilder builder, int stage, bool clearDamage = false)
     {
+        builder.AppendLine(); builder.AppendLine(IntelInfoStart);
         //自己的道具栈放最前面，AI 第一眼就能看到
         GetInfoProp(builder, stage);
+        AppendTurretControlNotice(builder, stage);
+        AppendNearestEnemyTerritory(builder, stage);
+        TurretControlLostReason.Remove(stage);
 
         //全局可见信息
         foreach (var key in Oitems.Keys)
         {
             GetInfoOKey(builder, key);
         }
+        AppendAIContents(builder);
         //弹珠为阵营私有信息，只返回请求方自己的
         foreach (var key in MarbleItems.Keys)
         {
@@ -85,7 +113,26 @@ public class InformGetter : MonoBehaviour
         AppendUpgradeProgress(builder, stage);
         AppendTerritoryArea(builder);
         AppendDamageInfo(builder, stage);
-        ClearDamageStats();
+        if (clearDamage) ClearDamageStats();
+        builder.AppendLine(); builder.AppendLine(IntelInfoEnd);
+    }
+
+    /// <summary>把每个 AI 的公开 content 追加到全局信息（所有阵营都可见）。</summary>
+    private static void AppendAIContents(StringBuilder builder)
+    {
+        bool has = false;
+        for (int s = 1; s <= 4; s++)
+        {
+            if (AIContents.TryGetValue(s, out string c) && !string.IsNullOrWhiteSpace(c)) { has = true; break; }
+        }
+        if (!has) return;
+
+        builder.AppendLine(); builder.AppendLine("各AI本轮发言:");
+        for (int s = 1; s <= 4; s++)
+        {
+            if (AIContents.TryGetValue(s, out string c) && !string.IsNullOrWhiteSpace(c))
+                builder.AppendLine($"{AIAgent.GetStageName(s)}：{c}");
+        }
     }
 
     #region 领土面积
@@ -135,6 +182,14 @@ public class InformGetter : MonoBehaviour
 
     /// <summary>把请求方自己受到的伤害统计拼进 AI 上下文（阵营私有）。</summary>
 
+    /// <summary>炮塔控制自动断开提示：每个阵营每次 GetInfo 最多输出一次。</summary>
+    private static void AppendTurretControlNotice(StringBuilder builder, int stage)
+    {
+        if (!TurretControlLostReason.TryGetValue(stage, out string reason) || string.IsNullOrWhiteSpace(reason)) return;
+
+        builder.AppendLine(); builder.AppendLine($"炮塔控制已断开：{reason}。如需继续瞄准，请重新调用 control_turret start。");
+    }
+
     /// <summary>附加请求方自己的弹珠升级进度（空槽升级）。</summary>
     private static void AppendUpgradeProgress(StringBuilder builder, int stage)
     {
@@ -166,6 +221,76 @@ public class InformGetter : MonoBehaviour
             builder.Append(")");
         }
         builder.AppendLine(); builder.Append("}");
+    }
+
+    private const float EnemyTerritoryDangerDistance = 3f;
+    /// <summary>找出距离请求方基地最近的敌方领土，报告所属阵营、世界坐标、距离和相对方位。距离<=3标为危险。</summary>
+    private static void AppendNearestEnemyTerritory(StringBuilder builder, int stage)
+    {
+        var canvas = TerritoryCanvas.Instance;
+        var config = MapConfig.Instance;
+        if (canvas == null || config == null || !canvas.territoryMap.IsCreated) return;
+        if (!Towel.AllTowel.TryGetValue(stage, out Towel self) || self == null) return;
+
+        int res = config.resolution;
+        float ms = config.worldSize;
+        Vector2 origin = canvas.transform.position; // 地形 Quad 中心的世界坐标（当前场景为原点）
+        Vector2 selfPos = self.transform.position;
+        var map = canvas.territoryMap;
+
+        float bestSq = float.MaxValue;
+        int bestStage = -1;
+        Vector2 bestWorld = Vector2.zero;
+
+        for (int i = 0; i < map.Length; i++)
+        {
+            byte s = map[i];
+            if (s == stage || s == 0 || s >= config.teamColors.Count) continue;
+
+            int px = i % res;
+            int py = i / res;
+            Vector2 world = origin + new Vector2((px + 0.5f) / res * ms - ms * 0.5f, (py + 0.5f) / res * ms - ms * 0.5f);
+            float dx = world.x - selfPos.x;
+            float dy = world.y - selfPos.y;
+            float dSq = dx * dx + dy * dy;
+            if (dSq < bestSq)
+            {
+                bestSq = dSq;
+                bestStage = s;
+                bestWorld = world;
+            }
+        }
+
+        if (bestStage < 0) return;
+
+        Vector2 dir = bestWorld - selfPos;
+        float dist = Mathf.Sqrt(bestSq);
+        string dirText = CardinalDirection(dir);
+
+        builder.AppendLine(); builder.Append("{");
+        builder.Append("距离你基地最近的敌方领土: ");
+        builder.Append(bestStage); builder.Append("号阵营("); builder.Append(AIAgent.GetStageName(bestStage)); builder.Append(")，全局坐标(");
+        builder.Append(bestWorld.x.ToString("0.00")); builder.Append(", ");
+        builder.Append(bestWorld.y.ToString("0.00")); builder.Append(")，距离 ");
+        builder.Append(dist.ToString("0.00"));
+        if (dist <= EnemyTerritoryDangerDistance) builder.Append("【危险：距离3】");
+        builder.Append("，相对方向 "); builder.Append(dirText);
+        builder.AppendLine();
+        builder.AppendLine("(附近存在敌方领土时，你的子弹可以朝该方向长驱直入，快速涂下更多领地)");
+        builder.Append("}");
+    }
+
+    private static string CardinalDirection(Vector2 dir)
+    {
+        float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+        if (angle >= -22.5f && angle < 22.5f) return "右";
+        if (angle >= 22.5f && angle < 67.5f) return "右上";
+        if (angle >= 67.5f && angle < 112.5f) return "上";
+        if (angle >= 112.5f && angle < 157.5f) return "左上";
+        if (angle >= 157.5f || angle < -157.5f) return "左";
+        if (angle >= -157.5f && angle < -112.5f) return "左下";
+        if (angle >= -112.5f && angle < -67.5f) return "下";
+        return "右下";
     }
 
     public static void ClearDamageStats()
@@ -250,6 +375,7 @@ public class InformGetter : MonoBehaviour
         MarbleItems = new();
         GuidToTransform = new();
         DamageStats = new();
+        TurretControlLostReason = new();
     }
 }
 

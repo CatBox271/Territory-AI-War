@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 
 
@@ -100,7 +101,7 @@ public class Towel : MonoBehaviour, IStageValue
         ShotGunTest();
     }
 
-    public bool Say(string content) => messageDisplayer.Say(content);
+    public bool Say(string content, bool force = false) => messageDisplayer.Say(content, force);
 
     void CreateExplosionEffect()
     {
@@ -138,20 +139,28 @@ public class Towel : MonoBehaviour, IStageValue
 
     private bool isDead;
 
-    public void Die()
+    private int killerStage = -1;
+    private string killerWeapon = "";
+
+    public void Die(int killerStage = -1, string killerWeapon = "")
     {
         if (isDead) return;
         isDead = true;
+        this.killerStage = killerStage;
+        this.killerWeapon = killerWeapon ?? "";
 
         if (shield != null) shield.SetActive(false);
 
         CreateExplosionEffect();
-        AllTowel.Remove(stage);
         StartCoroutine(DieSequence());
     }
 
     System.Collections.IEnumerator DieSequence()
     {
+        // 遗言放在死亡流程最前面：先说完遗言，再开始释放大球
+        var lastWords = AIAgent.OnStageDeathAsync(stage, killerStage, killerWeapon);
+        while (!lastWords.IsCompleted) yield return null;
+
         var marbles = FindObjectsOfType<Marble>();
         foreach (var marble in marbles)
         {
@@ -161,20 +170,47 @@ public class Towel : MonoBehaviour, IStageValue
                 yield return new WaitForSeconds(0.2f);
             }
         }
+
+        // 死亡时把道具栈里的道具也以大球形式释放
+        if (config != null && config.teamProps != null && stage >= 0 && stage < config.teamProps.Length)
+        {
+            List<PropEntry> props = config.teamProps[stage];
+            if (props != null)
+            {
+                foreach (PropEntry prop in new List<PropEntry>(props))
+                {
+                    SpawnBigBall(prop.value);
+                    yield return new WaitForSeconds(0.2f);
+                }
+                props.Clear();
+            }
+        }
+
         if (value > 0)
         {
             SpawnBigBall(value);
             yield return new WaitForSeconds(0.2f);
         }
+
         if (MarbleManager.Instance != null)
             MarbleManager.Instance.OnTeamDeath(stage);
+
+        AllTowel.Remove(stage);
         Destroy(gameObject);
     }
 
     public void WhileBeHit(int _stage, HugeInt _value)
     {
         Debug.Log($"stage:{stage} has killed by stage{_stage}");
-        Die();
+        Die(_stage, ExtractWeapon(hurtSourceDesc));
+    }
+
+    private static string ExtractWeapon(string sourceDesc)
+    {
+        if (string.IsNullOrEmpty(sourceDesc)) return "";
+        int idx = sourceDesc.IndexOf("号阵营");
+        if (idx >= 0) return sourceDesc.Substring(idx + 3).Trim();
+        return sourceDesc;
     }
 
     void ShotGunTest()

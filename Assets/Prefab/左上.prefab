@@ -517,20 +517,20 @@ MonoBehaviour:
     - serializedVersion: 3
       time: 0
       value: 0.1
-      inSlope: 0.00416715
-      outSlope: 0.044999998
-      tangentMode: 65
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0.12686683
-    - serializedVersion: 3
-      time: 20
-      value: 1
-      inSlope: 0.11836903
-      outSlope: 0.11836903
+      inSlope: 0.14449193
+      outSlope: 0.14449193
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.087799646
+      inWeight: 0.33333334
+      outWeight: 0.10244175
+    - serializedVersion: 3
+      time: 20
+      value: 4
+      inSlope: 0.32603857
+      outSlope: 0.32603857
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.11027317
       outWeight: 0
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -2425,6 +2425,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 8992258395687461325}
     m_Modifications:
+    - target: {fileID: 1901738514413325518, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
     - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_text
       value: "\xD78"
@@ -2523,6 +2527,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 8992258395687461325}
     m_Modifications:
+    - target: {fileID: 1901738514413325518, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
     - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_text
       value: "\xD74"
@@ -2621,6 +2629,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 8992258395687461325}
     m_Modifications:
+    - target: {fileID: 1901738514413325518, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
     - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_text
       value: "\xD72"

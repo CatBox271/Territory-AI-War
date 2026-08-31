@@ -169,7 +169,7 @@ public class UIWeaponItem : MonoBehaviour
             case EffectLevel.Dark:
                 if (normalMaterial != null) sp.sharedMaterial = normalMaterial;
                 sp.SetPropertyBlock(null);
-                sp.color = tint * darkFactor;
+                sp.color = new Color(tint.r * darkFactor, tint.g * darkFactor, tint.b * darkFactor, tint.a);
                 break;
 
             case EffectLevel.Enchant:
@@ -272,7 +272,7 @@ public class UIWeaponItem : MonoBehaviour
         MaterialPropertyBlock block = GetBlock();
         if (level == EffectLevel.Dark)
         {
-            block.SetColor("_Color", previewTint * darkFactor);
+            block.SetColor("_Color", new Color(previewTint.r * darkFactor, previewTint.g * darkFactor, previewTint.b * darkFactor, previewTint.a));
         }
         else if (level == EffectLevel.Enchant)
         {
