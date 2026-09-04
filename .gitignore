@@ -48,3 +48,8 @@ crashlytics-build.properties
 # ── Debug captures / archives ──
 /*.mp4
 Assets.7z
+
+# ── Locus tooling (auto-generated / plugin) ──
+/Directory.Build.props
+/Locus/workspace-trees/
+/Packages/com.farlocus.locus/
