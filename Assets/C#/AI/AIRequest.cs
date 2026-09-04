@@ -314,6 +314,11 @@ public class RequestInfo
     public int toolStage = -1;
     public bool back_tool = true;
 
+    /// <summary>回复落库/执行工具前的内容校验。返回 false 会拦截本次回复并重发。</summary>
+    public Func<DeepSeekMessage, bool> validateResponse;
+    public int maxValidationRetries = 3;
+    public int validationRetryCount;
+
     public void AddMessage(List<DeepSeekMessage> message)
     {
         request.messages.AddRange(message);
@@ -627,6 +632,39 @@ public static class AIRequest
         return JsonConvert.DeserializeObject<List<DeepSeekMessage>>(JsonConvert.SerializeObject(input));
     }
 
+    private const string ThinkingRetryPrompt =
+        "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）或(我想：……)；" +
+        "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
+
+    /// <summary>
+    /// 校验 AI 回复。不合格时不落库、不执行工具，追加一条修正提醒后立刻重发。
+    /// candidateAlreadyInHistory：流式请求会先放一个占位 assistant，校验失败时需要先移除。
+    /// </summary>
+    private static bool ValidateAndMaybeRetry(RequestInfo requestInfo, DeepSeekMessage candidate, bool candidateAlreadyInHistory)
+    {
+        if (requestInfo.validateResponse == null || requestInfo.validateResponse(candidate))
+            return true;
+
+        if (candidateAlreadyInHistory && requestInfo.messages.Count > 0 &&
+            requestInfo.messages[requestInfo.messages.Count - 1].role == "assistant")
+        {
+            requestInfo.messages.RemoveAt(requestInfo.messages.Count - 1);
+        }
+
+        if (requestInfo.validationRetryCount >= requestInfo.maxValidationRetries)
+        {
+            Debug.LogWarning("[AIRequest] 思考模式连续校验失败，已拦截本轮回复与工具。");
+            requestInfo.onError?.Invoke("思考模式连续不符合要求，已拦截本轮回复与工具");
+            return false;
+        }
+
+        requestInfo.validationRetryCount++;
+        requestInfo.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
+        Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {candidate.reasoning_content}");
+        SendRequest(requestInfo);
+        return false;
+    }
+
     public static void SendRequest(RequestInfo requestInfo)
     {
         // 在发送副本上做字段裁剪，绝不修改 CharacterCard 的 history。
@@ -700,14 +738,29 @@ public static class AIRequest
                 string aiResponse = back_message.content;
                 string after_thinking = back_message.reasoning_content;
 
-                if (back_message.tool_calls != null && back_message.tool_calls.Count > 0)
+                var assistant = new DeepSeekMessage()
+                {
+                    role = "assistant",
+                    reasoning_content = after_thinking,
+                    content = aiResponse,
+                    tool_calls = back_message.tool_calls
+                };
+
+                // 思考模式不合格：不落库、不执行工具，直接拦截并重发
+                if (!ValidateAndMaybeRetry(requestInfo, assistant, false))
+                {
+                    request.Dispose();
+                    return;
+                }
+
+                if (assistant.tool_calls != null && assistant.tool_calls.Count > 0)
                 {
                     // 把AI的回复加入对话记录
-                    requestInfo.AddMessage(new DeepSeekMessage() { role = "assistant", reasoning_content = after_thinking, content = aiResponse, tool_calls = back_message.tool_calls });
+                    requestInfo.AddMessage(assistant);
 
                     if (requestInfo.toolkit != null)
                     {
-                        var newMessages = await requestInfo.toolkit.DealToolCallsAsync(back_message.tool_calls, requestInfo.toolStage);
+                        var newMessages = await requestInfo.toolkit.DealToolCallsAsync(assistant.tool_calls, requestInfo.toolStage);
                         if (newMessages != null && newMessages.Count > 0)
                         {
                             if (requestInfo.back_tool)
@@ -730,9 +783,8 @@ public static class AIRequest
                 else
                 {
                     // 把AI的回复加入对话记录
-                    var nms = new DeepSeekMessage() { role = "assistant", reasoning_content = after_thinking, content = aiResponse };
-                    requestInfo.AddMessage(nms);
-                    requestInfo.onResponse?.Invoke(new() { nms.Clone });
+                    requestInfo.AddMessage(assistant);
+                    requestInfo.onResponse?.Invoke(new() { assistant.Clone });
                 }
             }
             else
@@ -856,6 +908,13 @@ public static class AIRequest
                 requestInfo.messages[^1] = assistantMessage;
             }
 
+            // 思考模式不合格：移除占位 assistant，拦截工具并重发
+            if (!ValidateAndMaybeRetry(requestInfo, assistantMessage, true))
+            {
+                request.Dispose();
+                return;
+            }
+
             if (requestInfo.toolkit != null)
             {
                 var newMessages = await requestInfo.toolkit.DealToolCallsAsync(toolCallsList, requestInfo.toolStage);
@@ -890,6 +949,14 @@ public static class AIRequest
             {
                 requestInfo.messages[^1] = assistantMessage;
             }
+
+            // 思考模式不合格：移除占位 assistant 并重发，不展示错误回复
+            if (!ValidateAndMaybeRetry(requestInfo, assistantMessage, true))
+            {
+                request.Dispose();
+                return;
+            }
+
             requestInfo.onResponse?.Invoke(new() { assistantMessage.Clone });
         }
 
@@ -1037,19 +1104,44 @@ public static class AIRequest
     }
     /// <summary>
     /// 检测 reasoning_content 是否是符合人设的中文内心独白。
-    /// 合格示例：(内心OS：) / （心想：）；不合格示例：大段英文规划/复盘。
+    /// 合格示例：(内心OS：) / （心想：） / （我想：）；不合格示例：大段英文规划/复盘。
     /// </summary>
-    public static bool IsRoleplayReasoning(string text)
+    public static bool IsRoleplayReasoning(string text, string content)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(content)) return false;
+        return HasRoleplayThinkingMark(text) && !ContainsAnyParenthesis(content) && !content.Contains("[skip]");
+    }
+
+    /// <summary>
+    /// 用于 RequestInfo.validateResponse 的完整回复校验。
+    /// 纯文本回复必须无括号；工具调用允许 content 为空，但仍要求思考里有内心独白标记。
+    /// </summary>
+    public static bool IsRoleplayReasoning(DeepSeekMessage message)
+    {
+        if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content)) return false;
+
+        bool contentRight;
+        if (string.IsNullOrWhiteSpace(message.content))
+            contentRight = message.tool_calls != null && message.tool_calls.Count > 0;
+        else
+            contentRight = !ContainsAnyParenthesis(message.content) && !message.content.Contains("[skip]");
+
+        return HasRoleplayThinkingMark(message.reasoning_content) && contentRight;
+    }
+
+    private static bool HasRoleplayThinkingMark(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-
-        // 关键是括号：内心独白必须写成 (内心OS：) / （心想：）这种形式
         bool hasParen = text.Contains("（") || text.Contains("(");
-        bool hasMarker = text.Contains("内心OS")
-            || text.Contains("心想")
-            || text.Contains("内心独白")
-            || text.Contains("暗自");
-        return hasParen && hasMarker;
+        return hasParen &&
+               (text.Contains("我想") || text.Contains("心想：") || text.Contains("内心OS："));
+    }
+
+    private static bool ContainsAnyParenthesis(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text.IndexOf('（') >= 0 || text.IndexOf('）') >= 0 ||
+               text.IndexOf('(') >= 0 || text.IndexOf(')') >= 0;
     }
 
     public static class TokenEstimator

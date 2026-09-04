@@ -113,19 +113,19 @@ public class AIAgent : MonoBehaviour
         {
             reactionSystem.stage = 1;//兼容旧的单阵营入口，实际以 RequestInfo.toolStage 为准
            cards.Add(new CharacterCard("赤喵",
-    "人设：15岁的中二雌小鬼小猫，自称“猩红利爪”。性格急性子、爱嘲讽、得意时“嘻嘻～”笑。劣势时会发出“呜喵？！”等奇怪动静，死不认输。战术风格：开局rush，多线骚扰，越劣势越疯。", 
+    "人设：15岁的中二雌小鬼小猫，自称“猩红利爪”。性格急性子、爱嘲讽、得意时“嘻嘻～”笑。劣势时会发出“呜喵？！”等奇怪动静，死不认输。发猫咪emoji", 
     1, "255|000|000|255", ApiUrl, reactionSystem.tools));
 
 cards.Add(new CharacterCard("苍感",
-    "人设：20岁的天才战术师，外表冷静正经但偶尔会冒出低烈度粗口。过度思考，容易走神，常说“啊……你刚刚说了什么？”战术风格：侦察优先，防守反击，精于计算。", 
+    "人设：20岁的天才战术师，外表冷静正经，但会在突发情况冒出低烈度粗口。", 
     2, "000|000|255|255", ApiUrl, reactionSystem.tools));
 
 cards.Add(new CharacterCard("藤延", 
-    "人设：绿发阴湿系青年。性格冷漠寡言，但对队友莫名负责，总在暗处默默守护。战术风格：游走消耗，耐心围杀，像鬼一样神出鬼没。", 
+    "人设：绿发阴湿系青年。", 
     3, "000|255|000|255", ApiUrl, reactionSystem.tools));
 
 cards.Add(new CharacterCard("耶罗",
-    "人设：24岁的疯癫战术家，直觉惊人。性格疯疯癫癫，爱说无厘头胡话。战术风格：不可预测，声东击西，制造混乱。", 
+    "人设：24岁的疯癫战术家，熟女。性格疯疯癫癫，爱说无厘头胡话，喜欢大笑，低程度的阴阳。", 
     4, "255|255|000|255", ApiUrl, reactionSystem.tools));
 
             foreach (CharacterCard card in cards)
@@ -474,8 +474,9 @@ cards.Add(new CharacterCard("耶罗",
 - 道具按获得顺序进入武器栏；超过当前可持有数量时，从最新获得的道具开始溢出并立即生效。
 
 ## 五、空槽升级
-每个**已解锁且为空**的武器格都会持续积累升级值，达标后**额外生成一个弹珠**；每生成一个，下一次升级所需值翻倍。
-因此：使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌。但不要无意义囤积道具。
+每个**已解锁且为空**的道具格都会持续积累升级值，达标后**额外生成一个弹珠**；每生成一个，下一次升级所需值翻倍。
+因此：使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
+注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
 
 ## 六、道具
 一次使用多个道具时，按武器栈从后往前（高槽位→低槽位）依次调用，避免槽位反复移动。
@@ -490,15 +491,18 @@ cards.Add(new CharacterCard("耶罗",
 
 ## 决策原则
 选择能够最大化最终胜率的行动，而不是看起来最积极的行动。
-
-## 行动与发言约束
-- 沉默指 content 极简克制（可用。。。或嗯。表达），游戏行动仍必须照常调用工具。
 ";
-        private static string character_mode_prompt = @"【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
-1. 请以角色第一人称进行内心独白，用括号包裹内心活动，例如“（心想：……）”或“(内心OS：……)”
+        private static string character_mode_prompt = @"
+
+【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
+1. 请以角色第一人称进行内心独白，用括号包裹内心活动，必须用“（我想：……）”或“（心想：……）”
 2. 用第一人称描写角色的内心感受，例如“我心想”“我觉得”“我暗自”等
 3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复
-4. 正式回答只放content内，别露内心戏,别露你的情报，别暴露你的悄悄话，content的内容全局玩家共享！纯文本+emoji，人格化表达，禁用markdown，字数左右25字。
+
+在你的真实回答（<content>标签内）中，请遵守以下规则：
+1. 纯文本 + emoji，禁用markdown，不使用括号（）（）！不要动作描写，。
+2. 别露内心戏，别露你的情报。
+3. 夸张化的沉浸在角色中，字数限制在25字。
 ";
 
         public static string ModePrompt => character_mode_prompt;
@@ -717,6 +721,10 @@ cards.Add(new CharacterCard("耶罗",
         private const int k = 5;    // 保留最近完整轮数，与 last_round_index 的 5 对应
         private const float b = 30f; // DeepSeek 未命中/命中价格比
 
+        // 连续系统录制回合未调用工具统计；超过 2 个系统回合未用工具时追加提醒
+        private int roundsWithoutTool;
+        private bool noToolReminderSent;
+
         private bool openingRetryMode;
         private List<DeepSeekMessage> openingLastMessages;
         private int n_0_index = 1;//排除系统消息
@@ -760,9 +768,9 @@ cards.Add(new CharacterCard("耶罗",
             return d >= D;
         }
 
-        private void MaybeCompress()
+        private bool MaybeCompress()
         {
-            if (!ShouldCompress()) return;
+            if (!ShouldCompress()) return false;
 
             Compress();
 
@@ -777,18 +785,24 @@ cards.Add(new CharacterCard("耶罗",
             }
 
             n_0 = N;
+            return true;
         }
 
         public async Task SendRequest(string inform)
         {
             N++;
-            MaybeCompress();
+            bool compressed = MaybeCompress();
 
             last_round_index.Add(history.Count);
             if (last_round_index.Count > 5) last_round_index.RemoveAt(0);
 
             int startTokens = EstimateHistoryTokens(history);
             history.Add(new DeepSeekMessage("user", inform));
+
+            // 压缩后不能只改旧历史；要在“这轮新对话”里追加 Tool 使用方法提醒
+            if (compressed)
+                history.Add(new DeepSeekMessage("user", BuildToolUsageReminder()));
+
             int roundStartIndex = history.Count;
             bool isOpening = N == 1; // 只在开局放狠话这一轮检测 reasoning，不合格就无限重刷
             bool pausedForRetry = false;
@@ -846,6 +860,11 @@ cards.Add(new CharacterCard("耶罗",
                 info.apiKey = AIAgent.LoadApiKey();
                 info.apiUrl = url;
 
+                // 开局轮由本类自己的 reasoning 重试循环处理；
+                // 其余回合交给 AIRequest 在落库/执行工具前校验，不合格立即拦截重发。
+                if (!isOpening)
+                    info.validateResponse = m => AIRequest.IsRoleplayReasoning(m);
+
                 try
                 {
                     AIRequest.SendRequest(info);
@@ -869,8 +888,8 @@ cards.Add(new CharacterCard("耶罗",
                 bool goodEnough = true;
                 if (isOpening)
                 {
-                    reasoning = GetLastAssistantReasoning();
-                    goodEnough = AIRequest.IsRoleplayReasoning(reasoning);
+                    reasoning = GetLastAssistantReasoning(out string content);
+                    goodEnough = AIRequest.IsRoleplayReasoning(reasoning,content);
                 }
 
                 if (goodEnough)
@@ -918,11 +937,112 @@ cards.Add(new CharacterCard("耶罗",
             int sampleX = Mathf.Max(0, endTokens - startTokens);
             avgX = avgX * 0.9f + sampleX * 0.1f;
 
+            // 开局强制不放工具，不参与“连续未用工具”统计
+            if (!isOpening)
+                UpdateToolUsageReminder(roundStartIndex);
+
             Save();
         }
+
+        private string BuildToolUsageReminder()
+        {
+            var sb = new StringBuilder("[压缩后的Tool提醒] 旧历史已被压缩，但你仍然可以正常调用工具，调用方式不变。可用工具：");
+
+            bool first = true;
+            if (request.tools != null)
+            {
+                foreach (Tool tool in request.tools)
+                {
+                    string toolName = tool?.function?.name;
+                    if (string.IsNullOrWhiteSpace(toolName)) continue;
+                    if (!first) sb.Append("、");
+                    sb.Append(toolName);
+                    first = false;
+                }
+            }
+
+            if (first)
+                sb.Append("（无）");
+            else
+                sb.Append("。请按工具参数 JSON 调用，不要因为历史被压缩就只发文字。");
+
+            return sb.ToString();
+        }
+
+        private void UpdateToolUsageReminder(int roundStartIndex)
+        {
+            bool usedToolThisRound = false;
+            for (int i = roundStartIndex; i < history.Count; i++)
+            {
+                DeepSeekMessage msg = history[i];
+                if (msg == null) continue;
+                if (msg.role == "tool" || (msg.tool_calls != null && msg.tool_calls.Count > 0))
+                {
+                    usedToolThisRound = true;
+                    break;
+                }
+            }
+
+            if (usedToolThisRound)
+            {
+                roundsWithoutTool = 0;
+                noToolReminderSent = false;
+                return;
+            }
+
+            roundsWithoutTool++;
+
+            // 超过 2 个系统录制回合没用工具：在第 3 个连续空回合追加一次提醒
+            if (roundsWithoutTool >= 3 && !noToolReminderSent)
+            {
+                noToolReminderSent = true;
+                history.Add(new DeepSeekMessage("user",
+                    $"[行动提醒] 你已经连续 {roundsWithoutTool} 个系统录制回合没有调用工具。请尽快使用工具采取实际游戏行动，不要只发言或思考。注意：道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。"));
+                Debug.LogWarning($"[AIAgent] {name} 连续 {roundsWithoutTool} 个系统回合未调用工具，已追加行动提醒");
+            }
+        }
+        private const string ParenthesisReminder =
+            "[格式提醒] 检测到你上次的回复里带了中文或英文括号。下次回复禁止使用任何括号，请严格遵守：\n" +
+            "1. 纯文本 + emoji，禁用 markdown，不使用括号，不要动作描写。\n" +
+            "2. 别露内心戏，别露你的情报。\n" +
+            "3. 夸张化地沉浸在角色中，字数限制在 25 字。";
+
+        private static readonly char[] ParenthesisChars = { '（', '）', '(', ')' };
+
+        private bool ContainsParenthesis(string text)
+        {
+            return !string.IsNullOrEmpty(text) && text.IndexOfAny(ParenthesisChars) >= 0;
+        }
+
+        private void RemindIfUsesParentheses(List<DeepSeekMessage> messages)
+        {
+            if (messages == null) return;
+
+            foreach (DeepSeekMessage message in messages)
+            {
+                if (message == null || message.role != "assistant") continue;
+                if (!ContainsParenthesis(message.content)) continue;
+
+                // 避免同一个违规反复堆叠提醒
+                if (history.Count > 0)
+                {
+                    DeepSeekMessage last = history[history.Count - 1];
+                    if (last.role == "user" && last.content == ParenthesisReminder)
+                        return;
+                }
+
+                history.Add(new DeepSeekMessage("user", ParenthesisReminder));
+                Debug.Log($"[AIAgent] {name} 的回复包含括号，已追加下次禁止括号提醒。原文: {message.content}");
+                return;
+            }
+        }
+
         private void ReceiveResponse(List<DeepSeekMessage> messages)
         {
             if (!_isRunning) return;
+
+            // 检查 AI 回复 content，出现括号就在 history 末尾追加提醒，下一次请求会带过去
+            RemindIfUsesParentheses(messages);
 
             // 开头重试期间先不公开展示，等确定保留哪一次再显示
             if (openingRetryMode)
@@ -976,12 +1096,16 @@ cards.Add(new CharacterCard("耶罗",
             return null;
         }
 
-        private string GetLastAssistantReasoning()
+        private string GetLastAssistantReasoning(out string content)
         {
+            content = "";
             for (int i = history.Count - 1; i >= 0; i--)
             {
                 if (history[i].role == "assistant")
+                {
+                    content = history[i].content;
                     return history[i].reasoning_content;
+                }
             }
             return null;
         }

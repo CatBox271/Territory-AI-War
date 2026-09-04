@@ -50,6 +50,7 @@ public class UIMarbleUpgrade : MonoBehaviour
         {
             marble.TryGetUpgradeInfo(i + 1, out float progress, out float cost);
             texts[i].text = $"当   前:{(int)progress}\n下一级:{(int)cost}";
+
         }
     }
 }

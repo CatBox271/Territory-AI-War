@@ -373,7 +373,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             return $"悄悄话失败：to 必须是1-4的阵营编号，收到 {args.to}。";
 
         string whisperResult = await WhisperManager.WhisperAsync(callStage, args.to, args.content, currentRound);
-        return whisperResult + "\n\n提醒：以上是悄悄话工具结果，只有你自己可见。你接下来最终生成的 content 是公开发言，所有玩家都会看到；请不要在公开发言里重复悄悄话内容或相关私密信息。如果本轮没有其他需要公开说的，content 可以只回复 [skip]；但这不影响你继续调用 use_prop / control_turret 等工具执行行动。";
+        return whisperResult + "\n\n提醒：以上是悄悄话工具结果，只有你自己可见。你接下来最终生成的 content 是公开发言，所有玩家都会看到；请不要在公开发言里重复悄悄话内容或相关私密信息。";
     }
 
     private static bool TryParseWhisperArguments(string argumentsJson, out WhisperArguments args)

@@ -187,6 +187,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: af02c48e039a73e488409df1700e9339, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  shakingAim: {fileID: 0}
 --- !u!1 &2081993569207315083
 GameObject:
   m_ObjectHideFlags: 0
@@ -199,6 +200,7 @@ GameObject:
   - component: {fileID: 2122457711876351644}
   - component: {fileID: 1534009320548253222}
   - component: {fileID: 7876056322405587230}
+  - component: {fileID: 4454358521560124109}
   m_Layer: 5
   m_Name: "\u5F39\u73E0\u5347\u7EA7\u663E\u793A"
   m_TagString: Untagged
@@ -334,3 +336,17 @@ MonoBehaviour:
   Refresh: 1
   times: 0.41
   tf: {fileID: 6911114859406908040}
+--- !u!114 &4454358521560124109
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2081993569207315083}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14a4bd19beceff74aa6807d00b32c9f0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  sp: {fileID: 2122457711876351644}
+  orign_effect: {fileID: 2100000, guid: 8b4f0d2e5c9a4b6e1d3f5a7c9e1b3d5f, type: 2}

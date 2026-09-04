@@ -266,7 +266,7 @@ MonoBehaviour:
     m_RotationOrder: 4
   randomRotationMax: 360
   fallFadeTime: 0.4
-  charDisplayTime: 0.08
-  minDisplayTime: 2
+  charDisplayTime: 0.1
+  minDisplayTime: 3
   speedMultiplier: 1
   playOnEnable: 1

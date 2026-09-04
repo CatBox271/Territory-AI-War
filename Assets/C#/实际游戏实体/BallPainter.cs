@@ -113,7 +113,7 @@ public class BallPainter : MonoBehaviour, IStageValue
         Vector2 uvB = WorldToUV(cur);
         if (!hasLast) { uvA = uvB; hasLast = true; }
 
-        int changed = canvas.PaintSegment(uvA, uvB, stage, attackPower, pixelR, budget);
+        int changed = canvas?.PaintSegment(uvA, uvB, stage, attackPower, pixelR, budget) ?? 0;
         Spend(changed);
         lastWorldPos = cur;
     }

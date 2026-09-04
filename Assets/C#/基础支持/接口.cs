@@ -48,5 +48,3 @@ public interface IStageValue
         WhileBeHit(_stage, -_value);
     }
 }
-
-
