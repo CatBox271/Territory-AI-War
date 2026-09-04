@@ -77,6 +77,49 @@ public class AIAgent : MonoBehaviour
         }
         return result;
     }
+
+    /// <summary>
+    /// 检测 reasoning_content 是否是符合人设的中文内心独白（思考模式校验，从 AIRequest 移入）。
+    /// 合格示例：(内心OS：) / （心想：） / （我想：）；不合格示例：大段英文规划/复盘。
+    /// </summary>
+    public static bool IsRoleplayReasoning(string text, string content)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(content)) return false;
+        return HasRoleplayThinkingMark(text) && !ContainsAnyParenthesis(content) && !content.Contains("[skip]");
+    }
+
+    /// <summary>
+    /// 完整回复校验。
+    /// 纯文本回复必须无括号；工具调用允许 content 为空，但仍要求思考里有内心独白标记。
+    /// </summary>
+    public static bool IsRoleplayReasoning(DeepSeekMessage message)
+    {
+        if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content)) return false;
+
+        bool contentRight;
+        if (string.IsNullOrWhiteSpace(message.content))
+            contentRight = message.tool_calls != null && message.tool_calls.Count > 0;
+        else
+            contentRight = !ContainsAnyParenthesis(message.content) && !message.content.Contains("[skip]");
+
+        return HasRoleplayThinkingMark(message.reasoning_content) && contentRight;
+    }
+
+    private static bool HasRoleplayThinkingMark(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        bool hasParen = text.Contains("（") || text.Contains("(");
+        return hasParen &&
+               (text.Contains("我想") || text.Contains("心想：") || text.Contains("内心OS："));
+    }
+
+    private static bool ContainsAnyParenthesis(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text.IndexOf('（') >= 0 || text.IndexOf('）') >= 0 ||
+               text.IndexOf('(') >= 0 || text.IndexOf(')') >= 0;
+    }
+
     private bool _isWaiting;
     private int _round;
     private bool _start = false;
@@ -725,6 +768,11 @@ cards.Add(new CharacterCard("耶罗",
         private int roundsWithoutTool;
         private bool noToolReminderSent;
 
+        // 思考模式回复校验与重试（从 AIRequest 移入；不合格时无限重试，直到合格或本轮超时）
+        private const string ThinkingRetryPrompt =
+            "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）或(我想：……)；" +
+            "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
+
         private bool openingRetryMode;
         private List<DeepSeekMessage> openingLastMessages;
         private int n_0_index = 1;//排除系统消息
@@ -836,6 +884,7 @@ cards.Add(new CharacterCard("耶罗",
                 }
 
                 bool timedOut = false;
+                Func<bool> isTimedOut = () => timedOut;
                 //结果等待器
                 var tcs = new TaskCompletionSource<bool>();
 
@@ -861,9 +910,9 @@ cards.Add(new CharacterCard("耶罗",
                 info.apiUrl = url;
 
                 // 开局轮由本类自己的 reasoning 重试循环处理；
-                // 其余回合交给 AIRequest 在落库/执行工具前校验，不合格立即拦截重发。
+                // 其余回合由本类注入校验/重试钩子，在落库/执行工具前拦截不合格回复。
                 if (!isOpening)
-                    info.validateResponse = m => AIRequest.IsRoleplayReasoning(m);
+                    info.validateAndMaybeRetry = (ri, msg, inHistory) => ValidateAndMaybeRetry(ri, msg, inHistory, isTimedOut);
 
                 try
                 {
@@ -889,7 +938,7 @@ cards.Add(new CharacterCard("耶罗",
                 if (isOpening)
                 {
                     reasoning = GetLastAssistantReasoning(out string content);
-                    goodEnough = AIRequest.IsRoleplayReasoning(reasoning,content);
+                    goodEnough = AIAgent.IsRoleplayReasoning(reasoning,content);
                 }
 
                 if (goodEnough)
@@ -942,6 +991,32 @@ cards.Add(new CharacterCard("耶罗",
                 UpdateToolUsageReminder(roundStartIndex);
 
             Save();
+        }
+
+        /// <summary>
+        /// 思考模式回复校验与重试（从 AIRequest 移入）。
+        /// 不合格时不落库、不执行工具，追加一条修正提醒后立刻重发；取消重试次数上限，直到合格或本轮超时。
+        /// candidateAlreadyInHistory：流式请求会先放一个占位 assistant，校验失败时需要先移除。
+        /// </summary>
+        private bool ValidateAndMaybeRetry(RequestInfo requestInfo, DeepSeekMessage candidate, bool candidateAlreadyInHistory, Func<bool> isTimedOut)
+        {
+            if (IsRoleplayReasoning(candidate))
+                return true;
+
+            if (candidateAlreadyInHistory && requestInfo.messages.Count > 0 &&
+                requestInfo.messages[requestInfo.messages.Count - 1].role == "assistant")
+            {
+                requestInfo.messages.RemoveAt(requestInfo.messages.Count - 1);
+            }
+
+            // 本轮已超时就不再继续重发，避免后台重试链一直跑
+            if (isTimedOut != null && isTimedOut())
+                return false;
+
+            requestInfo.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
+            Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {candidate.reasoning_content}");
+            AIRequest.SendRequest(requestInfo);
+            return false;
         }
 
         private string BuildToolUsageReminder()

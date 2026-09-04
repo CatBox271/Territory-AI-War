@@ -314,10 +314,12 @@ public class RequestInfo
     public int toolStage = -1;
     public bool back_tool = true;
 
-    /// <summary>回复落库/执行工具前的内容校验。返回 false 会拦截本次回复并重发。</summary>
-    public Func<DeepSeekMessage, bool> validateResponse;
-    public int maxValidationRetries = 3;
-    public int validationRetryCount;
+    /// <summary>
+    /// 回复落库/执行工具前的外部校验钩子（由 AIAgent 注入）。
+    /// 参数：本次 RequestInfo、候选 assistant 回复、该候选是否已经作为占位消息写入 history。
+    /// 返回 true 表示通过并继续流程；返回 false 表示本次响应已由外部处理（重发或报错），AIRequest 停止当前流水线。
+    /// </summary>
+    public Func<RequestInfo, DeepSeekMessage, bool, bool> validateAndMaybeRetry;
 
     public void AddMessage(List<DeepSeekMessage> message)
     {
@@ -632,39 +634,6 @@ public static class AIRequest
         return JsonConvert.DeserializeObject<List<DeepSeekMessage>>(JsonConvert.SerializeObject(input));
     }
 
-    private const string ThinkingRetryPrompt =
-        "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）或(我想：……)；" +
-        "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
-
-    /// <summary>
-    /// 校验 AI 回复。不合格时不落库、不执行工具，追加一条修正提醒后立刻重发。
-    /// candidateAlreadyInHistory：流式请求会先放一个占位 assistant，校验失败时需要先移除。
-    /// </summary>
-    private static bool ValidateAndMaybeRetry(RequestInfo requestInfo, DeepSeekMessage candidate, bool candidateAlreadyInHistory)
-    {
-        if (requestInfo.validateResponse == null || requestInfo.validateResponse(candidate))
-            return true;
-
-        if (candidateAlreadyInHistory && requestInfo.messages.Count > 0 &&
-            requestInfo.messages[requestInfo.messages.Count - 1].role == "assistant")
-        {
-            requestInfo.messages.RemoveAt(requestInfo.messages.Count - 1);
-        }
-
-        if (requestInfo.validationRetryCount >= requestInfo.maxValidationRetries)
-        {
-            Debug.LogWarning("[AIRequest] 思考模式连续校验失败，已拦截本轮回复与工具。");
-            requestInfo.onError?.Invoke("思考模式连续不符合要求，已拦截本轮回复与工具");
-            return false;
-        }
-
-        requestInfo.validationRetryCount++;
-        requestInfo.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
-        Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {candidate.reasoning_content}");
-        SendRequest(requestInfo);
-        return false;
-    }
-
     public static void SendRequest(RequestInfo requestInfo)
     {
         // 在发送副本上做字段裁剪，绝不修改 CharacterCard 的 history。
@@ -746,8 +715,9 @@ public static class AIRequest
                     tool_calls = back_message.tool_calls
                 };
 
-                // 思考模式不合格：不落库、不执行工具，直接拦截并重发
-                if (!ValidateAndMaybeRetry(requestInfo, assistant, false))
+                // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
+                if (requestInfo.validateAndMaybeRetry != null &&
+                    !requestInfo.validateAndMaybeRetry(requestInfo, assistant, false))
                 {
                     request.Dispose();
                     return;
@@ -908,8 +878,9 @@ public static class AIRequest
                 requestInfo.messages[^1] = assistantMessage;
             }
 
-            // 思考模式不合格：移除占位 assistant，拦截工具并重发
-            if (!ValidateAndMaybeRetry(requestInfo, assistantMessage, true))
+            // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
+            if (requestInfo.validateAndMaybeRetry != null &&
+                !requestInfo.validateAndMaybeRetry(requestInfo, assistantMessage, true))
             {
                 request.Dispose();
                 return;
@@ -950,8 +921,9 @@ public static class AIRequest
                 requestInfo.messages[^1] = assistantMessage;
             }
 
-            // 思考模式不合格：移除占位 assistant 并重发，不展示错误回复
-            if (!ValidateAndMaybeRetry(requestInfo, assistantMessage, true))
+            // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
+            if (requestInfo.validateAndMaybeRetry != null &&
+                !requestInfo.validateAndMaybeRetry(requestInfo, assistantMessage, true))
             {
                 request.Dispose();
                 return;
@@ -1102,48 +1074,6 @@ public static class AIRequest
             optimized.Insert(index, new DeepSeekMessage("user", all[i]));
         }
     }
-    /// <summary>
-    /// 检测 reasoning_content 是否是符合人设的中文内心独白。
-    /// 合格示例：(内心OS：) / （心想：） / （我想：）；不合格示例：大段英文规划/复盘。
-    /// </summary>
-    public static bool IsRoleplayReasoning(string text, string content)
-    {
-        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(content)) return false;
-        return HasRoleplayThinkingMark(text) && !ContainsAnyParenthesis(content) && !content.Contains("[skip]");
-    }
-
-    /// <summary>
-    /// 用于 RequestInfo.validateResponse 的完整回复校验。
-    /// 纯文本回复必须无括号；工具调用允许 content 为空，但仍要求思考里有内心独白标记。
-    /// </summary>
-    public static bool IsRoleplayReasoning(DeepSeekMessage message)
-    {
-        if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content)) return false;
-
-        bool contentRight;
-        if (string.IsNullOrWhiteSpace(message.content))
-            contentRight = message.tool_calls != null && message.tool_calls.Count > 0;
-        else
-            contentRight = !ContainsAnyParenthesis(message.content) && !message.content.Contains("[skip]");
-
-        return HasRoleplayThinkingMark(message.reasoning_content) && contentRight;
-    }
-
-    private static bool HasRoleplayThinkingMark(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        bool hasParen = text.Contains("（") || text.Contains("(");
-        return hasParen &&
-               (text.Contains("我想") || text.Contains("心想：") || text.Contains("内心OS："));
-    }
-
-    private static bool ContainsAnyParenthesis(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return false;
-        return text.IndexOf('（') >= 0 || text.IndexOf('）') >= 0 ||
-               text.IndexOf('(') >= 0 || text.IndexOf(')') >= 0;
-    }
-
     public static class TokenEstimator
     {
         private static DeepSeekTokenizer _tokenizer;
