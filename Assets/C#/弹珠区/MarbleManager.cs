@@ -130,14 +130,33 @@ public class MarbleManager : MonoBehaviour
         while (progress >= cost)
         {
             progress -= cost;
-            SpawnAndLaunch(stage);
             cost *= upgradeCostGrowth;
 
             UIMarbleUpgrade.Instance.ShowUpgrade(stage);
+            StartCoroutine(UpgradeSpawnSequence(stage));
         }
 
         upgradeCosts[stage] = cost;
         upgradeProgress[stage] = progress;
+    }
+
+    IEnumerator UpgradeSpawnSequence(int stage)
+    {
+        Vector3 target = GetSpawnPosition();
+        UIMarbleUpgrade ui = UIMarbleUpgrade.Instance;
+        if (ui != null)
+        {
+            bool arrived = false;
+            ui.PlayLineTo(stage, target, () => arrived = true);
+            float waited = 0f;
+            while (!arrived)
+            {
+                waited += Time.deltaTime;
+                if (waited > 3f) break;
+                yield return null;
+            }
+        }
+        SpawnAndLaunchAt(stage, target);
     }
 
 
@@ -156,10 +175,14 @@ public class MarbleManager : MonoBehaviour
 
     void SpawnAndLaunch(int stage)
     {
+        SpawnAndLaunchAt(stage, GetSpawnPosition());
+    }
+
+    void SpawnAndLaunchAt(int stage, Vector3 pos)
+    {
         if (MarbleOb == null) return;
         if (!Towel.AllTowel.ContainsKey(stage)) return;
 
-        Vector3 pos = GetSpawnPosition();
         GameObject ob = Instantiate(MarbleOb, pos, Quaternion.identity);
 
         Marble m = ob.GetComponent<Marble>();

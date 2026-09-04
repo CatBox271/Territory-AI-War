@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
+using UnityEngine.UI;
 using System.Text;
 
 public class UIMarbleUpgrade : MonoBehaviour
@@ -14,6 +15,13 @@ public class UIMarbleUpgrade : MonoBehaviour
 
     private const float UpgradeTextDuration = 2f;
     private readonly Dictionary<int, float> upgradeTextHoldUntil = new();
+
+    [Header("升级连线")]
+    public float lineTravelTime = 0.45f;
+    public float lineFadeTime = 0.12f;
+    public float lineStartWidth = 10f;
+    public float lineEndWidth = 4f;
+    public Camera lineCamera; // 留空自动选择能看到该点的相机
 
     private MarbleManager marble;
     private void Awake()
@@ -61,6 +69,140 @@ public class UIMarbleUpgrade : MonoBehaviour
         stage--;
         if (stage >= sps.Count || stage < 0) return new();
         return sps[stage].transform.position;
+    }
+
+    /// <summary>从升级槽向目标点画线（Canvas UI 线），线头到达后再回调 onArrived。</summary>
+    public void PlayLineTo(int stage, Vector3 target, System.Action onArrived)
+    {
+        StartCoroutine(LineRoutine(stage, target, onArrived));
+    }
+
+    private static Sprite lineSprite;
+    private static Sprite LineSprite
+    {
+        get
+        {
+            if (lineSprite == null)
+            {
+                Texture2D tex = Texture2D.whiteTexture;
+                lineSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+            }
+            return lineSprite;
+        }
+    }
+
+    private Camera PickCamera(Vector3 worldPos)
+    {
+        Camera fallback = Camera.main;
+        if (fallback == null && Camera.allCameras.Length > 0) fallback = Camera.allCameras[0];
+
+        Camera best = null;
+        float bestScore = float.MaxValue;
+        foreach (Camera cam in Camera.allCameras)
+        {
+            if (cam == null || !cam.isActiveAndEnabled) continue;
+            Vector3 vp = cam.WorldToViewportPoint(worldPos);
+            if (vp.z <= 0f) continue;
+            if (vp.x < -0.02f || vp.x > 1.02f || vp.y < -0.02f || vp.y > 1.02f) continue;
+            float score = (vp.x - 0.5f) * (vp.x - 0.5f) + (vp.y - 0.5f) * (vp.y - 0.5f);
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = cam;
+            }
+        }
+        return best != null ? best : fallback;
+    }
+
+    private Vector2 WorldToCanvasLocal(Vector3 worldPos, Canvas canvas)
+    {
+        Camera worldCam = lineCamera != null ? lineCamera : PickCamera(worldPos);
+        if (worldCam == null) return Vector2.zero;
+
+        Vector2 screen = worldCam.WorldToScreenPoint(worldPos);
+        Camera uiCam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle((RectTransform)canvas.transform, screen, uiCam, out Vector2 local))
+            return local;
+        return Vector2.zero;
+    }
+
+    private IEnumerator LineRoutine(int stage, Vector3 target, System.Action onArrived)
+    {
+        int index = stage - 1;
+        if (index < 0 || index >= sps.Count)
+        {
+            onArrived?.Invoke();
+            yield break;
+        }
+
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas == null) canvas = FindObjectOfType<Canvas>();
+        if (canvas == null)
+        {
+            onArrived?.Invoke();
+            yield break;
+        }
+
+        SpriteRenderer slot = sps[index];
+        Vector3 fromWorld = slot != null ? slot.transform.position : target;
+        Vector2 from = WorldToCanvasLocal(fromWorld, canvas);
+        Vector2 to = WorldToCanvasLocal(target, canvas);
+
+        GameObject lineGo = new GameObject("UpgradeLine", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        lineGo.transform.SetParent(canvas.transform, false);
+        RectTransform rt = lineGo.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+
+        Image img = lineGo.GetComponent<Image>();
+        img.sprite = LineSprite;
+        img.raycastTarget = false;
+
+        Color col = MapConfig.Instance != null
+            ? MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball)
+            : Color.white;
+        col = Color.Lerp(col, Color.white, 0.35f);
+        col.a = 1f;
+        img.color = col;
+
+        float t = 0f;
+        while (t < lineTravelTime)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / lineTravelTime);
+            k = k * k * (3f - 2f * k);
+            Vector2 tip = Vector2.Lerp(from, to, k);
+            Vector2 dir = tip - from;
+            float dist = dir.magnitude;
+            rt.localPosition = (from + tip) * 0.5f;
+            rt.sizeDelta = new Vector2(Mathf.Max(dist, lineEndWidth), Mathf.Lerp(lineStartWidth, lineEndWidth, k));
+            if (dist > 0.001f)
+                rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg);
+            yield return null;
+        }
+
+        Vector2 full = to - from;
+        rt.localPosition = (from + to) * 0.5f;
+        rt.sizeDelta = new Vector2(Mathf.Max(full.magnitude, lineEndWidth), lineEndWidth);
+        if (full.magnitude > 0.001f)
+            rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(full.y, full.x) * Mathf.Rad2Deg);
+        onArrived?.Invoke();
+
+        if (lineFadeTime > 0f)
+        {
+            float f = 0f;
+            while (f < lineFadeTime)
+            {
+                f += Time.deltaTime;
+                Color c = img.color;
+                c.a = Mathf.Clamp01(1f - f / lineFadeTime);
+                img.color = c;
+                yield return null;
+            }
+        }
+
+        Destroy(lineGo);
     }
     int pass = 0;
     StringBuilder builder;
