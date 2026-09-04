@@ -44,3 +44,7 @@ crashlytics-build.properties
 # ── Recordings / Profiling ──
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/
+
+# ── Debug captures / archives ──
+/*.mp4
+Assets.7z
