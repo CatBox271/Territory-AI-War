@@ -37,10 +37,17 @@ public class UIWeaponItem : MonoBehaviour
     public static int PreviewOverrideValue = 20;
 
     private Coroutine coroutine;
+    private Coroutine moveCoroutine;
     private bool shown;              // 当前是否显示中(用于避免重复播放)
     private MaterialPropertyBlock propertyBlock;
     private Color normalTint = Color.white;
     private bool normalTintSet;
+
+    /// <summary>是否正在播放槽位间位移动画。</summary>
+    public bool Moving => moveCoroutine != null;
+
+    /// <summary>空闲可复用：不在显示、不在移动、且物体已隐藏。道具显示池按这个判定取实例。</summary>
+    public bool IsIdle => !shown && !Moving && !gameObject.activeSelf;
 
     public enum EffectLevel
     {
@@ -305,21 +312,62 @@ public class UIWeaponItem : MonoBehaviour
         shown = true;
         gameObject.SetActive(true);
         StopAnim();
+        StopMove();
         coroutine = StartCoroutine(PlayScale(false));
     }
 
-    // 消失：反向播放 Anim，结束后隐藏
+    // 消失：反向播放 Anim（缩回），结束后隐藏。移动中触发时定格当前位置缩回，不继续滑向旧槽。
     public void Hide()
     {
         if (!shown) return;
         shown = false;
         StopAnim();
+        StopMove();
         coroutine = StartCoroutine(PlayScale(true));
+    }
+
+    /// <summary>立即隐藏：跳过消失动画，用于槽位从锁定转道具槽时的释放。</summary>
+    public void ForceHideNow()
+    {
+        shown = false;
+        StopAnim();
+        StopMove();
+        gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// 位移动画：从当前位置平滑滑到目标槽位（世界坐标），到达后定格，
+    /// 期间不换皮、不重置位置——避免"动画完瞬移回原位置"。
+    /// </summary>
+    public void MoveTo(Vector3 targetWorldPos, float duration)
+    {
+        StopMove();
+        moveCoroutine = StartCoroutine(MoveAnim(targetWorldPos, duration));
+    }
+
+    private IEnumerator MoveAnim(Vector3 target, float duration)
+    {
+        Vector3 start = transform.position;
+        float t = 0;
+        while (t < duration)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / Mathf.Max(duration, 0.0001f));
+            transform.position = Vector3.Lerp(start, target, k);
+            yield return null;
+        }
+        transform.position = target;
+        moveCoroutine = null;
     }
 
     private void StopAnim()
     {
         if (coroutine != null) { StopCoroutine(coroutine); coroutine = null; }
+    }
+
+    private void StopMove()
+    {
+        if (moveCoroutine != null) { StopCoroutine(moveCoroutine); moveCoroutine = null; }
     }
 
     private IEnumerator PlayScale(bool reverse)
@@ -344,5 +392,6 @@ public class UIWeaponItem : MonoBehaviour
     private void OnDisable()
     {
         StopAnim();
+        StopMove();
     }
 }

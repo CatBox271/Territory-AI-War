@@ -20,7 +20,7 @@ public class GameEndMonitor : MonoBehaviour
     public bool showTestButton = true;
 
     [Tooltip("开局是否自动启动录制（对已录制的状态幂等，不会重复启动）")]
-    public bool startRecordingOnStart = true;
+    public bool startRecordingOnStart = false;
 
     [Tooltip("结束后延迟多少秒退出应用；0 = 不退出（编辑器里始终不退出）")]
     public float quitDelaySeconds = 0f;

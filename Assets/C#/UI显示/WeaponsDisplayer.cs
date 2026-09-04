@@ -12,8 +12,23 @@ public class WeaponsDisplayer : MonoBehaviour
     public bool previewEffect;
     [Range(0, 40)] public int previewValue = 20;
 
-    // 每个阵营实例化的武器格子，下标 1..4
+    [Header("道具槽位前移动画时长(秒)")]
+    public float moveDuration = 0.25f;
+
+    // 每个阵营的锁定槽显示实例（固定槽位，只负责"锁定+倒计时"，绝不显示道具）
     private readonly List<UIWeaponItem>[] campItems = new List<UIWeaponItem>[5];
+
+    // 道具显示状态：显示实例跟着道具 id 走（不是槽位换皮）。
+    // 使用道具后，被用的格子播消失动画，剩余道具的图标用位移动画滑到前一个槽，
+    // 避免"同一道具同时出现在前后两个格子"的涂抹现象。
+    // 道具实例是独立池（5 个/阵营），与锁定槽实例分开，两套显示互不抢占。
+    private class CampPropUI
+    {
+        public readonly Dictionary<int, UIWeaponItem> byId = new();   // 道具id -> 显示实例
+        public readonly Dictionary<UIWeaponItem, int> slots = new();  // 实例 -> 当前所在槽位
+        public readonly List<UIWeaponItem> pool = new();              // 道具显示实例池（独立于锁定槽）
+    }
+    private readonly CampPropUI[] campPropUIs = new CampPropUI[5];
 
     // 每槽位解锁时间(秒)，对应 propLimit 前 N 个槽位；开局解锁 2 个(0,1)，之后 1/5/7 分钟各解锁 1 个
     public List<int> unlockTimes = new(){ -1, -1, 60, 300, 420 };
@@ -41,6 +56,9 @@ public class WeaponsDisplayer : MonoBehaviour
         for (int i = 1; i < 5; i++)
         {
             campItems[i] = new List<UIWeaponItem>();
+            campPropUIs[i] = new CampPropUI();
+
+            // 锁定槽实例：固定槽位，只显示锁定与倒计时
             for (int a = 0; a < 5; a++)
             {
                 GameObject go = Instantiate(item, transform);
@@ -48,6 +66,14 @@ public class WeaponsDisplayer : MonoBehaviour
                 upg.transform.position = go.transform.position = GetPos(i, a);
                 go.SetActive(false);   // 初始隐藏，之后由 Show/Hide 驱动
                 campItems[i].Add(go.GetComponent<UIWeaponItem>());
+            }
+
+            // 道具显示实例池：独立 5 个浮动实例，初始全隐藏，SetData 时摆到目标槽
+            for (int p = 0; p < 5; p++)
+            {
+                GameObject go = Instantiate(item, transform);
+                go.SetActive(false);
+                campPropUIs[i].pool.Add(go.GetComponent<UIWeaponItem>());
             }
         }
 
@@ -93,48 +119,94 @@ public class WeaponsDisplayer : MonoBehaviour
 
         for (int camp = 1; camp <= 4; camp++) RefreshCamp(camp);
     }
+
     private void RefreshCamp(int camp)
     {
         var props = config.teamProps[camp];
-        int propCount = props.Count;
         var list = campItems[camp];
         if (list == null) return;
 
-        Color campColor = config.GetColor(camp, MapConfig.ColorStage.Dark);
-
-
+        // 锁定槽：固定实例显示"锁定+倒计时"；道具槽的锁定实例隐藏（道具由独立池实例负责显示）
         for (int a = 0; a < list.Count; a++)
         {
-            SpriteRenderer sr = list[a].sp;
             UIWeaponItem wc = list[a];
-
             if (a >= config.propLimit)
             {
-                // 未解锁：锁定态，必须显示(靠倒计时体现进度)
-                if (wc != null)
-                {
-                    wc.SetLocked(FormatRemain(unlockTimes[a - list.Count + unlockTimes.Count] - Time.time));
-                }
-                else wc.gameObject.SetActive(true);
+                wc.SetLocked(FormatRemain(unlockTimes[a - list.Count + unlockTimes.Count] - Time.time));
             }
-            else
+            else if (wc.gameObject.activeSelf)
             {
-                // 已解锁
-                if (a < propCount)
-                {
-                    // 有道具：显示
-                    sr.color = campColor;
-                    if (wc != null) wc.SetData(props[a].item, props[a].value);
-                    else wc.gameObject.SetActive(true);
-                }
-                else
-                {
-                    // 已解锁但无道具：播放消失动画后隐藏
-                    if (wc != null) wc.Hide();
-                    else wc.gameObject.SetActive(false);
-                }
+                wc.ForceHideNow();   // 槽位解锁：隐藏锁定实例，空出该槽给道具
             }
         }
+
+        RefreshCampProps(camp, props);
+    }
+
+    /// <summary>
+    /// 道具槽对账：以 props 当前列表为准。
+    /// 1. 已显示但道具不在列表（被使用/溢出）→ 原地播消失动画；
+    /// 2. 道具还在但槽位变化 → 位移动画滑到目标槽；
+    /// 3. 新道具还没有显示实例 → 从池取空闲实例，摆到目标槽播入场动画。
+    /// </summary>
+    private void RefreshCampProps(int camp, List<PropEntry> props)
+    {
+        CampPropUI ui = campPropUIs[camp];
+        if (ui == null) return;
+        Color campColor = config.GetColor(camp, MapConfig.ColorStage.Dark);
+
+        HashSet<int> targetIds = new();
+        for (int a = 0; a < props.Count; a++) targetIds.Add(props[a].id);
+
+        // 1. 消失
+        foreach (var kv in new List<KeyValuePair<int, UIWeaponItem>>(ui.byId))
+        {
+            if (targetIds.Contains(kv.Key)) continue;
+            ui.byId.Remove(kv.Key);
+            ui.slots.Remove(kv.Value);
+            kv.Value.Hide();
+        }
+
+        // 2. 位移
+        for (int a = 0; a < props.Count; a++)
+        {
+            if (!ui.byId.TryGetValue(props[a].id, out UIWeaponItem wc)) continue;
+            if (ui.slots.TryGetValue(wc, out int cur) && cur != a)
+            {
+                wc.MoveTo(GetPos(camp, a), moveDuration);
+                ui.slots[wc] = a;
+            }
+        }
+
+        // 3. 新道具
+        for (int a = 0; a < props.Count; a++)
+        {
+            if (ui.byId.ContainsKey(props[a].id)) continue;
+            UIWeaponItem wc = TakeIdleItem(ui);
+            if (wc == null) continue;
+
+            PropEntry p = props[a];
+            wc.transform.position = GetPos(camp, a);
+            wc.sp.color = campColor;
+            wc.SetData(p.item, p.value);
+            ui.byId[p.id] = wc;
+            ui.slots[wc] = a;
+        }
+    }
+
+    private UIWeaponItem TakeIdleItem(CampPropUI ui)
+    {
+        foreach (UIWeaponItem wc in ui.pool)
+            if (wc.IsIdle) return wc;
+
+        // 都在动画中：优先强制停掉一个缩回中的（它已退出 byId，安全；移动中的实例打断会造成错位）
+        foreach (UIWeaponItem wc in ui.pool)
+        {
+            if (!wc.Moving) { wc.ForceHideNow(); return wc; }
+        }
+
+        // 全在移动（实际不可达，道具满 5 个时新道具只会溢出不会入栈）：本轮放弃，下次对账再显示
+        return null;
     }
 
 #if UNITY_EDITOR

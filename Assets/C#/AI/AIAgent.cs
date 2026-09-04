@@ -773,6 +773,34 @@ cards.Add(new CharacterCard("耶罗",
             "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）或(我想：……)；" +
             "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
 
+        // ---------- AI 行为检查 ----------
+        private const string BehaviorCheckerModel = "deepseek-v4-flash";
+        private const int BehaviorCheckTimeoutMs = 15000;
+        private const int ForceToolTimeoutMs = 25000;
+
+        private const string BehaviorCheckerSystemPrompt =
+@"你是一个严格的游戏 AI 行为检查器。你的任务只有：判断目标 AI 是否“说了要做某个具体行动，但没有调用对应工具执行”。你不调用任何工具，只输出分析文字和最终判断。
+
+目标 AI 可用的工具只有 3 个：
+- use_prop：使用自己武器栏里的道具（护盾、霰弹、扫射、大球等）
+- control_turret：控制自己炮塔瞄准
+- whisper：给其他 AI 发悄悄话
+
+判定规则：
+1. 只有明确声称要做具体游戏行动、且对应工具没有出现在“实际工具调用”里时，才算缺失。
+2. 情绪、嘲讽、喊口号、泛目标（如“我要赢”）不算缺失。
+3. 发言只是在描述或配合已经发生的工具调用，不算缺失。
+4. 分析过程中禁止使用方括号。最终判断必须单独放在最后一行。";
+
+        private static readonly Regex BehaviorCheckVerdictRegex = new Regex(@"\[([^\[\]]*)\]", RegexOptions.Compiled);
+        private static readonly string[] BehaviorCheckToolSeparators = { ",", "，", "、" };
+        private static readonly HashSet<string> BehaviorCheckAllowedTools = new HashSet<string>
+        {
+            "use_prop",
+            "control_turret",
+            "whisper"
+        };
+
         private bool openingRetryMode;
         private List<DeepSeekMessage> openingLastMessages;
         private int n_0_index = 1;//排除系统消息
@@ -856,6 +884,7 @@ cards.Add(new CharacterCard("耶罗",
             bool pausedForRetry = false;
             int retryCount = 0;
             bool openingReused = false;
+            bool mainTimedOut = false;
 
             // 有成功缓存就直接复用，不再请求/重刷
             if (isOpening && TryLoadOpeningCache(out DeepSeekMessage cachedOpening))
@@ -929,6 +958,7 @@ cards.Add(new CharacterCard("耶罗",
                 if (completed != tcs.Task)
                 {
                     timedOut = true;
+                    mainTimedOut = true;
                     ReceiveError("AI请求超时(25秒)");
                 }
 
@@ -986,9 +1016,18 @@ cards.Add(new CharacterCard("耶罗",
             int sampleX = Mathf.Max(0, endTokens - startTokens);
             avgX = avgX * 0.9f + sampleX * 0.1f;
 
-            // 开局强制不放工具，不参与“连续未用工具”统计
+            // 开局强制不放工具，不参与行为检查和“连续未用工具”统计；主请求超时时本轮不完整，跳过检查
             if (!isOpening)
+            {
+                if (!mainTimedOut)
+                {
+                    List<string> missingTools = await RunBehaviorCheckAsync(roundStartIndex);
+                    foreach (string toolName in missingTools)
+                        await ForceToolCallAsync(toolName);
+                }
+
                 UpdateToolUsageReminder(roundStartIndex);
+            }
 
             Save();
         }
@@ -1017,6 +1056,264 @@ cards.Add(new CharacterCard("耶罗",
             Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {candidate.reasoning_content}");
             AIRequest.SendRequest(requestInfo);
             return false;
+        }
+
+        /// <summary>拼接本轮所有 assistant.content。</summary>
+        private string CollectRoundAssistantContents(int roundStartIndex)
+        {
+            var parts = new List<string>();
+            for (int i = roundStartIndex; i < history.Count; i++)
+            {
+                DeepSeekMessage msg = history[i];
+                if (msg != null && msg.role == "assistant" && !string.IsNullOrWhiteSpace(msg.content))
+                    parts.Add(msg.content.Trim());
+            }
+            return parts.Count > 0 ? string.Join("\n", parts) : "（无）";
+        }
+
+        /// <summary>收集本轮所有工具调用（工具名 + 参数）。</summary>
+        private string CollectRoundToolCalls(int roundStartIndex)
+        {
+            var parts = new List<string>();
+            for (int i = roundStartIndex; i < history.Count; i++)
+            {
+                DeepSeekMessage msg = history[i];
+                if (msg == null || msg.role != "assistant" || msg.tool_calls == null) continue;
+
+                foreach (ToolCall call in msg.tool_calls)
+                {
+                    string callName = call?.function?.name;
+                    if (string.IsNullOrWhiteSpace(callName)) continue;
+                    string arguments = call?.function?.arguments;
+                    parts.Add(string.IsNullOrWhiteSpace(arguments) ? callName : $"{callName} {arguments}");
+                }
+            }
+            return parts.Count > 0 ? string.Join("\n", parts) : "无";
+        }
+
+        private string BuildBehaviorCheckUserPrompt(string roundContents, string roundToolCalls)
+        {
+            return $@"请检查以下 AI 本轮行为：
+
+【本轮公开发言（按顺序拼接）】
+{roundContents}
+
+【本轮实际工具调用】
+{roundToolCalls}
+
+输出要求：
+1. 先输出你的分析。
+2. 最后一行只输出最终判断，格式：
+   - 没有缺失：[]
+   - 有缺失：[工具名]
+   - 缺多个：用英文逗号分隔，例如 [use_prop,control_turret]
+3. [] 里只能出现 use_prop、control_turret、whisper，不得输出其他内容。";
+        }
+
+        /// <summary>从检查模型的输出里正则提取最后的 [工具名] 判断。</summary>
+        private List<string> ParseBehaviorCheckVerdict(string checkerText)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrWhiteSpace(checkerText)) return result;
+
+            MatchCollection matches = BehaviorCheckVerdictRegex.Matches(checkerText);
+            if (matches.Count == 0) return result;
+
+            string verdict = matches[matches.Count - 1].Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(verdict)) return result;
+
+            foreach (string raw in verdict.Split(BehaviorCheckToolSeparators, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string toolName = raw.Trim();
+                if (string.IsNullOrEmpty(toolName)) continue;
+
+                if (BehaviorCheckAllowedTools.Contains(toolName))
+                {
+                    if (!result.Contains(toolName))
+                        result.Add(toolName);
+                }
+                else
+                {
+                    Debug.LogWarning($"[AI行为检查] {name} 模型判断里出现未知工具：{toolName}。原文：{checkerText}");
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 行为检查：把本轮 content 与工具调用交给 thinking disabled 的 flash 模型判断。
+        /// 返回“说了要做但没调用”的工具名列表。
+        /// </summary>
+        private async Task<List<string>> RunBehaviorCheckAsync(int roundStartIndex)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string roundContents = CollectRoundAssistantContents(roundStartIndex);
+            string roundToolCalls = CollectRoundToolCalls(roundStartIndex);
+
+            DeepSeekRequest checkerRequest = new DeepSeekRequest
+            {
+                model = BehaviorCheckerModel,
+                temperature = 0f,
+                max_tokens = 1024,
+                stream = false,
+                thinking = new ThinkingConfig(false)
+            };
+            checkerRequest.messages = new List<DeepSeekMessage>
+            {
+                new DeepSeekMessage("system", BehaviorCheckerSystemPrompt),
+                new DeepSeekMessage("user", BuildBehaviorCheckUserPrompt(roundContents, roundToolCalls))
+            };
+            checkerRequest.tools = null;
+            checkerRequest.tool_choice = null;
+
+            bool timedOut = false;
+            var tcs = new TaskCompletionSource<string>();
+            RequestInfo info = new RequestInfo(
+                checkerRequest,
+                msgs =>
+                {
+                    if (timedOut) return;
+                    DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m != null && m.role == "assistant") : null;
+                    tcs.TrySetResult(last != null ? last.content : "");
+                },
+                error =>
+                {
+                    if (timedOut) return;
+                    Debug.LogWarning($"[AI行为检查] {name} 检查请求失败：{error}");
+                    tcs.TrySetResult("");
+                },
+                toolkit: null,
+                back_tool: false,
+                toolStage: position);
+            info.apiKey = AIAgent.LoadApiKey();
+            info.apiUrl = url;
+
+            try
+            {
+                AIRequest.SendRequest(info);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[AI行为检查] {name} 发送检查请求异常：{e.Message}");
+                tcs.TrySetResult("");
+            }
+
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(BehaviorCheckTimeoutMs));
+            string checkerText = "";
+            if (completed == tcs.Task)
+            {
+                checkerText = await tcs.Task;
+            }
+            else
+            {
+                timedOut = true;
+            }
+
+            sw.Stop();
+            if (timedOut)
+            {
+                Debug.LogWarning($"[AI行为检查] {name} 检查超时（{BehaviorCheckTimeoutMs}ms），本轮跳过。用时 {sw.Elapsed.TotalSeconds:F2}s");
+                return new List<string>();
+            }
+
+            List<string> missingTools = ParseBehaviorCheckVerdict(checkerText);
+            Debug.Log($"[AI行为检查] {name} 检查完成，用时 {sw.Elapsed.TotalSeconds:F2}s。\n" +
+                      $"发言：{roundContents}\n工具调用：{roundToolCalls}\n模型输出：\n{checkerText}\n" +
+                      $"缺失工具：{(missingTools.Count > 0 ? string.Join(", ", missingTools) : "无")}");
+            if (missingTools.Count > 0)
+                Debug.LogWarning($"[AI行为检查] {name} 检测到说做未做：{string.Join(", ", missingTools)}");
+
+            return missingTools;
+        }
+
+        /// <summary>
+        /// 用 tool_choice 强制 AI 调用指定工具一次（back_tool=false，不生成后续公开发言）。
+        /// 多个缺失工具由调用方逐个分批发。
+        /// </summary>
+        private async Task<bool> ForceToolCallAsync(string toolName)
+        {
+            if (string.IsNullOrWhiteSpace(toolName) || !BehaviorCheckAllowedTools.Contains(toolName))
+                return false;
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int forceStartIndex = history.Count;
+            history.Add(new DeepSeekMessage("user",
+                $"[行为检查补执行] 检测到你上一轮声称要做某个行动，但没有调用 {toolName}。现在必须调用 {toolName} 实际执行，具体参数根据你收到的情报自行决定，不要只说话。"));
+
+            object previousToolChoice = request.tool_choice;
+            request.tool_choice = new { type = "function", function = new { name = toolName } };
+
+            bool timedOut = false;
+            var tcs = new TaskCompletionSource<bool>();
+            RequestInfo info = new RequestInfo(
+                request,
+                msgs =>
+                {
+                    if (timedOut) return;
+                    if (msgs != null)
+                    {
+                        foreach (DeepSeekMessage msg in msgs)
+                        {
+                            // back_tool=false 时这里收到的是 role=tool 结果，落回 history
+                            if (msg != null && msg.role == "tool")
+                                history.Add(msg);
+                        }
+                    }
+                    tcs.TrySetResult(true);
+                },
+                error =>
+                {
+                    if (timedOut) return;
+                    Debug.LogWarning($"[AI行为检查] {name} 强制调用 {toolName} 失败：{error}");
+                    tcs.TrySetResult(true);
+                },
+                toolkit,
+                back_tool: false,
+                toolStage: position);
+            info.apiKey = AIAgent.LoadApiKey();
+            info.apiUrl = url;
+            info.validateAndMaybeRetry = (ri, msg, inHistory) => ValidateAndMaybeRetry(ri, msg, inHistory, () => timedOut);
+
+            try
+            {
+                AIRequest.SendRequest(info);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[AI行为检查] {name} 强制调用 {toolName} 异常：{e.Message}");
+                tcs.TrySetResult(true);
+            }
+
+            try
+            {
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(ForceToolTimeoutMs));
+                if (completed != tcs.Task)
+                    timedOut = true;
+            }
+            finally
+            {
+                request.tool_choice = previousToolChoice;
+            }
+
+            sw.Stop();
+
+            bool executed = false;
+            for (int i = forceStartIndex + 1; i < history.Count; i++)
+            {
+                DeepSeekMessage msg = history[i];
+                if (msg != null && msg.role == "tool" && !string.IsNullOrEmpty(msg.tool_call_id))
+                {
+                    executed = true;
+                    break;
+                }
+            }
+
+            if (timedOut)
+                Debug.LogWarning($"[AI行为检查] {name} 强制调用 {toolName} 超时（{ForceToolTimeoutMs}ms），用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executed ? "是" : "否")}");
+            else
+                Debug.Log($"[AI行为检查] {name} 强制调用 {toolName} 完成，用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executed ? "是" : "否")}");
+
+            return executed;
         }
 
         private string BuildToolUsageReminder()

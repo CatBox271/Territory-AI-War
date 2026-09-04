@@ -445,6 +445,7 @@ GameObject:
   - component: {fileID: 5692170445538429223}
   - component: {fileID: 6803598725173778874}
   - component: {fileID: 7770099887766554433}
+  - component: {fileID: 2845889364233226184}
   m_Layer: 0
   m_Name: "\u6B66\u5668\u663E\u793A"
   m_TagString: Untagged
@@ -657,3 +658,16 @@ MonoBehaviour:
     pic: {fileID: 21300000, guid: abd6840d04ce9584c9a12e6aece4202a, type: 3}
   - kind: 4
     pic: {fileID: 21300000, guid: 4ad780f33d1f78b4eb48f1f260f1b957, type: 3}
+--- !u!114 &2845889364233226184
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8953601172753876520}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af02c48e039a73e488409df1700e9339, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shakingAim: {fileID: 0}

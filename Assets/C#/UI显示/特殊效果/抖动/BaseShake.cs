@@ -39,6 +39,7 @@ public class BaseShake : MonoBehaviour
     /// </summary>
     public void SetDefault()
     {
+        if (shakingAim == null) shakingAim = transform;
         if (shakingAim != null) pos = shakingAim.localPosition;
     }
     private void Update()

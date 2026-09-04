@@ -2402,6 +2402,14 @@ PrefabInstance:
       propertyPath: m_Name
       value: 3
       objectReference: {fileID: 0}
+    - target: {fileID: 2437586379965800013, guid: df11e561f42ee4f4ca037bd4e46faf4e, type: 3}
+      propertyPath: m_fontSize
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 2437586379965800013, guid: df11e561f42ee4f4ca037bd4e46faf4e, type: 3}
+      propertyPath: m_fontSizeBase
+      value: 4
+      objectReference: {fileID: 0}
     - target: {fileID: 4944908653673649856, guid: df11e561f42ee4f4ca037bd4e46faf4e, type: 3}
       propertyPath: m_LocalPosition.x
       value: 5.55
@@ -11208,7 +11216,7 @@ MonoBehaviour:
   startValueExponent: 10
   gravity: 0.2
   upgradePerEmptySlotPerSecond: 1
-  upgradeCost: 75
+  upgradeCost: 1
   upgradeCostGrowth: 2.4
 --- !u!1 &1508170505
 GameObject:
@@ -13913,7 +13921,7 @@ GameObject:
   - component: {fileID: 1906333480}
   - component: {fileID: 1906333481}
   m_Layer: 0
-  m_Name: WeaponDisplayer
+  m_Name: "\u6B66\u5668\u6808"
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -13955,6 +13963,7 @@ MonoBehaviour:
   up: {fileID: 8953601172753876520, guid: e8d7b3cbd1a121842a9fa1ce7c9dbed0, type: 3}
   previewEffect: 0
   previewValue: 20
+  moveDuration: 0.25
   unlockTimes: ffffffffffffffff3c000000b400000058020000
 --- !u!1 &1909349230
 GameObject:
@@ -16717,7 +16726,7 @@ MonoBehaviour:
   TowelDefaultBullets: 262144
   basicBallPrefab: {fileID: 2741485188931532298, guid: 5d1c6af57d89db441b4186adbf0c8bc1, type: 3}
   bounceRate: 0.3
-  useAIDecision: 1
+  useAIDecision: 0
   propLimit: 0
 --- !u!23 &345786292810578330
 MeshRenderer:

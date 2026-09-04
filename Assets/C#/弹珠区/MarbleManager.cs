@@ -132,6 +132,8 @@ public class MarbleManager : MonoBehaviour
             progress -= cost;
             SpawnAndLaunch(stage);
             cost *= upgradeCostGrowth;
+
+            UIMarbleUpgrade.Instance.ShowUpgrade(stage);
         }
 
         upgradeCosts[stage] = cost;

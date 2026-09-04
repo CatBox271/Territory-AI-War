@@ -31,7 +31,9 @@ public class Towel : MonoBehaviour, IStageValue
     public CurveTransform bulletInterval;
     public CurveTransform shieldRadius;
     public CurveTransform bulletRandomSpeed;
-
+    /// <summary>
+    /// 从1开始
+    /// </summary>
     public static Dictionary<int, Towel> AllTowel = new();
     public Collider2D towelCollider;
     public Collider2D shieldCollider;
@@ -137,7 +139,7 @@ public class Towel : MonoBehaviour, IStageValue
         ps.Play();
     }
 
-    private bool isDead;
+    public bool isDead;
 
     private int killerStage = -1;
     private string killerWeapon = "";

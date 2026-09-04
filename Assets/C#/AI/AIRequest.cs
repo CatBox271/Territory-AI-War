@@ -177,7 +177,8 @@ public class DeepSeekRequest
 
     public bool ShouldSerializethinking()
     {
-        return thinking != null && thinking.type == "enabled";
+        // enabled / disabled 都需要显式发送，否则模型可能走默认开启思考
+        return thinking != null;
     }
 
     public bool ShouldSerializereasoning_effort()
@@ -188,7 +189,8 @@ public class DeepSeekRequest
     [HideInInspector]
     public List<DeepSeekMessage> messages;
     public List<Tool> tools = new();
-    public string tool_choice = "auto";
+    /// <summary>支持字符串（auto/none/required）或对象（强制指定某个 function）。</summary>
+    public object tool_choice = "auto";
     //新词度-2~2
     public float frequency_penalty = 0f;
     //新话题度-2~2

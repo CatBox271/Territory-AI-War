@@ -15,6 +15,11 @@ public enum WeaponKind
 [System.Serializable]
 public class PropEntry
 {
+    // 运行时唯一指纹：武器栏 UI 的显示实例跟着这个 id 走（而不是槽位换皮），
+    // 使用道具后剩余道具的图标才能用位移动画平滑前移。
+    private static int nextId = Environment.TickCount & 0x7FFFFFFF;
+    public int id = nextId++;
+
     public WeaponKind item;
     public HugeInt value;
     public int stage;

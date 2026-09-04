@@ -103,6 +103,7 @@ public class InformGetter : MonoBehaviour
         {
             GetInfoOKey(builder, key);
         }
+        AppendBallImpactWarning(builder, stage);
         AppendAIContents(builder);
         //弹珠为阵营私有信息，只返回请求方自己的
         foreach (var key in MarbleItems.Keys)
@@ -222,6 +223,112 @@ public class InformGetter : MonoBehaviour
         }
         builder.AppendLine(); builder.Append("}");
     }
+
+    #region 大球撞击预警
+    // 轨迹推演参数：最多预测 12 秒、步长 0.02 秒。“几秒后第一次撞上护盾”按近似计算。
+    private const float BallWarningMaxPredictTime = 12f;
+    private const float BallWarningStep = 0.02f;
+
+    /// <summary>
+    /// 大球撞击预警：对每个敌方大球做轨迹推演（直线运动 + 地图边界反弹 + 敌方护盾镜面反弹；
+    /// 同队护盾与球物理无碰撞，跳过），计算它大约几秒后第一次撞上请求方护盾。
+    /// 只在预测窗口内会撞上的大球输出预警，格式仿照“最近敌方领土”块。
+    /// </summary>
+    private static void AppendBallImpactWarning(StringBuilder builder, int stage)
+    {
+        var config = MapConfig.Instance;
+        var canvas = TerritoryCanvas.Instance;
+        if (config == null || canvas == null) return;
+        if (!Towel.AllTowel.TryGetValue(stage, out Towel self) || self == null || self.shield_value <= 0) return;
+
+        Vector2 mapCenter = canvas.transform.position;
+        float mapHalf = config.worldSize * 0.5f;
+        Vector2 selfShieldPos = self.transform.position;
+        float selfShieldR = self.shield != null ? self.shield.transform.lossyScale.x : 0f;
+        if (selfShieldR <= 0f) return;
+
+        foreach (var kv in Oitems)
+        {
+            if (kv.Key == stage) continue;
+
+            foreach (ItemType item in kv.Value)
+            {
+                if (item.description != "大球" || item.item == null) continue;
+
+                BallPainter bp = item.stageValue as BallPainter;
+                float ballR = bp != null
+                    ? Mathf.Max(item.item.lossyScale.x, item.item.lossyScale.y) * bp.baseWorldRadius
+                    : 0f;
+                float impactT = PredictShieldImpact(
+                    item.item.position,
+                    item.rb != null ? item.rb.velocity : Vector2.zero,
+                    ballR, mapCenter, mapHalf, stage, selfShieldPos, selfShieldR);
+                if (impactT < 0f) continue;
+
+                builder.AppendLine(); builder.Append("{");
+                builder.Append("大球撞击预警: "); builder.Append(AIAgent.GetStageName(kv.Key));
+                builder.Append("的大球(");
+                builder.Append("guid: "); builder.Append(item.guid);
+                builder.Append(", 数值 "); builder.Append(item.value);
+                builder.Append(", 直径 "); builder.Append((ballR * 2).ToString("0.0"));
+                builder.Append(")预计 "); builder.Append(impactT.ToString("0.0"));
+                builder.Append(" 秒后第一次撞上你的护盾(护盾当前直径 ");
+                builder.Append((selfShieldR * 2).ToString("0.0")); builder.Append(")");
+                builder.AppendLine(); builder.Append("}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 模拟大球轨迹，返回首次命中 targetStage 护盾的预计时间（秒）；预测窗口内撞不上返回 -1。
+    /// 反弹均为近似：边界按子弹同规则反射，敌方护盾按镜面反弹，速度大小不变。
+    /// </summary>
+    private static float PredictShieldImpact(Vector2 pos, Vector2 vel, float ballR, Vector2 mapCenter, float mapHalf, int stage, Vector2 shieldPos, float shieldR)
+    {
+        if (vel.sqrMagnitude < 0.0001f) return -1f;
+
+        float totalR = ballR + shieldR;
+        // 已经贴脸：直接按即将命中报告
+        if ((pos - shieldPos).sqrMagnitude <= totalR * totalR) return 0f;
+
+        float minX = mapCenter.x - mapHalf + ballR, maxX = mapCenter.x + mapHalf - ballR;
+        float minY = mapCenter.y - mapHalf + ballR, maxY = mapCenter.y + mapHalf - ballR;
+        Vector2 v = vel;
+
+        for (float t = BallWarningStep; t <= BallWarningMaxPredictTime; t += BallWarningStep)
+        {
+            pos += v * BallWarningStep;
+
+            // 地图边界反弹（球心按半径留边）
+            if (pos.x < minX) { pos.x = minX; if (v.x < 0) v.x = -v.x; }
+            else if (pos.x > maxX) { pos.x = maxX; if (v.x > 0) v.x = -v.x; }
+            if (pos.y < minY) { pos.y = minY; if (v.y < 0) v.y = -v.y; }
+            else if (pos.y > maxY) { pos.y = maxY; if (v.y > 0) v.y = -v.y; }
+
+            // 敌方护盾反弹：只处理正在接近且进入相切范围的球；同队盾无碰撞自然跳过
+            foreach (var tkv in Towel.AllTowel)
+            {
+                if (tkv.Key == stage || tkv.Value == null || tkv.Value.isDead || tkv.Value.shield_value <= 0) continue;
+                Vector2 sp = tkv.Value.transform.position;
+                float sr = tkv.Value.shield != null ? tkv.Value.shield.transform.lossyScale.x : 0f;
+                if (sr <= 0f) continue;
+
+                Vector2 diff = pos - sp;
+                float rSum = ballR + sr;
+                if (diff.sqrMagnitude < rSum * rSum && Vector2.Dot(v, diff) < 0f)
+                {
+                    Vector2 n = diff.normalized;
+                    pos = sp + n * rSum;
+                    v = v - 2f * Vector2.Dot(v, n) * n;
+                }
+            }
+
+            // 己方护盾命中：首次进入相切范围即报告
+            if ((pos - shieldPos).sqrMagnitude <= totalR * totalR) return t;
+        }
+        return -1f;
+    }
+    #endregion
 
     private const float EnemyTerritoryDangerDistance = 3f;
     /// <summary>找出距离请求方基地最近的敌方领土，报告所属阵营、世界坐标、距离和相对方位。距离<=3标为危险。</summary>
