@@ -57,7 +57,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 3504502201474179892, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
+  - {fileID: 2100000, guid: 587399b3da4e57b47a04c973df351712, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -102,9 +102,9 @@ MonoBehaviour:
   m_text: "\u9730\u5F39"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
-  m_sharedMaterial: {fileID: 3504502201474179892, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
+  m_sharedMaterial: {fileID: 2100000, guid: 587399b3da4e57b47a04c973df351712, type: 2}
   m_fontSharedMaterials: []
-  m_fontMaterial: {fileID: 2100000, guid: 4b8128658ac04fcc9adce4f68d3c16b4, type: 2}
+  m_fontMaterial: {fileID: 2100000, guid: 587399b3da4e57b47a04c973df351712, type: 2}
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
@@ -187,8 +187,9 @@ GameObject:
   - component: {fileID: 9104353428294185795}
   - component: {fileID: 4284300323083742931}
   - component: {fileID: 6467836933991516873}
+  - component: {fileID: 6440530499414111167}
   m_Layer: 0
-  m_Name: "\u9053\u5177\u9009\u533A"
+  m_Name: "\u9730\u5F39"
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -251,7 +252,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: -1
-  m_Sprite: {fileID: 7482667652216324306, guid: 311925a002f4447b3a28927169b83ea6, type: 3}
+  m_Sprite: {fileID: 21300000, guid: 86920e3442d28644ebf9c2537ddea050, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -336,3 +337,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   itemName: 0
   text: {fileID: 2052642827941083727}
+--- !u!114 &6440530499414111167
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9053751718362533022}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 453d17c5f81fa064ea55aebee82b1e3e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  addition: {r: -0.4, g: -0.4, b: -0.4, a: 0}
+  duration: 0.1

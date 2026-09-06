@@ -209,12 +209,8 @@ public class MarbleManager : MonoBehaviour
         if (choice == UpgradeChoice.Turret) towel.ApplyTurretUpgrade();
         else towel.ApplyShieldUpgrade();
 
-        if (ui != null)
-        {
-            string label = choice == UpgradeChoice.Turret ? "炮塔升级" : "护盾升级";
-            Color col = MapConfig.Instance != null ? MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball) : Color.white;
-            ui.PopUpgradeText(target, label, col);
-        }
+        string label = choice == UpgradeChoice.Turret ? "炮塔升级" : "护盾升级";
+        towel.Say(label);
     }
 
     IEnumerator PlayLineToTarget(int stage, Vector3 target)

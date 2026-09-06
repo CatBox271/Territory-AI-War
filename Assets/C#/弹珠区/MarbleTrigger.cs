@@ -8,8 +8,7 @@ public class MarbleTrigger : MonoBehaviour
 
     void OnValidate()
     {
-        if (text != null)
-            text.text = "×" + Times;
+        if (text != null) name = text.text = "×" + Times;
     }
 
     void OnTriggerEnter2D(Collider2D other)
@@ -24,5 +23,7 @@ public class MarbleTrigger : MonoBehaviour
             if (shooter != null)
                 marble.Home(shooter);
         }
+
+        GetComponent<CrashFlash>()?.Flash();
     }
 }

@@ -8,8 +8,7 @@ public class PropTrigger : MonoBehaviour
 
     void OnValidate()
     {
-        if (text != null)
-            text.text = itemName.ToString();
+        if (text != null) name = text.text = itemName.ToString();
     }
 
     MapConfig cfg;
@@ -33,5 +32,7 @@ public class PropTrigger : MonoBehaviour
             if (shooter != null)
                 marble.Home(shooter);
         }
+
+        GetComponent<CrashFlash>()?.Flash();
     }
 }

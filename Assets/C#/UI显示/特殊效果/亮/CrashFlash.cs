@@ -19,12 +19,17 @@ public class CrashFlash : MonoBehaviour
 
     void OnCollisionExit2D(Collision2D collision)
     {
-        if (flashRoutine != null)
-            StopCoroutine(flashRoutine);
-        flashRoutine = StartCoroutine(Flash());
+        Flash();
     }
 
-    IEnumerator Flash()
+    public void Flash()
+    {
+        if (flashRoutine != null)
+            StopCoroutine(flashRoutine);
+        flashRoutine = StartCoroutine(FlashRoutine());
+    }
+
+    IEnumerator FlashRoutine()
     {
         sr.color = originColor + addition;
         yield return new WaitForSeconds(duration);

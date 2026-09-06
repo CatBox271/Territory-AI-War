@@ -205,45 +205,7 @@ public class UIMarbleUpgrade : MonoBehaviour
         Destroy(lineGo);
     }
 
-    /// <summary>在世界坐标位置弹出一个上升并淡出的升级文本。</summary>
-    public void PopUpgradeText(Vector3 worldPos, string content, Color color)
-    {
-        GameObject go = new GameObject("UpgradePopText");
-        go.transform.position = worldPos + Vector3.up * 0.7f;
 
-        TextMesh tm = go.AddComponent<TextMesh>();
-        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        if (font != null) tm.font = font;
-        tm.text = content;
-        tm.fontSize = 72;
-        tm.characterSize = 0.04f;
-        tm.anchor = TextAnchor.MiddleCenter;
-        tm.color = color;
-
-        MeshRenderer mr = go.GetComponent<MeshRenderer>();
-        if (mr != null)
-            mr.sortingOrder = 500;
-
-        StartCoroutine(PopTextRoutine(go, tm));
-    }
-
-    private IEnumerator PopTextRoutine(GameObject go, TextMesh tm)
-    {
-        float duration = 1.2f;
-        float t = 0f;
-        Vector3 start = go.transform.position;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float k = Mathf.Clamp01(t / duration);
-            go.transform.position = start + Vector3.up * (0.6f * k);
-            Color c = tm.color;
-            c.a = 1f - k;
-            tm.color = c;
-            yield return null;
-        }
-        Destroy(go);
-    }
     int pass = 0;
     StringBuilder builder;
 
