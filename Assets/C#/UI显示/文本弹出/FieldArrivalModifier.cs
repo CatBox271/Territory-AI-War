@@ -27,6 +27,9 @@ public class FieldArrivalModifier : MonoBehaviour
     [Tooltip("每个字符的随机初始旋转角上限（度）")]
     [Range(0, 360)] public float randomRotationMax = 60f;
 
+
+    [Header("是否消失")]
+    public bool fadable = true;
     // ====== 消失 ======
     [Header("消失（所有字符同时淡出）")]
     [Tooltip("淡出时长（秒）")]
@@ -108,6 +111,7 @@ public class FieldArrivalModifier : MonoBehaviour
 
     public void PlayFallOut()
     {
+        if (!fadable) return;
         if (_text == null || _visibleCharCount <= 0) return;
 
         _state = State.Falling;

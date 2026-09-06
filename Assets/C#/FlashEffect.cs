@@ -3,21 +3,27 @@ using UnityEngine;
 public class FlashEffect : MonoBehaviour
 {
     public SpriteRenderer sp;
-    public Material orign_effect;
+    public Material orign_material;
+    public Material effect_material;
 
-    private Material orign_material;
+
     private Material instance;
     private Material effectSource;
 
     void Awake()
     {
         if (sp == null) TryGetComponent(out sp);
-        if (sp != null) orign_material = sp.sharedMaterial;
+        if (sp != null && orign_material == null) orign_material = sp.sharedMaterial;
     }
 
     public Material GetEffect()
     {
         return sp != null ? sp.sharedMaterial : null;
+    }
+
+    public void SetEffect(bool on)
+    {
+        if (on) ApplyEffect(); else RemoveEffect();
     }
 
     void ApplyEffect()
@@ -29,20 +35,20 @@ public class FlashEffect : MonoBehaviour
         if (orign_material == null) orign_material = sp.sharedMaterial;
 
         // 未配置闪光材质时，回到原始材质并清理
-        if (orign_effect == null)
+        if (effect_material == null)
         {
             RemoveEffect();
             return;
         }
 
         // 同一个效果材质且仍在生效：复用实例，不重复 new
-        if (instance != null && effectSource == orign_effect && GetEffect() == instance) return;
+        if (instance != null && effectSource == effect_material && GetEffect() == instance) return;
 
         DestroyInstance();
 
-        effectSource = orign_effect;
-        instance = new Material(orign_effect);
-        instance.name = orign_effect.name + " (FlashEffect)";
+        effectSource = effect_material;
+        instance = new Material(effect_material);
+        instance.name = effect_material.name + " (FlashEffect)";
         sp.sharedMaterial = instance;
     }
 
