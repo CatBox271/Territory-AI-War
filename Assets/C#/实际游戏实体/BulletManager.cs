@@ -167,6 +167,7 @@ public class BulletManager : MonoBehaviour
         var config = MapConfig.Instance;
 
         if (gatherTimer >= GATHER_INTERVAL) { gatherTimer = 0; RefreshColliders(); }
+        else UpdateCachedBallColliders();
 
         var moveJob = new MoveBulletsJob
         {
@@ -452,6 +453,22 @@ public class BulletManager : MonoBehaviour
         }
     }
 
+    /// <summary>球体列表每30帧重建一次；两次重建之间每帧同步大球当前位置，避免子弹视觉上还没碰到球就命中。</summary>
+    void UpdateCachedBallColliders()
+    {
+        for (int i = 0; i < ballCount; i++)
+        {
+            var bp = cachedBalls[i];
+            if (bp == null) continue;
+
+            var c = ballColliders[i];
+            c.position = new float2(bp.transform.position.x, bp.transform.position.y);
+            c.radius = Mathf.Max(bp.transform.lossyScale.x, bp.transform.lossyScale.y) * bp.baseWorldRadius;
+            c.value = bp.value > int.MaxValue ? int.MaxValue : (int)((HugeInt)bp.value).ToLong();
+            ballColliders[i] = c;
+        }
+    }
+
     int CountAndApplyHits()
     {
         int alive = 0;
@@ -469,7 +486,11 @@ public class BulletManager : MonoBehaviour
                 ApplyBulletImpact(bp, hit);
 
                 if (hit.sameTeam) ((IStageValue)bp).Heal(bullets[hit.bulletIndex].stage, new HugeInt(hit.value));
-                else ((IStageValue)bp).Hit(bullets[hit.bulletIndex].stage, new HugeInt(hit.value), "", $"{bullets[hit.bulletIndex].stage}号阵营子弹");
+                else
+                {
+                    ((IStageValue)bp).Hit(bullets[hit.bulletIndex].stage, new HugeInt(hit.value), "", $"{bullets[hit.bulletIndex].stage}号阵营子弹");
+                    SpawnBallHitEffect(hit);
+                }
             }
             else if (hit.targetType == 1 && hit.targetIndex < MAX_COLLIDERS)
             {
@@ -520,6 +541,22 @@ public class BulletManager : MonoBehaviour
         // V' = V球 + k*(V弹 - V球)；BulletImpactForce=1 时即完全非弹性碰撞动量守恒。
         Vector2 vAfter = vBall + (vBullet - vBall) * (k * impact);
         bp.rb.velocity = vAfter;
+    }
+
+    /// <summary>大球被子弹命中时，在接触点朝法线30随机方向生成 CrossEffect，数量按子弹数值0~512映射1~10。</summary>
+    void SpawnBallHitEffect(BulletHit hit)
+    {
+        EffectManager em = EffectManager.Instance;
+        if (em == null || em.CE == null) return;
+
+        int bulletStage = bullets[hit.bulletIndex].stage;
+        Color col = MapConfig.Instance != null
+            ? MapConfig.Instance.GetColor(bulletStage, MapConfig.ColorStage.Bright)
+            : Color.white;
+        int count = Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(1f, 10f, Mathf.Clamp01(hit.value / 512f))), 1, 10);
+        Vector2 normal = new Vector2(hit.hitNormal.x, hit.hitNormal.y);
+
+        em.Boom(new Vector3(hit.hitPosition.x, hit.hitPosition.y, 0f), col, count, 5f, 0.2f, 0.32f, normal, 30f);
     }
 
     /// <summary>质量比例 k。同队 k=m/(M+m)；敌队 k=m/(M-m)。</summary>
@@ -638,5 +675,7 @@ public class BulletManager : MonoBehaviour
         public int value;
         public float attackPower;
         public float2 bulletVelocity;
+        public float2 hitPosition;
+        public float2 hitNormal;
     }
 }

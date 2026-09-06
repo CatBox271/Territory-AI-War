@@ -7,7 +7,6 @@ public class SlowSmall : MonoBehaviour
     public float DieSpeed;
     public Vector3 velocity;
     public float slow;
-    int k;
     float size = 1;
     Color c;
 
@@ -17,13 +16,12 @@ public class SlowSmall : MonoBehaviour
         velocity = vel;
         c = col;
         this.DieSpeed = DieSpeed;
+        transform.localScale = Vector3.one * size;
     }
     private void Start()
     {
         c.a = StartA;
         sp.color = c;
-        k = Random.Range(0, 2) == 0 ? 1 : -1;
-        transform.localEulerAngles = new Vector3(0, 0, Random.Range(0f, 360f));
     }
     float M = 1;
     private void Update()
@@ -31,7 +29,7 @@ public class SlowSmall : MonoBehaviour
         transform.localEulerAngles += new Vector3(0, 0, 5f);
         if (M > 0)
         {
-            transform.position += velocity * k * Time.deltaTime;
+            transform.position += velocity * Time.deltaTime;
             M = velocity.magnitude - slow * Time.deltaTime;
             if (M > 0) velocity = M * velocity.normalized;
         }

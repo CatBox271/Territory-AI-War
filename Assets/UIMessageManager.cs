@@ -48,7 +48,6 @@ public class UIMessageManager : MonoBehaviour
         float last = Time.time - last_deal_time;
         float delay_time = 1f / ( need_deal.Count / intensity + 1) * max_show_time;
         if (last < delay_time) return;
-        print(delay_time);
         if (need_deal.Count == 0)
         {
             Unfocus(lihui_index);

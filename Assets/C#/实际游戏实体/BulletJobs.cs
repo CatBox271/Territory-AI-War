@@ -47,12 +47,18 @@ public struct BulletBallCollisionJob : IJobParallelFor
             var ball = balls[i];
             if (math.distancesq(b.position, ball.position) >= math.pow(ball.radius + 0.05f, 2)) continue;
 
+            float2 delta = b.position - ball.position;
+            float dist = math.length(delta);
+            float2 normal = dist > 0.0001f ? delta / dist : math.normalizesafe(b.velocity);
+            float2 hitPos = ball.position + normal * ball.radius;
+
             bool sameTeam = b.stage == ball.stage;
             hitWriter.AddNoResize(new BulletHit
             {
                 targetType = 0, targetIndex = i, bulletIndex = index,
                 sameTeam = sameTeam, value = b.value,
-                attackPower = b.attackPower, bulletVelocity = b.velocity
+                attackPower = b.attackPower, bulletVelocity = b.velocity,
+                hitPosition = hitPos, hitNormal = normal
             });
 
             if (sameTeam || b.value <= ball.value)
