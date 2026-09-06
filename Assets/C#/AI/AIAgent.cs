@@ -24,17 +24,18 @@ public class AIAgent : MonoBehaviour
     public static AIAgent Instance { get; private set; }
 
     // 开局 reasoning 重试期间暂停录制：多张卡并发时用计数保证全部退出后才恢复
-    private static int openingRetryPauseCount;
+    private static int capturePauseCount;
     private static void EnterOpeningRetryPause()
     {
-        if (openingRetryPauseCount++ == 0)
+        if (capturePauseCount++ == 0)
             CapturePause.Pause();
     }
     private static void ExitOpeningRetryPause()
     {
-        if (openingRetryPauseCount > 0 && --openingRetryPauseCount == 0)
+        if (capturePauseCount > 0 && --capturePauseCount == 0)
             CapturePause.Resume();
     }
+
     private static readonly Dictionary<int, string> stageNames = new();
 
     /// <summary>阵营编号 -> 角色名字，供 GetInfo / 悄悄话横幅 / 工具结果显示。</summary>
@@ -127,7 +128,7 @@ public class AIAgent : MonoBehaviour
     //以后需要做个角色管理器
 
     private const string ApiUrl = "https://api.deepseek.com/v1/chat/completions";
-    private readonly List<CharacterCard> cards = new();
+    public readonly List<CharacterCard> cards = new();
     private readonly HashSet<int> deadStages = new();
     private int soloSinceRound = -1;
 
@@ -287,11 +288,21 @@ cards.Add(new CharacterCard("耶罗",
                 builder = new();
                 InformGetter.GetInfo(builder, card.position);
             }
+
             tasks.Add(RunCardAsync(card, builder.ToString()));
         }
         InformGetter.ClearDamageStats();
-
+        if (_round == 0)
+        {
+            EnterOpeningRetryPause();
+        }
         if (tasks.Count > 0) await Task.WhenAll(tasks);
+
+        if (_round == 0)
+        {
+            ExitOpeningRetryPause();
+        }
+
         complete?.Invoke();
     }
 
@@ -300,7 +311,8 @@ cards.Add(new CharacterCard("耶罗",
         WhisperManager.SetBusy(card.position, true);
         try
         {
-            await card.SendRequest(inform);
+            if(_round == 0) await card.FirstRequest(inform);
+            else await card.NormalRequest(inform);
         }
         finally
         {
@@ -308,6 +320,87 @@ cards.Add(new CharacterCard("耶罗",
         }
     }
 
+    /// <summary>升级触发时调用。仿照死亡遗言请求：用 DeepCopy 发独立请求，不污染 card.history，不阻塞任何普通轮次请求。</summary>
+    public async Task<int> RequestUpgradeChoiceAsync(int stage)
+    {
+        CharacterCard card = cards.Find(c => c.position == stage);
+        if (card == null) return 1;
+
+        int choice = 1;
+        CapturePause.Pause();
+        try
+        {
+            DeepSeekRequest copy = card.request.DeepCopy();
+            if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
+            copy.messages.Add(new DeepSeekMessage("user", BuildUpgradeChoicePrompt(card)));
+            copy.tools = null;
+            copy.tool_choice = null;
+
+            var tcs = new TaskCompletionSource<string>();
+            RequestInfo info = new RequestInfo(copy,
+                msgs =>
+                {
+                    DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
+                    tcs.TrySetResult(last != null ? last.content : "");
+                },
+                error => tcs.TrySetResult(""),
+                toolkit: null,
+                back_tool: false,
+                toolStage: stage);
+            info.apiKey = LoadApiKey();
+            info.apiUrl = card.url;
+
+            AIRequest.SendRequest(info);
+            Task completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
+            if (completed == tcs.Task)
+            {
+                string content = await tcs.Task;
+                choice = ParseUpgradeChoice(content);
+            }
+            else
+            {
+                Debug.LogWarning($"[升级选择] stage {stage} 请求超时，默认 +1 弹珠");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[升级选择] stage {stage} 请求异常：{e}");
+            choice = 1;
+        }
+        finally
+        {
+            CapturePause.Resume();
+        }
+        return choice;
+    }
+
+    private static int ParseUpgradeChoice(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return 1;
+
+        if (content.Contains("护盾")) return 3;
+        if (content.Contains("炮塔") || content.Contains("后坐力") || content.Contains("转速")) return 2;
+        if (content.Contains("弹珠")) return 1;
+
+        foreach (char c in content)
+        {
+            if (c >= '1' && c <= '3') return c - '0';
+        }
+        return 1;
+    }
+
+    private static string BuildUpgradeChoicePrompt(CharacterCard card)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("[升级选择] 你的空槽升级进度已满，这是一次额外强化决策，不占用你的行动轮。");
+        sb.AppendLine("从下列选项中选择本次升级，只能选择一项：");
+        sb.AppendLine("1. 额外弹珠：立即生成并发射一枚你的新弹珠，增强你的长期弹珠资源与倍乘收益。");
+        sb.AppendLine("2. 炮塔强化：炮塔后坐力提升，子弹显示半径变大、命中大球时的动量冲击更强，自动护卫极限转速翻倍（常态转速不变）。可叠加。");
+        sb.AppendLine("3. 护盾强化：护盾破碎后炮塔进入无敌时间，无视敌方子弹与大球伤害。可叠加。");
+
+        sb.AppendLine("输出要求：只回复一个数字 1、2 或 3，不要解释，不要调用工具。");
+        return sb.ToString();
+    }
     public static Task<string> OnStageDeathAsync(int stage, int killerStage, string killerWeapon = "")
     {
         if (Instance != null) return Instance.HandleStageDeath(stage, killerStage, killerWeapon);
@@ -325,9 +418,6 @@ cards.Add(new CharacterCard("耶罗",
         string victimName = card != null ? card.name : AIAgent.GetStageName(stage);
         string weaponText = string.IsNullOrEmpty(killerWeapon) ? "" : $"用{killerWeapon}";
         UISystemMessageShow.ShowNow($"{killerName}{weaponText}击杀{victimName}");
-        string deathLine = card != null ? $"{card.name}被{killerStage}号阵营击杀" : $"{stage}号阵营被{killerStage}号阵营击杀";
-        if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
-            towel.Say(deathLine, true);
 
         UpdateSoloState();
 
@@ -517,8 +607,11 @@ cards.Add(new CharacterCard("耶罗",
 - 道具按获得顺序进入武器栏；超过当前可持有数量时，从最新获得的道具开始溢出并立即生效。
 
 ## 五、空槽升级
-每个**已解锁且为空**的道具格都会持续积累升级值，达标后**额外生成一个弹珠**；每生成一个，下一次升级所需值翻倍。
-因此：使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
+每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择（不占用行动轮），你只能三选一：
+1. **额外弹珠：** 立即生成并发射一枚你的新弹珠，增强长期弹珠资源与倍乘收益。
+2. **炮塔强化：** 炮塔后坐力提升，子弹显示半径变大、命中大球时的动量冲击更强，自动护卫极限转速翻倍（常态转速不变）。可叠加。
+3. **护盾强化：** 护盾破碎后炮塔进入无敌时间，无视敌方子弹与大球伤害。可叠加。
+每次升级完成后，下一次升级所需值翻倍。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
 注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
 
 ## 六、道具
@@ -864,7 +957,97 @@ cards.Add(new CharacterCard("耶罗",
             return true;
         }
 
-        public async Task SendRequest(string inform)
+        public async Task UntilGreatRequest()
+        {
+            TaskCompletionSource<bool> tcs = new();
+
+            RequestInfo info = new(
+                request,
+                msgs =>
+                {
+                    if (!_isRunning) return;
+                    // 检查 AI 回复 content，出现括号就在 history 末尾追加提醒，下一次请求会带过去
+                    RemindIfUsesParentheses(msgs);
+                    tcs.SetResult(true);
+                    },
+                error =>
+                {
+                    ReceiveError(error);
+                    tcs.SetResult(true);
+                },
+                toolkit,
+                true,
+                position);
+
+            info.apiKey = LoadApiKey();
+            info.apiUrl = url;
+
+            //保证已经检查完毕
+            info.validateAndMaybeRetry = (msg) => {
+                if (IsRoleplayReasoning(msg)) return true;
+
+                info.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
+                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
+                AIRequest.SendRequest(info);
+                return false;
+            }; 
+
+            AIRequest.SendRequest(info);
+
+            await tcs.Task;
+
+            //Say
+            if (GetLastAssistantContent(out string finalContent))
+            {
+                Say(position,finalContent);
+            }
+        }
+        private void Say(int position,string content)
+        {
+            InformGetter.SetAIContent(position, content);
+            if (Towel.AllTowel.TryGetValue(position, out Towel towel)) towel.Say(content, true);
+            UIMessageManager.Instance?.AddMessage(new UIMInfo
+            {
+                stage = position,
+                content = content,
+                emo = (SpriteEmotion)UnityEngine.Random.Range(0, 7)
+            });
+        }
+        public async Task FirstRequest(string inform)
+        {
+            N++;
+
+            last_round_index.Add(history.Count);
+            if (last_round_index.Count > 5) last_round_index.RemoveAt(0);
+            int startTokens = EstimateHistoryTokens(history);
+            history.Add(new DeepSeekMessage("user", inform));
+
+            int roundStartIndex = history.Count;
+
+            // 有成功缓存就直接复用，不再请求/重刷
+            if (TryLoadOpeningCache(out DeepSeekMessage cachedOpening))
+            {
+                history.Add(cachedOpening);
+                Say(position, cachedOpening.content);
+
+                return;
+            }
+            request.tool_choice = "none";
+            //请求直到正确
+            await UntilGreatRequest();
+
+            SaveOpeningCache(request.messages[^1]);
+
+            request.tool_choice = "auto"; // 开局结束后恢复自动工具调用
+
+            int endTokens = EstimateHistoryTokens(history);
+            int sampleX = Mathf.Max(0, endTokens - startTokens);
+            avgX = avgX * 0.9f + sampleX * 0.1f;
+
+            Save();
+        }
+
+        public async Task NormalRequest(string inform)
         {
             N++;
             bool compressed = MaybeCompress();
@@ -880,183 +1063,23 @@ cards.Add(new CharacterCard("耶罗",
                 history.Add(new DeepSeekMessage("user", BuildToolUsageReminder()));
 
             int roundStartIndex = history.Count;
-            bool isOpening = N == 1; // 只在开局放狠话这一轮检测 reasoning，不合格就无限重刷
-            bool pausedForRetry = false;
-            int retryCount = 0;
-            bool openingReused = false;
-            bool mainTimedOut = false;
 
-            // 有成功缓存就直接复用，不再请求/重刷
-            if (isOpening && TryLoadOpeningCache(out DeepSeekMessage cachedOpening))
-            {
-                openingReused = true;
-                history.Add(cachedOpening);
-                InformGetter.SetAIContent(position, cachedOpening.content);
-                if (Towel.AllTowel.TryGetValue(position, out Towel towel))
-                    towel.Say(cachedOpening.content, true);
-            }
-
-            // 开局特殊处理：从第一次请求开始就暂停录制，直到开场 reasoning 合格
-            if (isOpening && !openingReused)
-            {
-                EnterOpeningRetryPause();
-                pausedForRetry = true;
-            }
-
-            while (!openingReused)
-            {
-                if (isOpening)
-                {
-                    openingRetryMode = true;
-                    openingLastMessages = null;
-                    request.tool_choice = "none"; // 开局只放狠话，不允许调用工具
-                }
-
-                bool timedOut = false;
-                Func<bool> isTimedOut = () => timedOut;
-                //结果等待器
-                var tcs = new TaskCompletionSource<bool>();
-
-                RequestInfo info = new(
-                    request,
-                    msgs =>
-                    {
-                        if (timedOut) return;
-                        ReceiveResponse(msgs);   // 在这里解析
-                        tcs.TrySetResult(true);
-                    },
-                    error =>
-                    {
-                        if (timedOut) return;
-                        ReceiveError(error);
-                        tcs.TrySetResult(true);
-                    },
-                    toolkit,
-                    true,
-                    position);
-
-                info.apiKey = AIAgent.LoadApiKey();
-                info.apiUrl = url;
-
-                // 开局轮由本类自己的 reasoning 重试循环处理；
-                // 其余回合由本类注入校验/重试钩子，在落库/执行工具前拦截不合格回复。
-                if (!isOpening)
-                    info.validateAndMaybeRetry = (ri, msg, inHistory) => ValidateAndMaybeRetry(ri, msg, inHistory, isTimedOut);
-
-                try
-                {
-                    AIRequest.SendRequest(info);
-                }
-                catch (Exception ex)
-                {
-                    ReceiveError(ex.Message);
-                    tcs.TrySetResult(false);
-                }
-
-                await tcs.Task;
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
-                if (completed != tcs.Task)
-                {
-                    timedOut = true;
-                    mainTimedOut = true;
-                    ReceiveError("AI请求超时(25秒)");
-                }
-
-                // 只在开头检测 reasoning_content，不合格就重发
-                string reasoning = null;
-                bool goodEnough = true;
-                if (isOpening)
-                {
-                    reasoning = GetLastAssistantReasoning(out string content);
-                    goodEnough = AIAgent.IsRoleplayReasoning(reasoning,content);
-                }
-
-                if (goodEnough)
-                    break;
-
-                retryCount++;
-                string shortReasoning = reasoning;
-                if (shortReasoning != null && shortReasoning.Length > 120)
-                    shortReasoning = shortReasoning.Substring(0, 120) + "...";
-                Debug.Log($"[开局重刷] {name} reasoning 不合格，第 {retryCount} 次重置重发。reasoning: {shortReasoning}");
-
-                // 清掉本次请求产生的 assistant/tool 消息，保留 user 消息重发
-                if (history.Count > roundStartIndex)
-                    history.RemoveRange(roundStartIndex, history.Count - roundStartIndex);
-            }
-
-            if (isOpening && !openingReused)
-            {
-                openingRetryMode = false;
-
-                // 直接用最终留在 history 里的 assistant content，确保一定 Say
-                string finalContent = GetLastAssistantContent();
-                if (!string.IsNullOrWhiteSpace(finalContent))
-                {
-                    InformGetter.SetAIContent(position, finalContent);
-                    if (Towel.AllTowel.TryGetValue(position, out Towel towel))
-                        towel.Say(finalContent, true); // 强制顶掉 Start 里的 HelloWorld 等旧气泡
-                        DeepSeekMessage finalMsg = GetLastAssistantMessage();
-                        if (finalMsg != null)
-                            SaveOpeningCache(finalMsg);
-                }
-                else
-                {
-                    Debug.LogWarning($"[开局] {name} 最终没有可取 content");
-                }
-            }
-
-            if (isOpening && !openingReused)
-                request.tool_choice = "auto"; // 开局结束后恢复自动工具调用
-
-            if (pausedForRetry)
-                ExitOpeningRetryPause();
+            //请求直到正确
+            await UntilGreatRequest();
 
             int endTokens = EstimateHistoryTokens(history);
             int sampleX = Mathf.Max(0, endTokens - startTokens);
             avgX = avgX * 0.9f + sampleX * 0.1f;
 
-            // 开局强制不放工具，不参与行为检查和“连续未用工具”统计；主请求超时时本轮不完整，跳过检查
-            if (!isOpening)
-            {
-                if (!mainTimedOut)
-                {
-                    List<string> missingTools = await RunBehaviorCheckAsync(roundStartIndex);
-                    foreach (string toolName in missingTools)
-                        await ForceToolCallAsync(toolName);
-                }
-
-                UpdateToolUsageReminder(roundStartIndex);
-            }
+            //言行一致性检查
+            List<string> missingTools = await RunBehaviorCheckAsync(roundStartIndex);
+            foreach (string toolName in missingTools) await ForceToolCallAsync(toolName);
+            //连续未用工具”统计
+            UpdateToolUsageReminder(roundStartIndex);
 
             Save();
         }
 
-        /// <summary>
-        /// 思考模式回复校验与重试（从 AIRequest 移入）。
-        /// 不合格时不落库、不执行工具，追加一条修正提醒后立刻重发；取消重试次数上限，直到合格或本轮超时。
-        /// candidateAlreadyInHistory：流式请求会先放一个占位 assistant，校验失败时需要先移除。
-        /// </summary>
-        private bool ValidateAndMaybeRetry(RequestInfo requestInfo, DeepSeekMessage candidate, bool candidateAlreadyInHistory, Func<bool> isTimedOut)
-        {
-            if (IsRoleplayReasoning(candidate))
-                return true;
-
-            if (candidateAlreadyInHistory && requestInfo.messages.Count > 0 &&
-                requestInfo.messages[requestInfo.messages.Count - 1].role == "assistant")
-            {
-                requestInfo.messages.RemoveAt(requestInfo.messages.Count - 1);
-            }
-
-            // 本轮已超时就不再继续重发，避免后台重试链一直跑
-            if (isTimedOut != null && isTimedOut())
-                return false;
-
-            requestInfo.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
-            Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {candidate.reasoning_content}");
-            AIRequest.SendRequest(requestInfo);
-            return false;
-        }
 
         /// <summary>拼接本轮所有 assistant.content。</summary>
         private string CollectRoundAssistantContents(int roundStartIndex)
@@ -1272,7 +1295,6 @@ cards.Add(new CharacterCard("耶罗",
                 toolStage: position);
             info.apiKey = AIAgent.LoadApiKey();
             info.apiUrl = url;
-            info.validateAndMaybeRetry = (ri, msg, inHistory) => ValidateAndMaybeRetry(ri, msg, inHistory, () => timedOut);
 
             try
             {
@@ -1409,22 +1431,6 @@ cards.Add(new CharacterCard("耶罗",
             }
         }
 
-        private void ReceiveResponse(List<DeepSeekMessage> messages)
-        {
-            if (!_isRunning) return;
-
-            // 检查 AI 回复 content，出现括号就在 history 末尾追加提醒，下一次请求会带过去
-            RemindIfUsesParentheses(messages);
-
-            // 开头重试期间先不公开展示，等确定保留哪一次再显示
-            if (openingRetryMode)
-            {
-                openingLastMessages = messages;
-                return;
-            }
-
-            DisplayReceivedMessages(messages);
-        }
 
         private void DisplayReceivedMessages(List<DeepSeekMessage> messages)
         {
@@ -1458,14 +1464,18 @@ cards.Add(new CharacterCard("耶罗",
             return null;
         }
 
-        private string GetLastAssistantContent()
+        private bool GetLastAssistantContent(out string out_text)
         {
+            out_text = "";
             for (int i = history.Count - 1; i >= 0; i--)
             {
                 if (history[i].role == "assistant" && !string.IsNullOrWhiteSpace(history[i].content))
-                    return history[i].content;
+                {
+                    out_text = history[i].content;
+                    return true;
+                }
             }
-            return null;
+            return false;
         }
 
         private string GetLastAssistantReasoning(out string content)

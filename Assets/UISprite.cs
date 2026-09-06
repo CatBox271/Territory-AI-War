@@ -1,9 +1,20 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+public enum SpriteEmotion
+{
+    origin,
+    laugh,
+    shock,
+    angry,
+    sad,
+    win,
+    lose,
+}
 
 public class UISprite : MonoBehaviour
 {
+    public SpriteRenderer sp;
     public enum XR
     { 
         None,
@@ -53,6 +64,17 @@ public class UISprite : MonoBehaviour
         transform.localScale = Vector3.one * (Scale + additive_scale);
     }
     public bool show;
+    public void Set(int stage, SpriteEmotion emo)
+    {
+        try
+        {
+            //我在写别动
+            sp.sprite = Resources.Load(AIAgent.GetStageName(stage) + "_" + emo.ToString()) as Sprite;
+            print("set");
+        }
+        catch
+        { }
+    }
     public void Act(bool show)
     {
         if (show) anim.Play("SpriteDuration");
@@ -67,4 +89,6 @@ public class UISprite : MonoBehaviour
             last_additive_pos = additive_pos;
         }
     }
+
+
 }

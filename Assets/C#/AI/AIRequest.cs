@@ -321,7 +321,7 @@ public class RequestInfo
     /// 参数：本次 RequestInfo、候选 assistant 回复、该候选是否已经作为占位消息写入 history。
     /// 返回 true 表示通过并继续流程；返回 false 表示本次响应已由外部处理（重发或报错），AIRequest 停止当前流水线。
     /// </summary>
-    public Func<RequestInfo, DeepSeekMessage, bool, bool> validateAndMaybeRetry;
+    public Func<DeepSeekMessage, bool> validateAndMaybeRetry;
 
     public void AddMessage(List<DeepSeekMessage> message)
     {
@@ -719,7 +719,7 @@ public static class AIRequest
 
                 // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
                 if (requestInfo.validateAndMaybeRetry != null &&
-                    !requestInfo.validateAndMaybeRetry(requestInfo, assistant, false))
+                    !requestInfo.validateAndMaybeRetry(assistant))
                 {
                     request.Dispose();
                     return;
@@ -882,7 +882,7 @@ public static class AIRequest
 
             // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
             if (requestInfo.validateAndMaybeRetry != null &&
-                !requestInfo.validateAndMaybeRetry(requestInfo, assistantMessage, true))
+                !requestInfo.validateAndMaybeRetry(assistantMessage))
             {
                 request.Dispose();
                 return;
@@ -925,7 +925,7 @@ public static class AIRequest
 
             // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
             if (requestInfo.validateAndMaybeRetry != null &&
-                !requestInfo.validateAndMaybeRetry(requestInfo, assistantMessage, true))
+                !requestInfo.validateAndMaybeRetry(assistantMessage))
             {
                 request.Dispose();
                 return;

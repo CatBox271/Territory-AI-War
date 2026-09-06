@@ -16,13 +16,29 @@ public class UIMessageBar : MonoBehaviour
     public Vector2 TextAlpha = new(1f, 0.5f);
     public float FadeMin = 0.5f;
     public float FadeMax = 1f;
+    public float speed = 1f;
+    public int MessageListCount;
+    private float Yvalue { get { return (YRange[1] - YRange[0]) / Mathf.Max(MessageListCount - 1, 1); } }
     private float FadeRange { get { return FadeMax - FadeMin; } }
+    private Vector3 AimPos = new();
 
-    public void Set(string content,Color col)
+    private void Start()
     {
+        AimPos = transform.localPosition;
+    }
+
+    public void SetLow(string content,Color col)
+    {
+        AimPos = transform.localPosition = new Vector3(0, YRange[0] - Yvalue);
         text.text = content;
         background.color = col;
+        focus = true;
         Refresh();
+    }
+
+    public void UpPos()
+    {
+        AimPos.y += Yvalue;
     }
 
     public void Refresh()
@@ -64,15 +80,26 @@ public class UIMessageBar : MonoBehaviour
 
         effect.SetEffect(false);
     }
-    // Start is called before the first frame update
-    void Start()
-    {
-        
-    }
 
-    // Update is called once per frame
+    bool last_focus;
+    float up_duration = 0;
     void Update()
     {
-        if (focus) LayerUp(); else LayerDown();
+        if (last_focus ^ focus)
+        {
+            last_focus = focus;
+            Refresh();
+        }
+        if (transform.localPosition != AimPos)
+        {
+            print(AimPos);
+            print(transform.localPosition);
+            transform.localPosition = Vector3.Lerp(transform.localPosition, AimPos, up_duration += Time.deltaTime * speed);
+            Refresh();
+        }
+        else
+        {
+            up_duration = 0;
+        }
     }
 }

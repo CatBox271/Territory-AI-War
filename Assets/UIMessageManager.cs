@@ -6,11 +6,12 @@ public struct UIMInfo
 {
     public int stage;
     public string content;
-    public string emo;
+    public SpriteEmotion emo;
 }
 
 public class UIMessageManager : MonoBehaviour
 {
+    public static UIMessageManager Instance;
     public GameObject item;
     public Vector2 YRange = new();
     public Transform MessageParent;
@@ -24,6 +25,10 @@ public class UIMessageManager : MonoBehaviour
     private List<UIMessageBar> items = new();
 
     public bool test;
+    private void Awake()
+    {
+        Instance = this;
+    }
     private void Start()
     {
         last_deal_time = -max_show_time;
@@ -31,7 +36,9 @@ public class UIMessageManager : MonoBehaviour
         {
             GameObject go = Instantiate(item, MessageParent.transform);
             var mb = go.GetComponent<UIMessageBar>();
-            mb.Set("", Color.white);
+            mb.YRange = YRange;
+            mb.MessageListCount = MessageCount;
+            mb.SetLow("", Color.white);
             items.Add(mb);
         }
         Adjust(false);
@@ -42,7 +49,7 @@ public class UIMessageManager : MonoBehaviour
         if (test)
         {
             test = false;
-            AddMessage(new() { stage = 0, content = "这就不行了，真是杂鱼。", emo = "origin" });
+            AddMessage(new() { stage = 1, content = "这就不行了，真是杂鱼。", emo = (SpriteEmotion)Random.Range(0,7) });
         }
 
         float last = Time.time - last_deal_time;
@@ -83,6 +90,8 @@ public class UIMessageManager : MonoBehaviour
         //取消聚焦
         var lihui = human[i];
         if (lihui.show) lihui.Act(false);
+        items[0].focus = false;
+        items[0].Refresh();
     }
     private int lihui_index = 1;
     private void lihui_switch()
@@ -93,14 +102,25 @@ public class UIMessageManager : MonoBehaviour
     {
         var item = need_deal.Dequeue();
 
-
         Unfocus(lihui_index);
         lihui_switch();
         var lihui = human[lihui_index];
-
+        lihui.Set(item.stage,item.emo);
         lihui.Act(true);
+
+        for (int i = 0; i < items.Count; i++)
+        {
+            var text_ui = items[i];
+            if (i == items.Count - 1)
+            {
+                text_ui.SetLow(item.content, MapConfig.Instance.GetColor(item.stage));
+                items.RemoveAt(i);
+                items.Insert(0,text_ui);
+            }
+            text_ui.UpPos();
+        }
     }
-    private void AddMessage(UIMInfo info)
+    public void AddMessage(UIMInfo info)
     {
         need_deal.Enqueue(info);
     }
