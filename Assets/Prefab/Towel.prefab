@@ -307,6 +307,12 @@ MonoBehaviour:
   shieldCollider: {fileID: 480754872830793386}
   messageDisplayer: {fileID: 2532380011593234005}
   aimController: {fileID: 7866295218095374167}
+  turretUpgraded: 0
+  shieldUpgradeOwned: 0
+  shieldBreakInvincibleTime: 2
+  upgradedBulletRadiusScale: 1.7
+  upgradedBulletImpactScale: 1.6
+  isDead: 0
   BulletPosRandom: 0
 --- !u!58 &525751960054713117
 CircleCollider2D:
@@ -592,7 +598,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  - {fileID: 3504502201474179892, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -636,8 +642,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: 8
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
+  m_sharedMaterial: {fileID: 3504502201474179892, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 2100000, guid: 8da143643363403a83d5bf9a492ae90a, type: 2}
   m_fontMaterials: []
@@ -667,7 +673,7 @@ MonoBehaviour:
   m_enableAutoSizing: 0
   m_fontSizeMin: 18
   m_fontSizeMax: 72
-  m_fontStyle: 1
+  m_fontStyle: 0
   m_HorizontalAlignment: 2
   m_VerticalAlignment: 512
   m_textAlignment: 65535

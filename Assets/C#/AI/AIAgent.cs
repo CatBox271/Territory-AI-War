@@ -351,16 +351,7 @@ cards.Add(new CharacterCard("耶罗",
             info.apiUrl = card.url;
 
             AIRequest.SendRequest(info);
-            Task completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
-            if (completed == tcs.Task)
-            {
-                string content = await tcs.Task;
-                choice = ParseUpgradeChoice(content);
-            }
-            else
-            {
-                Debug.LogWarning($"[升级选择] stage {stage} 请求超时，默认 +1 弹珠");
-            }
+            choice = ParseUpgradeChoice(await tcs.Task);
         }
         catch (Exception e)
         {
@@ -477,17 +468,8 @@ cards.Add(new CharacterCard("耶罗",
 
             AIRequest.SendRequest(info);
             Debug.Log($"[遗言] stage {stage} 请求已发送");
-            var completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
-            if (completed != tcs.Task)
-            {
-                Debug.LogWarning($"[遗言] stage {stage} 请求超时，使用兜底遗言");
-                words = "无言的告别";
-            }
-            else
-            {
-                words = await tcs.Task;
-                if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
-            }
+            words = await tcs.Task;
+            if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
             InformGetter.SetAIContent(stage, words);
         }
         catch (Exception e)
@@ -539,8 +521,6 @@ cards.Add(new CharacterCard("耶罗",
         info.apiUrl = card.url;
 
         AIRequest.SendRequest(info);
-        var completed = await Task.WhenAny(tcs.Task, Task.Delay(25000));
-        if (completed != tcs.Task) return "（悄悄话回复超时）";
         return await tcs.Task;
     }
 
@@ -861,15 +841,13 @@ cards.Add(new CharacterCard("耶罗",
         private int roundsWithoutTool;
         private bool noToolReminderSent;
 
-        // 思考模式回复校验与重试（从 AIRequest 移入；不合格时无限重试，直到合格或本轮超时）
+        // 思考模式回复校验与重试（从 AIRequest 移入；不合格时无限重试，直到合格）
         private const string ThinkingRetryPrompt =
             "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）或(我想：……)；" +
             "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
 
         // ---------- AI 行为检查 ----------
         private const string BehaviorCheckerModel = "deepseek-v4-flash";
-        private const int BehaviorCheckTimeoutMs = 15000;
-        private const int ForceToolTimeoutMs = 25000;
 
         private const string BehaviorCheckerSystemPrompt =
 @"你是一个严格的游戏 AI 行为检查器。你的任务只有：判断目标 AI 是否“说了要做某个具体行动，但没有调用对应工具执行”。你不调用任何工具，只输出分析文字和最终判断。
@@ -1188,20 +1166,16 @@ cards.Add(new CharacterCard("耶罗",
             };
             checkerRequest.tools = null;
             checkerRequest.tool_choice = null;
-
-            bool timedOut = false;
             var tcs = new TaskCompletionSource<string>();
             RequestInfo info = new RequestInfo(
                 checkerRequest,
                 msgs =>
                 {
-                    if (timedOut) return;
                     DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m != null && m.role == "assistant") : null;
                     tcs.TrySetResult(last != null ? last.content : "");
                 },
                 error =>
                 {
-                    if (timedOut) return;
                     Debug.LogWarning($"[AI行为检查] {name} 检查请求失败：{error}");
                     tcs.TrySetResult("");
                 },
@@ -1221,23 +1195,9 @@ cards.Add(new CharacterCard("耶罗",
                 tcs.TrySetResult("");
             }
 
-            var completed = await Task.WhenAny(tcs.Task, Task.Delay(BehaviorCheckTimeoutMs));
-            string checkerText = "";
-            if (completed == tcs.Task)
-            {
-                checkerText = await tcs.Task;
-            }
-            else
-            {
-                timedOut = true;
-            }
+            string checkerText = await tcs.Task;
 
             sw.Stop();
-            if (timedOut)
-            {
-                Debug.LogWarning($"[AI行为检查] {name} 检查超时（{BehaviorCheckTimeoutMs}ms），本轮跳过。用时 {sw.Elapsed.TotalSeconds:F2}s");
-                return new List<string>();
-            }
 
             List<string> missingTools = ParseBehaviorCheckVerdict(checkerText);
             Debug.Log($"[AI行为检查] {name} 检查完成，用时 {sw.Elapsed.TotalSeconds:F2}s。\n" +
@@ -1265,14 +1225,11 @@ cards.Add(new CharacterCard("耶罗",
 
             object previousToolChoice = request.tool_choice;
             request.tool_choice = new { type = "function", function = new { name = toolName } };
-
-            bool timedOut = false;
             var tcs = new TaskCompletionSource<bool>();
             RequestInfo info = new RequestInfo(
                 request,
                 msgs =>
                 {
-                    if (timedOut) return;
                     if (msgs != null)
                     {
                         foreach (DeepSeekMessage msg in msgs)
@@ -1286,7 +1243,6 @@ cards.Add(new CharacterCard("耶罗",
                 },
                 error =>
                 {
-                    if (timedOut) return;
                     Debug.LogWarning($"[AI行为检查] {name} 强制调用 {toolName} 失败：{error}");
                     tcs.TrySetResult(true);
                 },
@@ -1308,9 +1264,7 @@ cards.Add(new CharacterCard("耶罗",
 
             try
             {
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(ForceToolTimeoutMs));
-                if (completed != tcs.Task)
-                    timedOut = true;
+                await tcs.Task;
             }
             finally
             {
@@ -1330,10 +1284,7 @@ cards.Add(new CharacterCard("耶罗",
                 }
             }
 
-            if (timedOut)
-                Debug.LogWarning($"[AI行为检查] {name} 强制调用 {toolName} 超时（{ForceToolTimeoutMs}ms），用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executed ? "是" : "否")}");
-            else
-                Debug.Log($"[AI行为检查] {name} 强制调用 {toolName} 完成，用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executed ? "是" : "否")}");
+                        Debug.Log($"[AI行为检查] {name} 强制调用 {toolName} 完成，用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executed ? "是" : "否")}");
 
             return executed;
         }
