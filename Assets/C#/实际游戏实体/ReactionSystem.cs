@@ -235,7 +235,7 @@ public class ReactionSystem : MonoBehaviour, Itool
     {
         MapConfig config = MapConfig.Instance;
         if (config == null)
-            return "使用道具失败：游戏配置(MapConfig)不存在。";
+            return "使用道具失败：炮塔无法锁定4格外的目标，但是指向具体的坐标可以。";
 
         if (callStage < 0 || callStage >= config.teamProps.Length)
             return $"使用道具失败：当前角色阵营 {callStage} 无效。";
@@ -278,7 +278,18 @@ public class ReactionSystem : MonoBehaviour, Itool
         // 先取出并移除，再走原有执行逻辑（和 AddProp 里溢出执行的是同一套逻辑）。
         props.RemoveAt(args.index - 1);
 
-        config.ExecutePropEffect(prop.stage, prop.item, prop.value, aim, anyChoice);
+        // AI 调用道具的初始瞄准误差：基础 15，每级炮塔升级减半，可叠加。
+        float aimAngleError = 0f;
+        if (aim != null && aim.item != null)
+        {
+            int upgradeLevel = 0;
+            if (Towel.AllTowel.TryGetValue(callStage, out Towel aimTowel) && aimTowel != null)
+                upgradeLevel = Mathf.Max(0, aimTowel.turretUpgraded);
+            aimAngleError = 15f / Mathf.Pow(2f, upgradeLevel);
+        }
+
+
+        config.ExecutePropEffect(prop.stage, prop.item, prop.value, aim, anyChoice, aimAngleError);
 
         string choiceText = anyChoice.HasValue ? $"，任意触发为：{anyChoice.Value}" : "";
         string aimText = aim != null ? $"，已朝向 {aim.pos}" : "";

@@ -11,6 +11,8 @@ struct BulletData
     int alive;
     float attackPower;
     int value;
+    float displayRadius;
+    float impactScale;
 };
 
 RWTexture2D<float4> Display;
@@ -28,13 +30,13 @@ void CSClearDisplay(uint3 id : SV_DispatchThreadID)
     Display[id.xy] = float4(0, 0, 0, 0);
 }
 
-void FillCircle(int2 center, float4 color)
+void FillCircle(int2 center, float4 color, int radius)
 {
-    for (int dy = -_BulletRadius; dy <= _BulletRadius; dy++)
+    for (int dy = -radius; dy <= radius; dy++)
     {
-        for (int dx = -_BulletRadius; dx <= _BulletRadius; dx++)
+        for (int dx = -radius; dx <= radius; dx++)
         {
-            if (dx * dx + dy * dy > _BulletRadius * _BulletRadius) continue;
+            if (dx * dx + dy * dy > radius * radius) continue;
             int2 p = center + int2(dx, dy);
             if (p.x < 0 || p.x >= (int)_Resolution || p.y < 0 || p.y >= (int)_Resolution) continue;
             Display[p] = color;
@@ -55,5 +57,6 @@ void CSBulletDisplay(uint3 id : SV_DispatchThreadID)
 
     float t = saturate(((float)b.value - 4.0) / 252.0);
     float4 color = lerp(_BulletColors[ci], float4(1, 1, 1, 1), t);
-    FillCircle(pixel, color);
+    int radius = max(1, b.displayRadius > 0.0 ? (int)(b.displayRadius + 0.5) : _BulletRadius);
+    FillCircle(pixel, color, radius);
 }

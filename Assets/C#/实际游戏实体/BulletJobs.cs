@@ -57,7 +57,7 @@ public struct BulletBallCollisionJob : IJobParallelFor
             {
                 targetType = 0, targetIndex = i, bulletIndex = index,
                 sameTeam = sameTeam, value = b.value,
-                attackPower = b.attackPower, bulletVelocity = b.velocity,
+                attackPower = b.attackPower, bulletVelocity = b.velocity, impactScale = b.impactScale,
                 hitPosition = hitPos, hitNormal = normal
             });
 
@@ -122,7 +122,7 @@ public struct BulletTowelCollisionJob : IJobParallelFor
         {
             var body = towelBodies[i];
             if (math.distancesq(b.position, body.position) >= body.radius * body.radius) continue;
-            if (b.stage == body.stage) return;
+            if (b.stage == body.stage || body.invincible != 0) return; // 无敌时间内无视敌方子弹
 
             hitWriter.AddNoResize(new BulletHit
             {

@@ -10,6 +10,8 @@ struct BulletData
     int alive;
     float attackPower;
     int value;
+    float displayRadius;
+    float impactScale;
 };
 
 RWStructuredBuffer<BulletData> Bullets;

@@ -1,9 +1,12 @@
 using System.Collections;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class MarbleManager : MonoBehaviour
 {
+    public enum UpgradeChoice { Marble = 1, Turret = 2, Shield = 3 }
+
     public static MarbleManager Instance;
 
     [Header("Prefabs & Refs")]
@@ -133,11 +136,101 @@ public class MarbleManager : MonoBehaviour
             cost *= upgradeCostGrowth;
 
             UIMarbleUpgrade.Instance.ShowUpgrade(stage);
-            StartCoroutine(UpgradeSpawnSequence(stage));
+            if (MapConfig.Instance.useAIDecision && AIAgent.Instance != null)
+                StartCoroutine(AIUpgradeSequence(stage));
+            else
+                StartCoroutine(UpgradeSpawnSequence(stage));
         }
 
         upgradeCosts[stage] = cost;
         upgradeProgress[stage] = progress;
+    }
+
+    /// <summary>useAI 模式下：暂停并询问 AI 选择升级，选择后在 Say 里强制显示并执行对应升级。</summary>
+    IEnumerator AIUpgradeSequence(int stage)
+    {
+        Task<int> choiceTask = AIAgent.Instance.RequestUpgradeChoiceAsync(stage);
+        while (!choiceTask.IsCompleted)
+            yield return null;
+
+        int choice = 1;
+        if (choiceTask.IsFaulted || choiceTask.IsCanceled)
+        {
+            Debug.LogWarning($"[Upgrade] stage {stage} 升级选择请求失败，默认 +1 弹珠。{choiceTask.Exception}");
+        }
+        else
+        {
+            choice = choiceTask.Result;
+        }
+
+        if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
+            towel.Say(UpgradeChoiceText(choice), true);
+
+        ApplyUpgradeChoice(stage, (UpgradeChoice)choice);
+    }
+
+    private static string UpgradeChoiceText(int choice)
+    {
+        switch (choice)
+        {
+            case 2: return "炮塔升级";
+            case 3: return "护盾升级";
+            default: return "弹珠+1";
+        }
+    }
+
+    public void ApplyUpgradeChoice(int stage, UpgradeChoice choice)
+    {
+        switch (choice)
+        {
+            case UpgradeChoice.Turret:
+                StartCoroutine(TurretUpgradeSequence(stage, UpgradeChoice.Turret));
+                break;
+            case UpgradeChoice.Shield:
+                StartCoroutine(TurretUpgradeSequence(stage, UpgradeChoice.Shield));
+                break;
+            default:
+                StartCoroutine(UpgradeSpawnSequence(stage));
+                break;
+        }
+    }
+
+    /// <summary>炮塔/护盾升级：从升级槽连线到炮塔，线到后再应用升级并弹上升文本。</summary>
+    IEnumerator TurretUpgradeSequence(int stage, UpgradeChoice choice)
+    {
+        if (!Towel.AllTowel.TryGetValue(stage, out Towel towel) || towel == null)
+            yield break;
+
+        Vector3 target = towel.transform.position;
+        UIMarbleUpgrade ui = UIMarbleUpgrade.Instance;
+        if (ui != null)
+            yield return PlayLineToTarget(stage, target);
+
+        if (choice == UpgradeChoice.Turret) towel.ApplyTurretUpgrade();
+        else towel.ApplyShieldUpgrade();
+
+        if (ui != null)
+        {
+            string label = choice == UpgradeChoice.Turret ? "炮塔升级" : "护盾升级";
+            Color col = MapConfig.Instance != null ? MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball) : Color.white;
+            ui.PopUpgradeText(target, label, col);
+        }
+    }
+
+    IEnumerator PlayLineToTarget(int stage, Vector3 target)
+    {
+        UIMarbleUpgrade ui = UIMarbleUpgrade.Instance;
+        if (ui == null) yield break;
+
+        bool arrived = false;
+        ui.PlayLineTo(stage, target, () => arrived = true);
+        float waited = 0f;
+        while (!arrived)
+        {
+            waited += Time.deltaTime;
+            if (waited > 3f) break;
+            yield return null;
+        }
     }
 
     IEnumerator UpgradeSpawnSequence(int stage)

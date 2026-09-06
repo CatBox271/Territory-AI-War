@@ -155,7 +155,7 @@ public class MapConfig : MonoBehaviour
             ExecutePropEffect(top.stage, top.item, top.value);//溢出（内部触发OnPropPop）
         }
     }
-    public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null, WeaponKind? anyChoice = null)//anyChoice 只对【任意】生效；null=原来的随机
+    public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null, WeaponKind? anyChoice = null, float aimAngleError = 0f)//anyChoice 只对【任意】生效；null=原来的随机
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
 
@@ -163,6 +163,10 @@ public class MapConfig : MonoBehaviour
         {
             towel.LookAt(aim_pos.pos); //转向,炮塔默认会自动顺时针转向
             towel.aimController.ChangeAim(aim_pos);
+
+            // AI 调用道具的初始瞄准误差：在转向后立刻随机偏转，发射方向按误差后的朝向执行。
+            if (aimAngleError > 0f)
+                towel.transform.localEulerAngles += new Vector3(0f, 0f, Random.Range(-aimAngleError, aimAngleError));
         }
         OnPropOut?.Invoke(new PropInfo(itemName, val, stage, aim_pos));
 

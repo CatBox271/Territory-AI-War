@@ -85,12 +85,12 @@ public class BulletManager : MonoBehaviour
             cachedBulletColors[i] = new Vector4(bc.r, bc.g, bc.b, 1f);
         }
     }
-    public void Fire(Vector2 worldPos, Vector2 direction, int stage, int value, float speed = -1f)
-    => Fire(new float2(worldPos.x, worldPos.y), new float2(direction.x, direction.y), stage, value, speed);
-    public void Fire(Vector3 worldPos, Vector3 direction, int stage, int value, float speed = -1f)
-        => Fire(new float2(worldPos.x, worldPos.y), new float2(direction.x, direction.y), stage, value, speed);
+    public void Fire(Vector2 worldPos, Vector2 direction, int stage, int value, float speed = -1f, float displayRadius = -1f, float impactScale = 1f)
+    => Fire(new float2(worldPos.x, worldPos.y), new float2(direction.x, direction.y), stage, value, speed, displayRadius, impactScale);
+    public void Fire(Vector3 worldPos, Vector3 direction, int stage, int value, float speed = -1f, float displayRadius = -1f, float impactScale = 1f)
+        => Fire(new float2(worldPos.x, worldPos.y), new float2(direction.x, direction.y), stage, value, speed, displayRadius, impactScale);
 
-    public void Fire(float2 worldPos, float2 direction, int stage, int value, float speed = -1f)
+    public void Fire(float2 worldPos, float2 direction, int stage, int value, float speed = -1f, float displayRadius = -1f, float impactScale = 1f)
     {
         if (value <= 0) return;
         float spd = speed > 0 ? speed : bulletSpeed;
@@ -107,6 +107,8 @@ public class BulletManager : MonoBehaviour
                 b.alive = 1;
                 b.attackPower = 1f;
                 b.value = value;
+                b.displayRadius = displayRadius > 0f ? displayRadius : bulletDisplayRadius;
+                b.impactScale = impactScale;
                 bullets[i] = b;
                 activeCount++;
                 return;
@@ -167,7 +169,11 @@ public class BulletManager : MonoBehaviour
         var config = MapConfig.Instance;
 
         if (gatherTimer >= GATHER_INTERVAL) { gatherTimer = 0; RefreshColliders(); }
-        else UpdateCachedBallColliders();
+        else
+        {
+            UpdateCachedBallColliders();
+            UpdateCachedTowelInvincibility();
+        }
 
         var moveJob = new MoveBulletsJob
         {
@@ -436,7 +442,7 @@ public class BulletManager : MonoBehaviour
             if (towelBodyCount < MAX_COLLIDERS)
             {
                 float bodyR = t.towelCollider != null ? Mathf.Max(t.transform.lossyScale.x, t.transform.lossyScale.y) * 0.4f : 0.4f;
-                towelBodyColliders[towelBodyCount] = new ShieldCollider { position = p, radius = bodyR, stage = t.stage, value = 0 };
+                towelBodyColliders[towelBodyCount] = new ShieldCollider { position = p, radius = bodyR, stage = t.stage, value = 0, invincible = t.IsInvincible ? 1 : 0 };
                 cachedTowelsAll[towelBodyCount] = t;
                 towelBodyCount++;
             }
@@ -446,7 +452,7 @@ public class BulletManager : MonoBehaviour
             {
                 float r = t.shield.transform.lossyScale.x;
                 int v = t.shield_value > int.MaxValue ? int.MaxValue : (int)((HugeInt)t.shield_value).ToLong();
-                shieldColliders[shieldCount] = new ShieldCollider { position = p, radius = r, stage = t.stage, value = v };
+                shieldColliders[shieldCount] = new ShieldCollider { position = p, radius = r, stage = t.stage, value = v, invincible = 0 };
                 cachedTowels[shieldCount] = t;
                 shieldCount++;
             }
@@ -466,6 +472,19 @@ public class BulletManager : MonoBehaviour
             c.radius = Mathf.Max(bp.transform.lossyScale.x, bp.transform.lossyScale.y) * bp.baseWorldRadius;
             c.value = bp.value > int.MaxValue ? int.MaxValue : (int)((HugeInt)bp.value).ToLong();
             ballColliders[i] = c;
+        }
+    }
+
+    /// <summary>无敌标记不能等到30帧重建才生效，否则护盾刚碎时仍会被子弹击杀。</summary>
+    void UpdateCachedTowelInvincibility()
+    {
+        for (int i = 0; i < towelBodyCount; i++)
+        {
+            var t = cachedTowelsAll[i];
+            if (t == null) continue;
+            var c = towelBodyColliders[i];
+            c.invincible = t.IsInvincible ? 1 : 0;
+            towelBodyColliders[i] = c;
         }
     }
 
@@ -499,6 +518,7 @@ public class BulletManager : MonoBehaviour
                 if (!hit.sameTeam)
                 {
                     var cost = t.shieldSV.Hit(bullets[hit.bulletIndex].stage, new HugeInt(hit.value), "", $"{bullets[hit.bulletIndex].stage}号阵营子弹");
+                    if (t.shield_value <= 0) t.OnShieldBroken(); // 同帧开启无敌，避免脚本执行顺序差一帧被后续子弹穿死
                     var bi = bullets[hit.bulletIndex];
                     bi.value -= (int)((HugeInt)cost).ToLong();
                     if (bi.value <= 0) { bi.alive = 0; bi.value = 0; }
@@ -522,7 +542,7 @@ public class BulletManager : MonoBehaviour
     /// <remarks>同队质量融合为 M+m；敌队数值相消，按 M-m 计算。</remarks>
     void ApplyBulletImpact(BallPainter bp, BulletHit hit)
     {
-        float impact = MapConfig.Instance.BulletImpactForce;
+        float impact = MapConfig.Instance.BulletImpactForce * hit.impactScale;
         if (impact <= 0f || bp.rb == null || hit.value <= 0) return;
 
         HugeInt M = bp.value;
@@ -556,7 +576,7 @@ public class BulletManager : MonoBehaviour
         int count = Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(1f, 10f, Mathf.Clamp01(hit.value / 512f))), 1, 10);
         Vector2 normal = new Vector2(hit.hitNormal.x, hit.hitNormal.y);
 
-        em.Boom(new Vector3(hit.hitPosition.x, hit.hitPosition.y, 0f), col, count, 5f, 0.2f, 0.32f, normal, 30f);
+        em.Boom(new Vector3(hit.hitPosition.x, hit.hitPosition.y, 0f), col, count, 3f, 0.2f, 0.32f, normal, 30f);
     }
 
     /// <summary>质量比例 k。同队 k=m/(M+m)；敌队 k=m/(M-m)。</summary>
@@ -647,7 +667,9 @@ public class BulletManager : MonoBehaviour
         public int alive;
         public float attackPower;
         public int value;
-        public static int GPUSize => 40;
+        public float displayRadius;
+        public float impactScale;
+        public static int GPUSize => 48;
     }
 
     public struct BallCollider
@@ -664,6 +686,7 @@ public class BulletManager : MonoBehaviour
         public float radius;
         public int stage;
         public int value;
+        public int invincible;
     }
 
     public struct BulletHit
@@ -675,6 +698,7 @@ public class BulletManager : MonoBehaviour
         public int value;
         public float attackPower;
         public float2 bulletVelocity;
+        public float impactScale;
         public float2 hitPosition;
         public float2 hitNormal;
     }

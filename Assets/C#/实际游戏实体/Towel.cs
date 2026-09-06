@@ -40,6 +40,23 @@ public class Towel : MonoBehaviour, IStageValue
     public MessageDisplayer messageDisplayer;
     public AimController aimController;
 
+    [Header("炮塔升级")]
+    public int turretUpgraded;
+    public int shieldUpgradeOwned;
+    public float shieldBreakInvincibleTime = 2f;
+    public float upgradedBulletRadiusScale = 1.7f;
+    public float upgradedBulletImpactScale = 1.6f;
+    private float invincibleUntil = float.MinValue;
+    private float baseGuardSpeed = -1f;
+    public bool IsInvincible => shieldUpgradeOwned > 0 && Time.time < invincibleUntil;
+
+    /// <summary>每级炮塔升级叠加上去的子弹显示半径倍率：1 + (倍率-1)  等级。</summary>
+    public float CurrentBulletRadiusScale => 1f + (upgradedBulletRadiusScale - 1f) * Mathf.Max(0, turretUpgraded);
+    /// <summary>每级炮塔升级叠加上去的子弹动量倍率：1 + (倍率-1)  等级。</summary>
+    public float CurrentBulletImpactScale => 1f + (upgradedBulletImpactScale - 1f) * Mathf.Max(0, turretUpgraded);
+    /// <summary>每级炮塔升级让极限转速再翻一倍。</summary>
+    public float CurrentGuardSpeedScale => Mathf.Pow(2f, Mathf.Max(0, turretUpgraded));
+
     void Awake()
     {
         value = _value;
@@ -104,6 +121,32 @@ public class Towel : MonoBehaviour, IStageValue
     }
 
     public bool Say(string content, bool force = false) => messageDisplayer.Say(content, force);
+
+    /// <summary>选择 2：炮塔升级。后坐力带来的子弹显示半径与动量由开火参数处理；这里翻倍自动护卫的极限转速，常态转速不动。</summary>
+    public void ApplyTurretUpgrade()
+    {
+        turretUpgraded++;
+        if (aimController != null && aimController.auto != null)
+        {
+            if (baseGuardSpeed < 0f) baseGuardSpeed = aimController.auto.guard_speed;
+            aimController.auto.guard_speed = baseGuardSpeed * CurrentGuardSpeedScale;
+        }
+    }
+
+    /// <summary>选择 3：护盾升级。护盾破碎后获得一段无视子弹与大球伤害的时间。</summary>
+    public void ApplyShieldUpgrade()
+    {
+        shieldUpgradeOwned++;
+    }
+
+    /// <summary>护盾被击碎（或检测到已碎）时调用，立即开启无敌窗口与发光。</summary>
+    public void OnShieldBroken()
+    {
+        if (shield != null && shield.activeSelf) shield.SetActive(false);
+        if (shieldUpgradeOwned <= 0) return;
+
+        invincibleUntil = Time.time + shieldBreakInvincibleTime * shieldUpgradeOwned;
+    }
 
     void CreateExplosionEffect()
     {
@@ -202,8 +245,35 @@ public class Towel : MonoBehaviour, IStageValue
         Destroy(gameObject);
     }
 
+    public HugeInt Hit(int _stage, HugeInt _value, string sourceGuid = "", string sourceDesc = "")
+    {
+        if (IsInvincible) return 0; // 无敌时间内完全无视伤害
+
+        HugeInt cost = 0;
+        if (stage == _stage) return cost;
+        hurtSourceStage = _stage;
+        hurtSourceGuid = sourceGuid;
+        hurtSourceDesc = sourceDesc;
+
+        if (value > _value)
+        {
+            cost = _value;
+            WhileBeHit(_stage, cost);
+            value -= cost;
+        }
+        else
+        {
+            cost = value;
+            WhileBeHit(_stage, cost);
+            value = 0;
+        }
+        InformGetter.AddDamage(stage, _stage, sourceGuid, sourceDesc, cost);
+        return cost;
+    }
+
     public void WhileBeHit(int _stage, HugeInt _value)
     {
+        if (IsInvincible) return;
         Debug.Log($"stage:{stage} has killed by stage{_stage}");
         Die(_stage, ExtractWeapon(hurtSourceDesc));
     }
@@ -236,14 +306,24 @@ public class Towel : MonoBehaviour, IStageValue
         var pos = (Vector2)transform.position + Random.insideUnitCircle * BulletPosRandom;
         float maxAngle = bulletRandomSpeed.Evaluate(value);
         var finalDir = (Vector2)(Quaternion.AngleAxis(Random.Range(-maxAngle, maxAngle), Vector3.forward) * dir);
-        BulletManager.Instance.Fire(pos, finalDir, stage, bv, config != null ? config.NormalBulletSpeed : bulletSpeed);
+
+        float displayRadius = -1f;
+        float impactScale = 1f;
+        if (turretUpgraded > 0)
+        {
+            displayRadius = (BulletManager.Instance != null ? BulletManager.Instance.bulletDisplayRadius : 2f) * CurrentBulletRadiusScale;
+            impactScale = CurrentBulletImpactScale;
+        }
+
+        BulletManager.Instance.Fire(pos, finalDir, stage, bv, config != null ? config.NormalBulletSpeed : bulletSpeed, displayRadius, impactScale);
     }
 
     void ShieldTransform()
     {
         if (shield_value <= 0)
         {
-            if (shield.activeSelf) shield.SetActive(false);
+            if (shield.activeSelf)
+                OnShieldBroken();
         }
         else
         {
@@ -256,6 +336,7 @@ public class Towel : MonoBehaviour, IStageValue
                 shield.transform.localScale = Vector3.one * shieldRadius.Evaluate(shield_value);
 
         }
+
     }
 
     void PaintInitialCircle()
@@ -317,7 +398,15 @@ public class Towel : MonoBehaviour, IStageValue
         for (int i = 1; i <= defaultNum; i++)
         {
             var dir = Quaternion.AngleAxis(sa + da * i, Vector3.back) * transform.up;
-            BulletManager.Instance.Fire(transform.position, dir, stage, bv, config != null ? config.ShotGunBulletSpeed : bulletSpeed);
+
+            float displayRadius = -1f;
+            float impactScale = 1f;
+            if (turretUpgraded > 0)
+            {
+                displayRadius = (BulletManager.Instance != null ? BulletManager.Instance.bulletDisplayRadius : 2f) * CurrentBulletRadiusScale;
+                impactScale = CurrentBulletImpactScale;
+            }
+            BulletManager.Instance.Fire(transform.position, dir, stage, bv, config != null ? config.ShotGunBulletSpeed : bulletSpeed, displayRadius, impactScale);
         }
     }
 }

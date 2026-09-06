@@ -3546,7 +3546,7 @@ MonoBehaviour:
   MessageParent: {fileID: 648156955}
   MessageCount: 8
   max_show_time: 7
-  intensity: 2
+  intensity: 1.5
   human:
   - {fileID: 180841780}
   - {fileID: 1538111713}
@@ -4586,6 +4586,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Towel (3)
       objectReference: {fileID: 0}
+    - target: {fileID: 2351046282652987540, guid: e2009338a17302748b7127c1f790b461, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: 6eb0669a468587a46a9ee34e96afd732, type: 2}
     - target: {fileID: 4699204708100399713, guid: e2009338a17302748b7127c1f790b461, type: 3}
       propertyPath: m_LocalPosition.x
       value: -4
@@ -5407,7 +5411,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: -0.69
+      value: -1.7
       objectReference: {fileID: 0}
     - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
@@ -11680,7 +11684,7 @@ MonoBehaviour:
   startValueExponent: 10
   gravity: 0.2
   upgradePerEmptySlotPerSecond: 1
-  upgradeCost: 50
+  upgradeCost: 10
   upgradeCostGrowth: 2.4
 --- !u!1 &1508170505
 GameObject:
@@ -17330,7 +17334,7 @@ MonoBehaviour:
   TowelDefaultBullets: 262144
   basicBallPrefab: {fileID: 2741485188931532298, guid: 5d1c6af57d89db441b4186adbf0c8bc1, type: 3}
   bounceRate: 0.3
-  useAIDecision: 0
+  useAIDecision: 1
   propLimit: 0
 --- !u!23 &345786292810578330
 MeshRenderer:
@@ -19378,6 +19382,18 @@ PrefabInstance:
       value: 6.5273438
       objectReference: {fileID: 0}
     - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 1.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 1.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 1.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
       objectReference: {fileID: 0}
@@ -19411,7 +19427,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: -0.69
+      value: -1.7
       objectReference: {fileID: 0}
     - target: {fileID: 1331086632356284665, guid: af57becb892554641842d6b5333d0d13, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
