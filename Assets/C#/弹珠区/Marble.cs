@@ -63,8 +63,11 @@ public class Marble : MonoBehaviour
 
         if (sr != null && MapConfig.Instance != null)
         {
-            sr.color = MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball);
-            EffectManager.Instance?.Boom(transform.position, sr.color);
+            Color col = MapConfig.Instance.GetColor(stage, MapConfig.ColorStage.Ball);
+            col.a = sr.color.a;
+            sr.color = col;
+            col.a = 1;
+            EffectManager.Instance?.Boom(transform.position, col);
         }
         if (tr != null) ScheduleTrailSetup();
         if (tmp != null)

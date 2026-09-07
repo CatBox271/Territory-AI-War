@@ -2,6 +2,13 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 
+[System.Serializable]
+public struct BorderDirectionSettings
+{
+    public float width;
+    public float bright;
+}
+
 public class TerritoryCanvas : MonoBehaviour
 {
     public static TerritoryCanvas Instance { get; private set; }
@@ -11,6 +18,14 @@ public class TerritoryCanvas : MonoBehaviour
     public ComputeShader clearFlagCompute;
     public Material quadMaterial;
 
+    [Header("阵营领土贴图（1~4号阵营，1024x1024，正片叠底）")]
+    public Texture[] territoryTextures = new Texture[4];
+    [Header("交界提亮（按方向，bright=1 表示无效果）")]
+    public BorderDirectionSettings borderUp = new BorderDirectionSettings { width = 2f, bright = 1f };
+    public BorderDirectionSettings borderDown = new BorderDirectionSettings { width = 2f, bright = 1f };
+    public BorderDirectionSettings borderLeft = new BorderDirectionSettings { width = 2f, bright = 1f };
+    public BorderDirectionSettings borderRight = new BorderDirectionSettings { width = 2f, bright = 1f };
+
     private RenderTexture dataRT;
     private RenderTexture displayRT;
     private RenderTexture flagRT;
@@ -19,6 +34,24 @@ public class TerritoryCanvas : MonoBehaviour
     public RenderTexture DisplayRT => displayRT;
     public RenderTexture BulletDisplayRT => bulletDisplayRT;
     private int paintKernel;
+
+    private static readonly int[] TerritoryTexIds =
+    {
+        Shader.PropertyToID("_TerritoryTex0"),
+        Shader.PropertyToID("_TerritoryTex1"),
+        Shader.PropertyToID("_TerritoryTex2"),
+        Shader.PropertyToID("_TerritoryTex3")
+    };
+    private static readonly int[] HasTexIds =
+    {
+        Shader.PropertyToID("_HasTex0"),
+        Shader.PropertyToID("_HasTex1"),
+        Shader.PropertyToID("_HasTex2"),
+        Shader.PropertyToID("_HasTex3")
+    };
+    private Texture2D whiteTex;
+    private int displayKernel = -1;
+
     private MapConfig config;
 
     public NativeArray<byte> territoryMap;
@@ -32,6 +65,7 @@ public class TerritoryCanvas : MonoBehaviour
         flagRT = CreateRT(RenderTextureFormat.RFloat);
         bulletDisplayRT = CreateRT();
         territoryMap = new NativeArray<byte>(config.resolution * config.resolution, Allocator.Persistent);
+        EnsureWhiteTex();
         CreateMapQuad();
         CreateBulletQuad();
     }
@@ -72,11 +106,46 @@ public class TerritoryCanvas : MonoBehaviour
         mat.renderQueue = 3000;
         q.GetComponent<MeshRenderer>().material = mat;
     }
-
     void Start()
     {
         paintKernel = paintCompute.FindKernel("CSPaint");
+        displayKernel = paintCompute.FindKernel("CSDisplay");
         InitTerritory();
+        RefreshDisplay();
+    }
+
+    void Update()
+    {
+        if (displayKernel >= 0) RefreshDisplay();
+    }
+
+    void RefreshDisplay()
+    {
+        if (paintCompute == null || displayKernel < 0 || dataRT == null || displayRT == null) return;
+        EnsureWhiteTex();
+
+        paintCompute.SetTexture(displayKernel, "DataResult", dataRT);
+        paintCompute.SetTexture(displayKernel, "DisplayResult", displayRT);
+        for (int i = 0; i < 4; i++)
+        {
+            bool has = territoryTextures != null && i < territoryTextures.Length && territoryTextures[i] != null;
+            paintCompute.SetTexture(displayKernel, TerritoryTexIds[i], has ? territoryTextures[i] : whiteTex);
+            paintCompute.SetInt(HasTexIds[i], has ? 1 : 0);
+        }
+        paintCompute.SetInt("_Resolution", config.resolution);
+        paintCompute.SetVector("_BorderWidths", new Vector4(borderUp.width, borderDown.width, borderLeft.width, borderRight.width));
+        paintCompute.SetVector("_BorderBrightness", new Vector4(borderUp.bright, borderDown.bright, borderLeft.bright, borderRight.bright));
+        SetColorArray(paintCompute);
+        paintCompute.Dispatch(displayKernel, config.resolution / 8, config.resolution / 8, 1);
+    }
+
+    void EnsureWhiteTex()
+    {
+        if (whiteTex != null) return;
+        whiteTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+        whiteTex.name = "TerritoryWhite";
+        whiteTex.SetPixel(0, 0, Color.white);
+        whiteTex.Apply();
     }
 
     public void SetColorArrayPublic(ComputeShader cs) => SetColorArray(cs);
@@ -287,6 +356,7 @@ public class TerritoryCanvas : MonoBehaviour
         if (flagRT) flagRT.Release();
         if (bulletDisplayRT) bulletDisplayRT.Release();
         if (territoryMap.IsCreated) territoryMap.Dispose();
+        if (whiteTex != null) Destroy(whiteTex);
         if (Instance == this) Instance = null;
     }
 }

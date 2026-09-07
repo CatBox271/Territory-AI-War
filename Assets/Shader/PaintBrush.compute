@@ -15,6 +15,22 @@ uint _Budget;
 uniform float4 _TeamColors[17];
 uniform int _TeamCount;
 
+#pragma kernel CSDisplay
+
+Texture2D<float4> _TerritoryTex0;
+Texture2D<float4> _TerritoryTex1;
+Texture2D<float4> _TerritoryTex2;
+Texture2D<float4> _TerritoryTex3;
+SamplerState sampler_TerritoryTex0;
+SamplerState sampler_TerritoryTex1;
+SamplerState sampler_TerritoryTex2;
+SamplerState sampler_TerritoryTex3;
+uint _HasTex0;
+uint _HasTex1;
+uint _HasTex2;
+uint _HasTex3;
+float4 _BorderWidths;
+float4 _BorderBrightness;
 float PointToSegmentDistSq(float2 p, float2 a, float2 b)
 {
     float2 ab = b - a, ap = p - a;
@@ -63,4 +79,69 @@ void CSPaint(uint3 id : SV_DispatchThreadID)
     uint idx = newStage;
     if (idx >= (uint)_TeamCount) idx = 0;
     DisplayResult[coord] = _TeamColors[idx];
+}
+
+
+float4 SampleTerritory(Texture2D<float4> tex, SamplerState smp, uint2 coord)
+{
+    float2 uv = (float2(coord) + 0.5) / (float)_Resolution;
+    return tex.SampleLevel(smp, uv, 0);
+}
+
+uint StageAt(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= (int)_Resolution || y >= (int)_Resolution) return 0xFFFFFFFF;
+    float2 d = DataResult[uint2((uint)x, (uint)y)];
+    return (uint)(d.r * 255.0 + 0.5);
+}
+
+float DirectionBorderBoost(uint2 coord, uint stage, int dx, int dy, int width, float bright)
+{
+    if (width <= 0 || abs(bright - 1.0) < 0.0001) return 1.0;
+    int w = max(1, width);
+    for (int d = 1; d <= w; d++)
+    {
+        int x = (int)coord.x + dx * d;
+        int y = (int)coord.y + dy * d;
+        if (x < 0 || y < 0 || x >= (int)_Resolution || y >= (int)_Resolution) break;
+        uint ns = StageAt(x, y);
+        if (ns != stage && ns != 0 && ns != 0xFFFFFFFF)
+        {
+            float t = (float)(d - 1) / (float)w;
+            return 1.0 + (bright - 1.0) * (1.0 - t);
+        }
+    }
+    return 1.0;
+}
+
+[numthreads(8, 8, 1)]
+void CSDisplay(uint3 id : SV_DispatchThreadID)
+{
+    uint2 coord = id.xy;
+    if (coord.x >= _Resolution || coord.y >= _Resolution) return;
+
+    float2 data = DataResult[coord];
+    uint stage = (uint)(data.r * 255.0 + 0.5);
+    uint idx = stage;
+    if (idx >= (uint)_TeamCount) idx = 0;
+
+    float4 col = _TeamColors[idx];
+    float4 texCol = float4(1.0, 1.0, 1.0, 1.0);
+    if (stage == 1u && _HasTex0 != 0u) texCol = SampleTerritory(_TerritoryTex0, sampler_TerritoryTex0, coord);
+    else if (stage == 2u && _HasTex1 != 0u) texCol = SampleTerritory(_TerritoryTex1, sampler_TerritoryTex1, coord);
+    else if (stage == 3u && _HasTex2 != 0u) texCol = SampleTerritory(_TerritoryTex2, sampler_TerritoryTex2, coord);
+    else if (stage == 4u && _HasTex3 != 0u) texCol = SampleTerritory(_TerritoryTex3, sampler_TerritoryTex3, coord);
+    col.rgb = lerp(col.rgb, col.rgb * texCol.rgb, texCol.a);
+    col.a = 1.0;
+
+    if (stage != 0u)
+    {
+        // x=上 y=下 z=左 w=右；该方向设置控制这一侧的领土亮/暗
+        col.rgb *= DirectionBorderBoost(coord, stage, 0, -1, (int)_BorderWidths.x, _BorderBrightness.x);
+        col.rgb *= DirectionBorderBoost(coord, stage, 0, 1, (int)_BorderWidths.y, _BorderBrightness.y);
+        col.rgb *= DirectionBorderBoost(coord, stage, 1, 0, (int)_BorderWidths.z, _BorderBrightness.z);
+        col.rgb *= DirectionBorderBoost(coord, stage, -1, 0, (int)_BorderWidths.w, _BorderBrightness.w);
+    }
+
+    DisplayResult[coord] = col;
 }

@@ -53,6 +53,9 @@ public class MapConfig : MonoBehaviour
 {
     public static MapConfig Instance { get; private set; }
 
+    [Header("AI")]
+    public bool useAIDecision = false;
+
     [Header("Map")]
     public float worldSize = 10f;
     public int resolution = 1024;
@@ -118,8 +121,7 @@ public class MapConfig : MonoBehaviour
         return teamColors[stage].text;
     }
 
-    [Header("AI")]
-    public bool useAIDecision = false;
+
 
     [Header("Props")]
     public int propLimit = 0;

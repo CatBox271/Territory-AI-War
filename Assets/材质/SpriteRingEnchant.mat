@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: SpriteRingEnchant
-  m_Shader: {fileID: 10753, guid: 0000000000000000f000000000000000, type: 0}
+  m_Shader: {fileID: 4800000, guid: 0e8cce3594706614fa8525a8de5d1248, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -34,7 +34,7 @@ Material:
     m_Ints: []
     m_Floats:
     - PixelSnap: 0
-    - _EffectOpacity: 0
+    - _EffectOpacity: 0.15
     - _EffectScale: 2.4
     - _EffectSpeed: 4.51
     - _EnableExternalAlpha: 0

@@ -75,12 +75,9 @@ public class Towel : MonoBehaviour, IStageValue
         lastFireDirection = transform.up;
         sp.color = config.GetColor(stage, MapConfig.ColorStage.Towel);
         value = config.TowelDefaultBullets;
-        LookAt(Vector3.zero);
         PaintInitialCircle();
-
+        LookAt(Random.insideUnitCircle / 100f);
         ShotGun(1048576, 60, 1024);
-
-        Say("HelloWorld");
 
         //InformGeter初始化
         InformGetter.AddItem(stage, new ItemType(transform, "炮塔基地"));

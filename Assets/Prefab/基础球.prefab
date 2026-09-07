@@ -16,7 +16,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &449478902768515284
 Transform:
   m_ObjectHideFlags: 0
@@ -501,7 +501,7 @@ SpriteRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: a45f5966ad85c0d4e8fdb35745483119, type: 2}
+  - {fileID: 2100000, guid: 61c3f0cc38830b444ac0e00b8c6883a0, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -522,7 +522,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 1
-  m_Sprite: {fileID: -2413806693520163455, guid: a86470a33a6bf42c4b3595704624658b, type: 3}
+  m_Sprite: {fileID: 21300000, guid: 89bcd67e718ff314494b8eef97dce7a9, type: 3}
   m_Color: {r: 0.74213827, g: 0.74213827, b: 0.74213827, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -678,7 +678,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 116.05
+  m_fontSize: 109.55
   m_fontSizeBase: 166.67
   m_fontWeight: 400
   m_enableAutoSizing: 1
