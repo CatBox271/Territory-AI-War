@@ -180,10 +180,11 @@ public class BallPainter : MonoBehaviour, IStageValue
     {
         if (collision.collider.TryGetComponent(out IStageValue sv))
         {
+            bool spawnEffect = true;
             if (collision.collider.CompareTag("Ball"))
             {
-                if (collision.collider.GetInstanceID() < collision.collider.GetInstanceID()) return;
-                //确保执行一次
+                // 确保两个大球碰撞只释放一次效果
+                if (col != null && col.GetInstanceID() > collision.collider.GetInstanceID()) spawnEffect = false;
             }
             HugeInt max = (value > sv.value ? value : sv.value).Multiply(config.bounceRate);//mutiple
             //确保不会出现贷款
@@ -191,11 +192,25 @@ public class BallPainter : MonoBehaviour, IStageValue
             HugeInt cost = sv.Hit(stage, max, guid, $"{stage}号阵营大球");
             if (cost > 0)
             {
+                if (spawnEffect) SpawnHitCrossEffect(cost, collision);
                 string otherGuid = sv is BallPainter bp ? bp.guid : "";
                 string otherDesc = sv is BallPainter ? $"{sv.stage}号阵营大球" : $"{sv.stage}号阵营实体";
                 ((IStageValue)this).Hit(sv.stage, cost, otherGuid, otherDesc);
             }
         }
         if (value == 0) Die();
+    }
+
+    void SpawnHitCrossEffect(HugeInt hitValue, Collision2D collision)
+    {
+        EffectManager em = EffectManager.Instance;
+        if (em == null || em.CE == null || hitValue <= 0) return;
+
+        Vector2 point = collision.contactCount > 0 ? collision.GetContact(0).point : transform.position;
+        Vector2 normal = collision.contactCount > 0 ? collision.GetContact(0).normal : Vector2.zero;
+        int count = Mathf.Max(1, Mathf.RoundToInt(HugeInt.Log2(hitValue)));
+        Color col = sp != null ? sp.color : Color.white;
+
+        em.Boom(new Vector3(point.x, point.y, 0f), col, count, 3f, 0.2f, 0.6f, normal, 30f);
     }
 }

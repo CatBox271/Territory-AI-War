@@ -576,7 +576,7 @@ public class BulletManager : MonoBehaviour
         int count = Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(1f, 10f, Mathf.Clamp01(hit.value / 512f))), 1, 10);
         Vector2 normal = new Vector2(hit.hitNormal.x, hit.hitNormal.y);
 
-        em.Boom(new Vector3(hit.hitPosition.x, hit.hitPosition.y, 0f), col, count, 3f, 0.2f, 0.32f, normal, 30f);
+        em.Boom(new Vector3(hit.hitPosition.x, hit.hitPosition.y, 0f), col, count, 3f, 0.2f, 0.6f, normal, 30f);
     }
 
     /// <summary>质量比例 k。同队 k=m/(M+m)；敌队 k=m/(M-m)。</summary>

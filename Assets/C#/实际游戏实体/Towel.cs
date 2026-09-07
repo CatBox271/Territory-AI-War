@@ -133,10 +133,16 @@ public class Towel : MonoBehaviour, IStageValue
         }
     }
 
+
     /// <summary>选择 3：护盾升级。护盾破碎后获得一段无视子弹与大球伤害的时间。</summary>
     public void ApplyShieldUpgrade()
     {
         shieldUpgradeOwned++;
+        if (shield == null) return;
+        Transform shieldPic = shield.transform.Find("ShieldPic");
+        if (shieldPic == null) return;
+        Transform clone = Instantiate(shieldPic, shieldPic.parent);
+        clone.localScale -= Vector3.one * (0.15f * shieldUpgradeOwned);
     }
 
     /// <summary>护盾被击碎（或检测到已碎）时调用，立即开启无敌窗口与发光。</summary>

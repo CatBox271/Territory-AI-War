@@ -162,10 +162,6 @@ public class MarbleManager : MonoBehaviour
         {
             choice = choiceTask.Result;
         }
-
-        if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
-            towel.Say(UpgradeChoiceText(choice), true);
-
         ApplyUpgradeChoice(stage, (UpgradeChoice)choice);
     }
 

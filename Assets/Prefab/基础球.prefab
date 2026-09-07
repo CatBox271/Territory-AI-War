@@ -221,7 +221,6 @@ GameObject:
   - component: {fileID: 3767908013893368130}
   - component: {fileID: 6264478398640388796}
   - component: {fileID: 2128266677755943854}
-  - component: {fileID: 5049259855358430030}
   m_Layer: 0
   m_Name: "\u57FA\u7840\u7403"
   m_TagString: Ball
@@ -450,44 +449,6 @@ MonoBehaviour:
   stage: 2
   value: 1048576
   AutoDestroy: 1
---- !u!114 &5049259855358430030
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2741485188931532298}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ff8126b106db9c647add6583f6f79d51, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  shakingAim: {fileID: 4222657619570340843}
-  value:
-    curve:
-      serializedVersion: 2
-      m_Curve:
-      - serializedVersion: 3
-        time: 0
-        value: 1
-        inSlope: 0.075
-        outSlope: 0.075
-        tangentMode: 34
-        weightedMode: 0
-        inWeight: 0
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 40
-        value: 4
-        inSlope: 0.075
-        outSlope: 0.075
-        tangentMode: 34
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0
-      m_PreInfinity: 2
-      m_PostInfinity: 2
-      m_RotationOrder: 4
 --- !u!1 &4278316083713829892
 GameObject:
   m_ObjectHideFlags: 0
@@ -717,7 +678,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 109.55
+  m_fontSize: 116.05
   m_fontSizeBase: 166.67
   m_fontWeight: 400
   m_enableAutoSizing: 1

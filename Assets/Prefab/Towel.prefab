@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 2777734989558269982}
   - component: {fileID: 2532380011593234005}
   m_Layer: 0
-  m_Name: AIMessage
+  m_Name: "\u6D88\u606F\u663E\u793A"
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -45,10 +45,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   MonoText: {fileID: 1804877961324344624, guid: 0ba1d4353aef04e45a93d48f4b1a2507, type: 3}
-  circleRadius: 2.2
-  relativePos: {x: 0, y: -0.8, z: 0}
-  charDuration: 0.1
-  charInterval: 0.01
+  circleRadius: 1.5
+  relativePos: {x: 0, y: -0.4, z: 0}
+  charDuration: 0.2
+  charInterval: 0.05
 --- !u!1 &1997610200187619198
 GameObject:
   m_ObjectHideFlags: 0
@@ -310,7 +310,7 @@ MonoBehaviour:
   turretUpgraded: 0
   shieldUpgradeOwned: 0
   shieldBreakInvincibleTime: 2
-  upgradedBulletRadiusScale: 1.7
+  upgradedBulletRadiusScale: 1.2
   upgradedBulletImpactScale: 1.6
   isDead: 0
   BulletPosRandom: 0
@@ -397,7 +397,6 @@ GameObject:
   - component: {fileID: 480754872830793386}
   - component: {fileID: 4491979993208232202}
   - component: {fileID: 1050513759888372499}
-  - component: {fileID: 1219980013580762104}
   m_Layer: 0
   m_Name: Shield
   m_TagString: Shield
@@ -484,44 +483,6 @@ MonoBehaviour:
   originColor: {r: 0, g: 0, b: 0, a: 0}
   intensityPerHit: 0.4
   decayDuration: 1
---- !u!114 &1219980013580762104
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2721065759024970260}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ff8126b106db9c647add6583f6f79d51, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  shakingAim: {fileID: 8095830625972477186}
-  value:
-    curve:
-      serializedVersion: 2
-      m_Curve:
-      - serializedVersion: 3
-        time: 0
-        value: 1
-        inSlope: 0.075
-        outSlope: 0.075
-        tangentMode: 34
-        weightedMode: 0
-        inWeight: 0
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 40
-        value: 4
-        inSlope: 0.075
-        outSlope: 0.075
-        tangentMode: 34
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0
-      m_PreInfinity: 2
-      m_PostInfinity: 2
-      m_RotationOrder: 4
 --- !u!1 &4338203946166271588
 GameObject:
   m_ObjectHideFlags: 0
