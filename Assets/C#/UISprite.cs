@@ -4,12 +4,13 @@ using UnityEngine;
 public enum SpriteEmotion
 {
     origin,
+    smile,
     laugh,
     shock,
     angry,
     sad,
     win,
-    lose,
+    fail,
 }
 
 public class UISprite : MonoBehaviour
@@ -70,7 +71,26 @@ public class UISprite : MonoBehaviour
         {
             //我在写别动
             sp.sprite = Resources.Load(AIAgent.GetStageName(stage) + "_" + emo.ToString()) as Sprite;
-            print("set");
+            if (AIAgent.Instance != null)
+            {
+                var card = AIAgent.Instance.cards.Find(c => c.position == stage);
+                if (card != null)
+                {
+                    if (card.x_relative != XR.None)
+                    {
+                        x_relative = card.x_relative;
+                        x_relative_value = card.RelativePos.x;
+                    }
+                    if (card.y_relative != YR.None)
+                    {
+                        y_relative = card.y_relative;
+                        y_relative_value = card.RelativePos.y;
+                    }
+                    if (Mathf.Abs(card.Scale - 1.7f) > 0.0001f)
+                        Scale = card.Scale;
+                    Adjust();
+                }
+            }
         }
         catch
         { }

@@ -92,8 +92,6 @@ public class UIMessageBar : MonoBehaviour
         }
         if (transform.localPosition != AimPos)
         {
-            print(AimPos);
-            print(transform.localPosition);
             transform.localPosition = Vector3.Lerp(transform.localPosition, AimPos, up_duration += Time.deltaTime * speed);
             Refresh();
         }

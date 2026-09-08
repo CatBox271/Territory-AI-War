@@ -55,11 +55,11 @@ public class UIMessageManager : MonoBehaviour
         float last = Time.time - last_deal_time;
         float delay_time = 1f / ( need_deal.Count / intensity + 1) * max_show_time;
         if (last < delay_time) return;
-        if (need_deal.Count == 0)
-        {
-            Unfocus(lihui_index);
-        }
-        else
+
+        Unfocus(lihui_index);
+        lihui_switch();
+
+        if (need_deal.Count != 0)
         {
             Deal();
             last_deal_time = Time.time;
@@ -92,6 +92,8 @@ public class UIMessageManager : MonoBehaviour
         if (lihui.show) lihui.Act(false);
         items[0].focus = false;
         items[0].Refresh();
+
+        print("unfocus"+ i);
     }
     private int lihui_index = 1;
     private void lihui_switch()
@@ -101,19 +103,16 @@ public class UIMessageManager : MonoBehaviour
     private void Deal()
     {
         var item = need_deal.Dequeue();
-
-        Unfocus(lihui_index);
-        lihui_switch();
         var lihui = human[lihui_index];
         lihui.Set(item.stage,item.emo);
         lihui.Act(true);
-
+        print("show" + lihui_index);
         for (int i = 0; i < items.Count; i++)
         {
             var text_ui = items[i];
             if (i == items.Count - 1)
             {
-                text_ui.SetLow(item.content, MapConfig.Instance.GetColor(item.stage));
+                text_ui.SetLow(AIAgent.ColorizeAINames(item.content), MapConfig.Instance.GetColor(item.stage));
                 items.RemoveAt(i);
                 items.Insert(0,text_ui);
             }

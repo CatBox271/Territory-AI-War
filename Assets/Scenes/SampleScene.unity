@@ -2403,10 +2403,30 @@ PrefabInstance:
     - target: {fileID: 1901738514413325518, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: 587399b3da4e57b47a04c973df351712, type: 2}
+      objectReference: {fileID: 2100000, guid: 170380ee71cdbf84fa2a4a6f9508363b, type: 2}
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_text
       value: "\u4EFB\u610F"
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_sharedMaterial
+      value: 
+      objectReference: {fileID: 2100000, guid: 170380ee71cdbf84fa2a4a6f9508363b, type: 2}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor32.rgba
+      value: 4294967295
       objectReference: {fileID: 0}
     - target: {fileID: 4284300323083742931, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: Refresh
@@ -2460,6 +2480,22 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.g
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: 43f37a1a88f962443a5ee67fbdebdc76, type: 2}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
       value: 4
@@ -2495,15 +2531,11 @@ PrefabInstance:
     - target: {fileID: 1901738514413325518, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 3504502201474179892, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
+      objectReference: {fileID: 2100000, guid: 587399b3da4e57b47a04c973df351712, type: 2}
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_text
       value: "\u626B\u5C04"
       objectReference: {fileID: 0}
-    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
-      propertyPath: m_sharedMaterial
-      value: 
-      objectReference: {fileID: 3504502201474179892, guid: 2f2afd78d2aa626489197eec0d7b317a, type: 2}
     - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_hasFontAssetChanged
       value: 0
@@ -2559,6 +2591,14 @@ PrefabInstance:
     - target: {fileID: 5537858345313477848, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.r
+      value: 0.47843137
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
@@ -7588,6 +7628,22 @@ PrefabInstance:
       propertyPath: m_text
       value: "\xD716"
       objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_fontColor.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_fontColor.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_fontColor.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_fontColor32.rgba
+      value: 4294967295
+      objectReference: {fileID: 0}
     - target: {fileID: 5537858345313477848, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_LocalScale.x
       value: 0.41422927
@@ -7631,6 +7687,18 @@ PrefabInstance:
     - target: {fileID: 5537858345313477848, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Color.g
+      value: 0.1730086
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Color.r
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7782005206310863384, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: times
@@ -8699,6 +8767,39 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _cycleInterval: 7
+  cardset:
+  - name: "\u8D64\u55B5"
+    oc: "\u4EBA\u8BBE\uFF1A17\u5C81\u7684\u4E2D\u4E8C\u96CC\u5C0F\u9B3C\u5C0F\u732B\uFF0C\u81EA\u79F0\u201C\u7329\u7EA2\u5229\u722A\u201D\u3002\u6027\u683C\u6025\u6027\u5B50\u3001\u7231\u5632\u8BBD\u3001\u5F97\u610F\u65F6\u201C\u563B\u563B\uFF5E\uFF0C\u4E0D\u8FC7\u5982\u6B64\u561B\u201D\u7B11\u3002\u52A3\u52BF\u65F6\u4F1A\u53D1\u51FA\u201C\u545C\u55B5\uFF1F\uFF01\u201D\u7B49\u5947\u602A\u52A8\u9759\uFF0C\u6B7B\u4E0D\u8BA4\u8F93\u3002\u53D1\u732B\u54AAemoji"
+    position: 0
+    color: 255|000|000|255
+    x_relative: 1
+    y_relative: 2
+    RelativePos: {x: 0.85, y: 1.7}
+    Scale: 1.2
+  - name: "\u9752\u6614"
+    oc: 
+    position: 0
+    color: 000|127|255|255
+    x_relative: 1
+    y_relative: 2
+    RelativePos: {x: 0.85, y: 1.7}
+    Scale: 1.2
+  - name: "\u677E\u6C2F"
+    oc: 
+    position: 0
+    color: 000|255|000|255
+    x_relative: 1
+    y_relative: 2
+    RelativePos: {x: 0.85, y: 1.7}
+    Scale: 1.2
+  - name: "\u671D\u9732"
+    oc: "\u5C0F\u5929\u4F7F\uFF0C\u707F\u70C2\u7684\u6027\u683C\uFF0C\u7231\u8BF4\u65E0\u5398\u5934\u7684\u901A\u611F\u6BD4\u55BB"
+    position: 0
+    color: 255|255|000|255
+    x_relative: 1
+    y_relative: 2
+    RelativePos: {x: 0.85, y: 1.7}
+    Scale: 1.2
 --- !u!1 &1054705958
 GameObject:
   m_ObjectHideFlags: 0
@@ -8814,6 +8915,14 @@ PrefabInstance:
     - target: {fileID: 5537858345313477848, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.g
+      value: 0.59607846
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
@@ -10888,6 +10997,18 @@ PrefabInstance:
     - target: {fileID: 5742517445486526946, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_Layer
       value: 5
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Color.g
+      value: 0.95686275
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
+      propertyPath: m_Color.r
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7663483437954791276, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_Mesh
@@ -14545,6 +14666,14 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.g
+      value: 0.95686275
+      objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName
       value: 3
@@ -16356,7 +16485,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 4025116071210565372, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Name
-      value: Circle (7)
+      value: "\u79FB\u52A8\u6869"
       objectReference: {fileID: 0}
     - target: {fileID: 4893052234694770843, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_LocalScale.x
@@ -17269,6 +17398,22 @@ PrefabInstance:
       propertyPath: m_text
       value: "\u9730\u5F39"
       objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2052642827941083727, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_fontColor32.rgba
+      value: 4294967295
+      objectReference: {fileID: 0}
     - target: {fileID: 4284300323083742931, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: Refresh
       value: 1
@@ -17320,6 +17465,18 @@ PrefabInstance:
     - target: {fileID: 5537858345313477848, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.g
+      value: 0.17254902
+      objectReference: {fileID: 0}
+    - target: {fileID: 6250357850430401836, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
+      propertyPath: m_Color.r
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 6467836933991516873, guid: 89f6c2aa7a0561d4cab6c5071ffebdde, type: 3}
       propertyPath: itemName

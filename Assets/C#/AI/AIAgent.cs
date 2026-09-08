@@ -128,6 +128,8 @@ public class AIAgent : MonoBehaviour
     //以后需要做个角色管理器
 
     private const string ApiUrl = "https://api.deepseek.com/v1/chat/completions";
+    //cardset 只放 Inspector 里显示/编辑的角色载体（CharacterCardPreset），运行期真正用的 CharacterCard 由它生成后放进 cards
+    public List<CharacterCardPreset> cardset = new();
     public readonly List<CharacterCard> cards = new();
     private readonly HashSet<int> deadStages = new();
     private int soloSinceRound = -1;
@@ -156,21 +158,16 @@ public class AIAgent : MonoBehaviour
         if (reactionSystem != null)
         {
             reactionSystem.stage = 1;//兼容旧的单阵营入口，实际以 RequestInfo.toolStage 为准
-           cards.Add(new CharacterCard("赤喵",
-    "人设：15岁的中二雌小鬼小猫，自称“猩红利爪”。性格急性子、爱嘲讽、得意时“嘻嘻～”笑。劣势时会发出“呜喵？！”等奇怪动静，死不认输。发猫咪emoji", 
-    1, "255|000|000|255", ApiUrl, reactionSystem.tools));
-
-cards.Add(new CharacterCard("苍感",
-    "人设：20岁的天才战术师，外表冷静正经，但会在突发情况冒出低烈度粗口。", 
-    2, "000|000|255|255", ApiUrl, reactionSystem.tools));
-
-cards.Add(new CharacterCard("藤延", 
-    "人设：绿发阴湿系青年。", 
-    3, "000|255|000|255", ApiUrl, reactionSystem.tools));
-
-cards.Add(new CharacterCard("耶罗",
-    "人设：24岁的疯癫战术家，熟女。性格疯疯癫癫，爱说无厘头胡话，喜欢大笑，低程度的阴阳。", 
-    4, "255|255|000|255", ApiUrl, reactionSystem.tools));
+            for (int i = 0; i < cardset.Count; i++)
+            {
+                var set = cardset[i];
+                var nc = new CharacterCard(set.name, set.oc, i + 1, set.color, ApiUrl, reactionSystem.tools);
+                nc.x_relative = set.x_relative;
+                nc.y_relative = set.y_relative;
+                nc.RelativePos = set.RelativePos;
+                nc.Scale = set.Scale;
+                cards.Add(nc);
+            }
 
             foreach (CharacterCard card in cards)
             {
@@ -182,12 +179,10 @@ cards.Add(new CharacterCard("耶罗",
             }
 
             stageNames.Clear();
-            foreach (CharacterCard card in cards)
-                stageNames[card.position] = card.name;
+            foreach (CharacterCard card in cards) stageNames[card.position] = card.name;
 
             CharacterCard.SetKnownPlayers(cards);
-            foreach (CharacterCard card in cards)
-                card.RefreshSystemPrompt();
+            foreach (CharacterCard card in cards) card.RefreshSystemPrompt();
 
             WhisperManager.ReplyProvider = WhisperReplyAsync;
         }
@@ -302,7 +297,6 @@ cards.Add(new CharacterCard("耶罗",
         {
             ExitOpeningRetryPause();
         }
-
         complete?.Invoke();
     }
 
@@ -311,6 +305,7 @@ cards.Add(new CharacterCard("耶罗",
         WhisperManager.SetBusy(card.position, true);
         try
         {
+            if (deadStages.Contains(card.position)) return;
             if(_round == 0) await card.FirstRequest(inform);
             else await card.NormalRequest(inform);
         }
@@ -448,7 +443,7 @@ cards.Add(new CharacterCard("耶罗",
         {
             DeepSeekRequest copy = card.request.DeepCopy();
             if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
-            copy.messages.Add(new DeepSeekMessage("user", $"你刚刚被{killerStage}号阵营击杀。请留下一句遗言，50字以内，纯文本，不要调用工具。"));
+            copy.messages.Add(new DeepSeekMessage("user", $"你刚刚被{killerStage}号阵营击杀。留下你的最后一句话，20字以内，表现的符合人设同时可以难受虚弱一点，如：“可恶啊”、“额啊”、“为什么...”。"));
             copy.tools = null;
             copy.tool_choice = null;
 
@@ -486,13 +481,19 @@ cards.Add(new CharacterCard("耶罗",
         Debug.Log($"[遗言] stage {stage} 尝试 Say：{words}");
         try
         {
-            if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
-                towel.Say(words, true);
+            if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null) towel.Say(words, true);
+
         }
         catch (Exception e)
         {
             Debug.LogError($"[遗言] Say 失败：{e}");
         }
+        UIMessageManager.Instance?.AddMessage(new UIMInfo
+        {
+            stage = stage,
+            content = words,
+            emo = SpriteEmotion.fail
+        });
         return words;
     }
     private async Task<string> WhisperReplyAsync(int targetStage, int senderStage, string whisper)
@@ -554,8 +555,43 @@ cards.Add(new CharacterCard("耶罗",
 
     #region 实际执行
 
-    //先做一个角色卡
+    /// <summary>
+    /// 角色卡载体：只用于在 Inspector 里显示/编辑“当前角色”的静态配置。
+    /// 不含任何运行期状态——对话历史 history、请求体 request、工具执行器 toolkit 都只在 CharacterCard 里。
+    /// 字段名与原来序列化在场景里的 CharacterCard 一致（name / oc / position / color /
+    /// x_relative / y_relative / RelativePos / Scale），所以 SampleScene 里已有的 cardset 数据可以直接读进来。
+    /// Start() 用这里的配置 new 出运行期真正使用的 CharacterCard。
+    /// </summary>
+    [System.Serializable]
+    public class CharacterCardPreset
+    {
+        /// <summary>角色名，同时也是阵营名（stageNames 里 “N号阵营 = 名字”）。</summary>
+        public string name = "";
 
+        /// <summary>人设文本 oc，注入系统提示。</summary>
+        public string oc = "";
+
+        /// <summary>地图上的位置/阵营编号。运行期由 AIAgent 按列表顺序覆盖为 i + 1，这里只是保留原来的开放字段。</summary>
+        public int position = -1;
+
+        /// <summary>派系颜色，000~255 RGBA 中间用 | 分割，例如 122|122|122|255。</summary>
+        public string color;
+
+        /// <summary>头像相对屏幕的水平锚点，None 表示不改 UISprite 的设置。</summary>
+        public UISprite.XR x_relative = UISprite.XR.Left;
+
+        /// <summary>头像相对屏幕的垂直锚点，None 表示不改 UISprite 的设置。</summary>
+        public UISprite.YR y_relative = UISprite.YR.Botton;
+
+        /// <summary>头像相对偏移（x 给 x_relative_value，y 给 y_relative_value）。</summary>
+        public Vector2 RelativePos = new(0.85f, 1.7f);
+
+        /// <summary>头像缩放；等于 1.7 时表示沿用 UISprite 自身的值。</summary>
+        public float Scale = 1.2f;
+    }
+
+    //先做一个角色卡
+    [System.Serializable]
     public class CharacterCard
     {
         private static string world = @$"# 实时战略游戏 AI 提示词
@@ -566,6 +602,7 @@ cards.Add(new CharacterCard("耶罗",
 
 ## 一、世界与地图
 - 地图为 1024×1024 正方形，每个像素代表 1 单位领土。
+- K = 1000,M = 1000K,B = 1000M,T = 1000B,P = 1000T
 - 四名玩家分别位于地图四角。
 - 0 号阵营为无主领土，无需重点关注。
 - 玩家可以进攻、防御、结盟、中立、观望或积累资源。
@@ -616,20 +653,26 @@ cards.Add(new CharacterCard("耶罗",
 3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复
 
 在你的真实回答（<content>标签内）中，请遵守以下规则：
-1. 纯文本 + emoji，禁用markdown，不使用括号（）（）！不要动作描写，。
+1. 纯文本 + emoji，禁用markdown，不使用括号（）（）！不要动作描写。
 2. 别露内心戏，别露你的情报。
 3. 夸张化的沉浸在角色中，字数限制在25字。
+4. 除了emoji来表达情绪用[emo:] 参数允许的值: origin,smile,laugh,shock,angry,sad 来表达情绪。
 ";
 
         public static string ModePrompt => character_mode_prompt;
         public string name = "";
         public string oc = "";
-        public string url = "";
+        [HideInInspector] public string url = "";
         public int position = -1;//地图上的位置//派系记得告诉AI
         public string color;//派系颜色,000~255 RGBA中间|分割，完整的为如122|122|122|255，
-        public DeepSeekRequest request = new() { reasoning_effort = "low"
+        [HideInInspector] public DeepSeekRequest request = new() { reasoning_effort = "low"
 
         };
+        public UISprite.XR x_relative = UISprite.XR.Left;
+        public UISprite.YR y_relative = UISprite.YR.Botton;
+        public Vector2 RelativePos = new(0.85f, 1.7f);
+        public float Scale = 1.2f;
+
         [JsonIgnore]//这样应该不会重复
         public List<DeepSeekMessage> history = new();
         [JsonIgnore] public Itool toolkit;//工具执行器，发送请求时传给 RequestInfo

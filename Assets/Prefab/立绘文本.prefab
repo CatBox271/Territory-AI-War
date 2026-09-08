@@ -399,5 +399,5 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   sp: {fileID: 6950948469885372499}
-  orign_material: {fileID: 10754, guid: 0000000000000000f000000000000000, type: 0}
+  orign_material: {fileID: 2100000, guid: 11ce95bf05c4a594bbf1ce64ef7b3afa, type: 2}
   effect_material: {fileID: 2100000, guid: da80d0adb96443e448078efbed1addf0, type: 2}
