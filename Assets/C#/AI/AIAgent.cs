@@ -61,10 +61,35 @@ public class AIAgent : MonoBehaviour
         return false;
     }
 
-    /// <summary>把文本里出现的角色名包成对应阵营色的 TMP 富文本。没有名字表或 MapConfig 时原样返回。</summary>
+    private static readonly Regex EmotionTagRegex = new Regex(@"\[\s*emo\s*:\s*([A-Za-z]+)\s*\]", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 拦截文本里的 [emo:xxx] 表情标记：返回去掉标记后的文本。
+    /// hasEmo 表示标记里的值是不是 SpriteEmotion 认识的表情；不认识的值只删标记，不动表情。
+    /// </summary>
+    public static string ExtractEmotion(string text, out bool hasEmo, out SpriteEmotion emo)
+    {
+        hasEmo = false;
+        emo = SpriteEmotion.origin;
+        if (string.IsNullOrEmpty(text)) return text;
+
+        Match match = EmotionTagRegex.Match(text);
+        if (match.Success && Enum.TryParse(match.Groups[1].Value, true, out SpriteEmotion parsed))
+        {
+            emo = parsed;
+            hasEmo = true;
+        }
+
+        return EmotionTagRegex.Replace(text, "");
+    }
+
+    /// <summary>把文本里出现的角色名包成对应阵营色的 TMP 富文本，并拦掉 [emo:xxx] 标记。没有名字表或 MapConfig 时只做标记拦截。</summary>
     public static string ColorizeAINames(string text)
     {
-        if (string.IsNullOrEmpty(text) || MapConfig.Instance == null || stageNames.Count == 0) return text;
+        if (string.IsNullOrEmpty(text)) return text;
+
+        text = ExtractEmotion(text, out _, out _);   // 展示用文字里不保留 [emo:xxx]
+        if (MapConfig.Instance == null || stageNames.Count == 0) return text;
 
         string result = text;
         foreach (var kv in stageNames)
@@ -158,6 +183,7 @@ public class AIAgent : MonoBehaviour
         if (reactionSystem != null)
         {
             reactionSystem.stage = 1;//兼容旧的单阵营入口，实际以 RequestInfo.toolStage 为准
+            stageNames.Clear();
             for (int i = 0; i < cardset.Count; i++)
             {
                 var set = cardset[i];
@@ -172,14 +198,11 @@ public class AIAgent : MonoBehaviour
             foreach (CharacterCard card in cards)
             {
                 card.toolkit = reactionSystem;
-                if (MarbleManager.Instance != null)
-                    MarbleManager.Instance.RegisterAIStage(card.position);//空槽升级机制跟随这个 AI 阵营
-                else
-                    Debug.LogWarning("[AIAgent] MarbleManager 不存在，空槽升级机制未注册");
-            }
+                if (MarbleManager.Instance != null) MarbleManager.Instance.RegisterAIStage(card.position);//空槽升级机制跟随这个 AI 阵营
+                else Debug.LogWarning("[AIAgent] MarbleManager 不存在，空槽升级机制未注册");
 
-            stageNames.Clear();
-            foreach (CharacterCard card in cards) stageNames[card.position] = card.name;
+                stageNames[card.position] = card.name;
+            }
 
             CharacterCard.SetKnownPlayers(cards);
             foreach (CharacterCard card in cards) card.RefreshSystemPrompt();
@@ -1031,7 +1054,7 @@ public class AIAgent : MonoBehaviour
             {
                 stage = position,
                 content = content,
-                emo = (SpriteEmotion)UnityEngine.Random.Range(0, 7)
+                emo = SpriteEmotion.origin   // 没写 [emo:xxx] 时的默认表情（Deal 里以标记为准）
             });
         }
         public async Task FirstRequest(string inform)

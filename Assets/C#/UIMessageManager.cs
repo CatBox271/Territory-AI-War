@@ -49,7 +49,7 @@ public class UIMessageManager : MonoBehaviour
         if (test)
         {
             test = false;
-            AddMessage(new() { stage = 1, content = "这就不行了，真是杂鱼。", emo = (SpriteEmotion)Random.Range(0,7) });
+            AddMessage(new() { stage = 2, content = "别来无恙啊，这次小鸟不好给你机会了。", emo = (SpriteEmotion)Random.Range(0,8) });
         }
 
         float last = Time.time - last_deal_time;
@@ -92,8 +92,6 @@ public class UIMessageManager : MonoBehaviour
         if (lihui.show) lihui.Act(false);
         items[0].focus = false;
         items[0].Refresh();
-
-        print("unfocus"+ i);
     }
     private int lihui_index = 1;
     private void lihui_switch()
@@ -103,16 +101,17 @@ public class UIMessageManager : MonoBehaviour
     private void Deal()
     {
         var item = need_deal.Dequeue();
+        // 文本里的 [emo:xxx] 决定立绘表情；没写标记时用 UIMInfo.emo（公开发言=origin，遗言=fail）
+        string content = AIAgent.ExtractEmotion(item.content, out bool hasEmo, out SpriteEmotion emo);
         var lihui = human[lihui_index];
-        lihui.Set(item.stage,item.emo);
+        lihui.Set(item.stage, hasEmo ? emo : item.emo);
         lihui.Act(true);
-        print("show" + lihui_index);
         for (int i = 0; i < items.Count; i++)
         {
             var text_ui = items[i];
             if (i == items.Count - 1)
             {
-                text_ui.SetLow(AIAgent.ColorizeAINames(item.content), MapConfig.Instance.GetColor(item.stage));
+                text_ui.SetLow(AIAgent.ColorizeAINames(content), MapConfig.Instance.GetColor(item.stage));
                 items.RemoveAt(i);
                 items.Insert(0,text_ui);
             }

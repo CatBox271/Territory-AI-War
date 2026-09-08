@@ -3751,11 +3751,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   item: {fileID: 4686537583089243934, guid: 576515d4ce0e2d34b882237165c587ba, type: 3}
-  YRange: {x: -3.78, y: 3.96}
+  YRange: {x: -3.879, y: 3.96}
   MessageParent: {fileID: 648156955}
   MessageCount: 8
   max_show_time: 7
-  intensity: 1.5
+  intensity: 1
   human:
   - {fileID: 180841780}
   - {fileID: 1538111713}
@@ -8780,10 +8780,10 @@ MonoBehaviour:
     oc: 
     position: 0
     color: 000|127|255|255
-    x_relative: 1
+    x_relative: 2
     y_relative: 2
-    RelativePos: {x: 0.85, y: 1.7}
-    Scale: 1.2
+    RelativePos: {x: 0.97, y: 1.27}
+    Scale: 1.32
   - name: "\u677E\u6C2F"
     oc: 
     position: 0

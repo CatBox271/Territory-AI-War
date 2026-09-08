@@ -69,7 +69,7 @@ public class UISprite : MonoBehaviour
     {
         try
         {
-            //我在写别动
+            print(AIAgent.GetStageName(stage) + "_" + emo.ToString());
             sp.sprite = Resources.Load(AIAgent.GetStageName(stage) + "_" + emo.ToString()) as Sprite;
             if (AIAgent.Instance != null)
             {
