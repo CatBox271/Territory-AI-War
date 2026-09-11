@@ -194,70 +194,88 @@ public class ReactionSystem : MonoBehaviour, Itool
 
     private async Task<DeepSeekMessage> DealToolCall(ToolCall call, int callStage)
     {
-        string content;
+        ToolOutcome outcome;
 
         if (call == null)
         {
-            content = "工具调用失败：ToolCall 为空。";
+            outcome = new ToolOutcome("工具调用失败：ToolCall 为空。");
         }
         else if (call.function == null || string.IsNullOrEmpty(call.function.name))
         {
-            content = "工具调用失败：缺少 function.name。";
+            outcome = new ToolOutcome("工具调用失败：缺少 function.name。");
         }
         else if (call.function.name == UsePropToolName)
         {
-            content = UseProp(call.function.arguments, callStage);
+            outcome = UseProp(call.function.arguments, callStage);
         }
         else if (call.function.name == ControlTurretToolName)
         {
-            content = ControlTurret(call.function.arguments, callStage);
+            outcome = ControlTurret(call.function.arguments, callStage);
         }
         else if (call.function.name == WhisperToolName)
         {
-            content = await Whisper(call.function.arguments, callStage);
+            outcome = await Whisper(call.function.arguments, callStage);
         }
         else
         {
-            content = $"未知工具：{call.function.name}";
+            outcome = new ToolOutcome($"未知工具：{call.function.name}");
         }
+
+        // 玩家侧只飘 outcome.action（AI 做了什么），工具返回的 outcome.result 只回给模型。
+        // 调用失败时 action 为空，这一条就不飘字：没做成的事没必要播。
+        ShowActionText(callStage, outcome.action);
 
         return new DeepSeekMessage
         {
             role = "tool",
-            content = content,
+            content = outcome.result,
             tool_call_id = call != null ? call.id : ""
         };
     }
 
+    /// <summary>工具行动的出口：把拼好的 action 交给 AIAgent.ShowAction（当前不显示）。</summary>
+    private static void ShowActionText(int callStage, string action)
+    {
+        if (string.IsNullOrWhiteSpace(action)) return;
+        AIAgent.ShowAction(callStage, action);
+    }
+
+    /// <summary>瞄准目标的人类可读写法：只给坐标，例如“(1.2, 3.4)”。</summary>
+    private static string DescribeAimTarget(ItemType aim)
+    {
+        if (aim == null) return "";
+        return aim.pos.ToString();
+    }
+
 
     /// <summary>使用道具：消耗指定槽位，并连同瞄准目标交给既有游戏逻辑 ExecutePropEffect 执行。</summary>
-    private string UseProp(string argumentsJson, int callStage)
+    private ToolOutcome UseProp(string argumentsJson, int callStage)
     {
         MapConfig config = MapConfig.Instance;
         if (config == null)
-            return "使用道具失败：炮塔无法锁定4格外的目标，但是指向具体的坐标可以。";
+            return new ToolOutcome("使用道具失败：炮塔无法锁定4格外的目标，但是指向具体的坐标可以。");
 
         if (callStage < 0 || callStage >= config.teamProps.Length)
-            return $"使用道具失败：当前角色阵营 {callStage} 无效。";
+            return new ToolOutcome($"使用道具失败：当前角色阵营 {callStage} 无效。");
 
         List<PropEntry> props = config.teamProps[callStage];
         if (props == null)
-            return $"使用道具失败：{callStage} 号阵营没有道具栏。";
+            return new ToolOutcome($"使用道具失败：{callStage} 号阵营没有道具栏。");
 
         if (!TryParseArguments(argumentsJson, out UsePropArguments args))
-            return "使用道具失败：参数错误，至少需要 {\"index\": 从1开始的槽位序号}。";
+            return new ToolOutcome("使用道具失败：参数错误，至少需要 {\"index\": 从1开始的槽位序号}。");
 
         if (args.index < 1 || args.index > props.Count)
-            return $"使用道具失败：当前只有 {props.Count} 个道具，无法使用第 {args.index} 格。";
+            return new ToolOutcome($"使用道具失败：当前只有 {props.Count} 个道具，无法使用第 {args.index} 格。");
 
         PropEntry prop = props[args.index - 1];
 
         // 先解析朝向，失败时不消耗道具。
         ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y);
         if (!string.IsNullOrWhiteSpace(args.target_guid) && aim == null)
-            return $"使用道具失败：找不到目标 guid：{args.target_guid}。";
+            return new ToolOutcome($"使用道具失败：找不到目标 guid：{args.target_guid}。");
         if (string.IsNullOrWhiteSpace(args.target_guid) && (args.aim_x.HasValue != args.aim_y.HasValue))
-            return "使用道具失败：aim_x 和 aim_y 必须同时提供。";
+            return new ToolOutcome("使用道具失败：aim_x 和 aim_y 必须同时提供。");
 
         // 【任意】专属：AI 可以从全部四种武器里指定实际触发的武器。
         WeaponKind? anyChoice = null;
@@ -266,13 +284,13 @@ public class ReactionSystem : MonoBehaviour, Itool
             if (!string.IsNullOrWhiteSpace(args.weapon))
             {
                 if (!TryParseWeapon(args.weapon, out WeaponKind choice))
-                    return $"使用道具失败：weapon 参数无效：{args.weapon}。可选值：霰弹、扫射、护盾、大球。";
+                    return new ToolOutcome($"使用道具失败：weapon 参数无效：{args.weapon}。可选值：霰弹、扫射、护盾、大球。");
                 anyChoice = choice;
             }
         }
         else if (!string.IsNullOrWhiteSpace(args.weapon))
         {
-            return "使用道具失败：只有【任意】道具才能使用 weapon 参数指定武器。";
+            return new ToolOutcome("使用道具失败：只有【任意】道具才能使用 weapon 参数指定武器。");
         }
 
         // 先取出并移除，再走原有执行逻辑（和 AddProp 里溢出执行的是同一套逻辑）。
@@ -293,7 +311,16 @@ public class ReactionSystem : MonoBehaviour, Itool
 
         string choiceText = anyChoice.HasValue ? $"，任意触发为：{anyChoice.Value}" : "";
         string aimText = aim != null ? $"，已朝向 {aim.pos}" : "";
-        return $"已使用第 {args.index} 格道具：{prop.item}，数值 {prop.value.ToShortString()}{choiceText}{aimText}。";
+        string result = $"已使用第 {args.index} 格道具：{prop.item}，数值 {prop.value.ToShortString()}{choiceText}{aimText}。";
+
+        // 玩家侧的具体行动描述：第几格、什么道具、多少数值、指定还是随机武器、瞄准谁。
+        string actionChoice = anyChoice.HasValue
+            ? $"（触发 {anyChoice.Value}）"
+            : (prop.item == WeaponKind.任意 ? "（随机武器）" : "");
+        string actionAim = aim != null ? $" → 瞄准 {DescribeAimTarget(aim)}" : "";
+        string action = $"使用道具：第 {args.index} 格【{prop.item}】{prop.value.ToShortString()}{actionChoice}{actionAim}";
+
+        return new ToolOutcome(result, action);
     }
 
     /// <summary>
@@ -333,58 +360,68 @@ public class ReactionSystem : MonoBehaviour, Itool
     /// 控制自己炮塔的持续瞄准：
     /// action=start 时必须带 target_guid 或 aim_x+aim_y；action=stop 时交还自动旋转。
     /// </summary>
-    private string ControlTurret(string argumentsJson, int callStage)
+    private ToolOutcome ControlTurret(string argumentsJson, int callStage)
     {
         MapConfig config = MapConfig.Instance;
         if (config == null)
-            return "炮塔控制失败：游戏配置(MapConfig)不存在。";
+            return new ToolOutcome("炮塔控制失败：游戏配置(MapConfig)不存在。");
 
         if (!TryParseTurretArguments(argumentsJson, out TurretControlArguments args))
-            return "炮塔控制失败：参数错误，至少需要 {\"action\": \"start\" 或 \"stop\"}。";
+            return new ToolOutcome("炮塔控制失败：参数错误，至少需要 {\"action\": \"start\" 或 \"stop\"}。");
 
         if (!Towel.AllTowel.TryGetValue(callStage, out Towel towel) || towel == null)
-            return $"炮塔控制失败：{callStage} 号阵营的炮塔不存在。";
+            return new ToolOutcome($"炮塔控制失败：{callStage} 号阵营的炮塔不存在。");
 
         AimController aimController = towel.aimController;
         if (aimController == null)
-            return $"炮塔控制失败：{callStage} 号阵营没有挂 AimController。";
+            return new ToolOutcome($"炮塔控制失败：{callStage} 号阵营没有挂 AimController。");
 
         string action = (args.action ?? "").Trim().ToLower();
         if (action == "stop")
         {
             aimController.StopControl();
-            return "已停止炮塔控制，炮塔恢复自动旋转。";
+            return new ToolOutcome("已停止炮塔控制，炮塔恢复自动旋转。", "停止炮塔控制");
         }
         if (action != "start")
-            return $"炮塔控制失败：action 无效：{args.action}。可选值：start、stop。";
+            return new ToolOutcome($"炮塔控制失败：action 无效：{args.action}。可选值：start、stop。");
 
         ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y);
         if (aim == null)
         {
             if (!string.IsNullOrWhiteSpace(args.target_guid))
-                return $"炮塔控制失败：找不到目标 guid：{args.target_guid}。";
+                return new ToolOutcome($"炮塔控制失败：找不到目标 guid：{args.target_guid}。");
             if (args.aim_x.HasValue != args.aim_y.HasValue)
-                return "炮塔控制失败：aim_x 和 aim_y 必须同时提供。";
-            return "炮塔控制失败：start 需要指定瞄准目标（target_guid 或 aim_x+aim_y）。";
+                return new ToolOutcome("炮塔控制失败：aim_x 和 aim_y 必须同时提供。");
+            return new ToolOutcome("炮塔控制失败：start 需要指定瞄准目标（target_guid 或 aim_x+aim_y）。");
         }
 
         if (!aimController.StartControl(aim))
-            return "炮塔控制失败：瞄准目标无效。";
+            return new ToolOutcome("炮塔控制失败：瞄准目标无效。");
 
-        return $"炮塔开始持续瞄准 {aim.pos}（最多持续12秒，超时或目标消失会自动恢复自动旋转）。";
+        return new ToolOutcome(
+            $"炮塔开始持续瞄准 {aim.pos}（最多持续12秒，超时或目标消失会自动恢复自动旋转）。",
+            $"炮塔持续瞄准 {DescribeAimTarget(aim)}");
     }
 
     /// <summary>AI 间悄悄话：交给 WhisperManager 调度，等对方回复后作为 tool result 返回。</summary>
-    private async Task<string> Whisper(string argumentsJson, int callStage)
+    private async Task<ToolOutcome> Whisper(string argumentsJson, int callStage)
     {
         if (!TryParseWhisperArguments(argumentsJson, out WhisperArguments args))
-            return "悄悄话失败：参数错误，需要 {\"to\": 对方阵营1-4, \"content\": 内容}。";
+            return new ToolOutcome("悄悄话失败：参数错误，需要 {\"to\": 对方阵营1-4, \"content\": 内容}。");
 
         if (args.to < 1 || args.to > 4)
-            return $"悄悄话失败：to 必须是1-4的阵营编号，收到 {args.to}。";
+            return new ToolOutcome($"悄悄话失败：to 必须是1-4的阵营编号，收到 {args.to}。");
 
         string whisperResult = await WhisperManager.WhisperAsync(callStage, args.to, args.content, currentRound);
-        return whisperResult + "\n\n提醒：以上是悄悄话工具结果，只有你自己可见。你接下来最终生成的 content 是公开发言，所有玩家都会看到；请不要在公开发言里重复悄悄话内容或相关私密信息。";
+        string result = whisperResult + "\n\n提醒：以上是悄悄话工具结果，只有你自己可见。你接下来最终生成的 content 是公开发言，所有玩家都会看到；请不要在公开发言里重复悄悄话内容或相关私密信息。";
+
+        // 悄悄话内容和对方回复都属于私密信息：公开飘字只说“给谁发了悄悄话”。
+        // WhisperAsync 失败时一律返回“悄悄话失败：…”前缀，那时候没发出去，就不飘字。
+        string action = !string.IsNullOrEmpty(whisperResult) && whisperResult.StartsWith("悄悄话失败")
+            ? null
+            : $"悄悄话 → {AIAgent.GetStageName(args.to)}";
+
+        return new ToolOutcome(result, action);
     }
 
     private static bool TryParseWhisperArguments(string argumentsJson, out WhisperArguments args)
@@ -461,6 +498,23 @@ public class ReactionSystem : MonoBehaviour, Itool
     {
         if (aimAnchor != null)
             Destroy(aimAnchor.gameObject);
+    }
+
+    /// <summary>
+    /// 一次工具调用的两个产物：
+    /// result 进 role=tool 消息，只给模型看（含失败原因）；
+    /// action 飘到炮塔旁给玩家看，写的是“AI 做了什么”，为空表示这次调用没做成、不飘字。
+    /// </summary>
+    private struct ToolOutcome
+    {
+        public string result;
+        public string action;
+
+        public ToolOutcome(string result, string action = null)
+        {
+            this.result = result;
+            this.action = action;
+        }
     }
 
     [System.Serializable]

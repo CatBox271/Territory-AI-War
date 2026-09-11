@@ -15,7 +15,7 @@ using System.Text.RegularExpressions;
 public class AIAgent : MonoBehaviour
 {
     #region 视频流程
-    
+
     [SerializeField] private float _cycleInterval = 2f;
     private ReactionSystem reactionSystem;//行动系统：AI 工具在这里
 
@@ -105,13 +105,37 @@ public class AIAgent : MonoBehaviour
     }
 
     /// <summary>
+    /// 工具行动文案的出口。文案由 ReactionSystem 按调用参数拼好后传进来（ToolOutcome.action），
+    /// 目前只保留这个函数本身，不做任何显示：行动既不进中央发言列表，也不飘炮塔旁。
+    /// </summary>
+    public static void ShowAction(int stage, string text)
+    {
+        // 有意留空。以后要显示的时候在这里接出去。
+    }
+
+    /// <summary>
     /// 完整回复校验。
     /// 纯文本回复必须无括号；工具调用允许 content 为空，但仍要求思考里有内心独白标记。
     /// </summary>
     public static bool IsRoleplayReasoning(DeepSeekMessage message)
     {
-        if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content)) return false;
-        return (HasRoleplayThinkingMark(message.reasoning_content) && !ContainsAnyParenthesis(message.content)) || (message.tool_calls?.Count > 0);
+        if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content))
+        {
+            print("null");
+            return false;
+        }
+        if (ContainsAnyParenthesis(message.content)) return false;
+        if (message.tool_calls?.Count > 0)
+        {
+            print("tool");
+            return true;
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(message.content) || string.IsNullOrWhiteSpace(message.content)) return false;
+            if (!HasRoleplayThinkingMark(message.reasoning_content)) return false;
+        }
+        return true;
     }
 
     private static bool HasRoleplayThinkingMark(string text)
@@ -153,47 +177,40 @@ public class AIAgent : MonoBehaviour
     private void Awake()
     {
         Instance = this;
-    }
 
-    private void Start()
-    {
         CapturePause.Capture = GetComponent<RenderHeads.Media.AVProMovieCapture.CaptureBase>() ?? FindObjectOfType<RenderHeads.Media.AVProMovieCapture.CaptureBase>();
 
         // 工具注入：把 ReactionSystem 的工具表注入 4 张角色卡，并把 Itool 处理器一并传入。
         if (reactionSystem == null) reactionSystem = FindObjectOfType<ReactionSystem>();
-        if (reactionSystem != null)
+
+        reactionSystem.stage = 1;//兼容旧的单阵营入口，实际以 RequestInfo.toolStage 为准
+        stageNames.Clear();
+        for (int i = 0; i < cardset.Count; i++)
         {
-            reactionSystem.stage = 1;//兼容旧的单阵营入口，实际以 RequestInfo.toolStage 为准
-            stageNames.Clear();
-            for (int i = 0; i < cardset.Count; i++)
-            {
-                var set = cardset[i];
-                var nc = new CharacterCard(set.name, set.oc, i + 1, set.color, ApiUrl, reactionSystem.tools);
-                nc.x_relative = set.x_relative;
-                nc.y_relative = set.y_relative;
-                nc.RelativePos = set.RelativePos;
-                nc.Scale = set.Scale;
-                cards.Add(nc);
-            }
-
-            foreach (CharacterCard card in cards)
-            {
-                card.toolkit = reactionSystem;
-                if (MarbleManager.Instance != null) MarbleManager.Instance.RegisterAIStage(card.position);//空槽升级机制跟随这个 AI 阵营
-                else Debug.LogWarning("[AIAgent] MarbleManager 不存在，空槽升级机制未注册");
-
-                stageNames[card.position] = card.name;
-            }
-
-            CharacterCard.SetKnownPlayers(cards);
-            foreach (CharacterCard card in cards) card.RefreshSystemPrompt();
-
-            WhisperManager.ReplyProvider = WhisperReplyAsync;
+            var set = cardset[i];
+            var nc = new CharacterCard(set.name, set.oc, i + 1, set.color, ApiUrl, reactionSystem.tools);
+            nc.x_relative = set.x_relative;
+            nc.y_relative = set.y_relative;
+            nc.RelativePos = set.RelativePos;
+            nc.Scale = set.Scale;
+            cards.Add(nc);
         }
-        else
+    }
+    private void Start()
+    {
+        foreach (CharacterCard card in cards)
         {
-            Debug.LogError("[AIAgent] 场景中找不到 ReactionSystem，AI 将无法调用工具");
+            card.toolkit = reactionSystem;
+            if (MarbleManager.Instance != null) MarbleManager.Instance.RegisterAIStage(card.position);//空槽升级机制跟随这个 AI 阵营
+            else Debug.LogWarning("[AIAgent] MarbleManager 不存在，空槽升级机制未注册");
+
+            stageNames[card.position] = card.name;
         }
+        CharacterCard.SetKnownPlayers(cards);
+        foreach (CharacterCard card in cards) card.RefreshSystemPrompt();
+
+        WhisperManager.ReplyProvider = WhisperReplyAsync;
+
     }
 
     private void Update()
@@ -291,9 +308,6 @@ public class AIAgent : MonoBehaviour
                 builder = new();
                 InformGetter.GetInfo(builder, card.position);
             }
-
-            if (SpeechPass > 0) builder.AppendLine("当前回合content不会广播。");
-            else builder.AppendLine("当前回合content会广播，整合你在非广播时的信息，保持文风和角色正式说出。");
 
             tasks.Add(RunCardAsync(card, builder.ToString()));
         }
@@ -626,7 +640,7 @@ public class AIAgent : MonoBehaviour
 - **炮塔：** 被敌方攻击有效命中即**立即死亡**。
 
 ## 三、弹珠与资源
-- 每队初始拥有 {MarbleManager.Instance.initialMarbleCount} 个弹珠。
+- 每队初始拥有 {MarbleManager.Instance?.initialMarbleCount} 个弹珠。
 - 弹珠经过障碍后进入倍乘区：×2（面积最大）→ ×4 → ×8（面积最小）；倍乘完成后回到顶部重新滚落。
 - 进入道具选择区时随机落到道具上；道具数值等于弹珠当时数值，按 2 的幂次增长。
 
@@ -666,9 +680,8 @@ public class AIAgent : MonoBehaviour
 在你的真实回答（<content>标签内）中，请遵守以下规则：
 1. 纯文本 + emoji，禁用markdown，不使用括号（）（）！不要动作描写。
 2. 别露内心戏，别露你的情报。
-3. 夸张化的沉浸在角色中，字数限制在25字。
+3. 夸张化的沉浸在角色中，字数限制在15字。
 4. 除了emoji来表达情绪用[emo:] 参数允许的值: origin,smile,laugh,shock,angry,sad 来表达情绪。
-5.当提示不在广播content时只留自己的分析，在广播content时把上回合没有说的一起说了。
 ";
 
         public static string ModePrompt => character_mode_prompt;
@@ -679,7 +692,6 @@ public class AIAgent : MonoBehaviour
         public string color;//派系颜色,000~255 RGBA中间|分割，完整的为如122|122|122|255，
         [HideInInspector] public DeepSeekRequest request = new() {
             reasoning_effort = "low",
-            max_tokens = 512
         };
         public UISprite.XR x_relative = UISprite.XR.Left;
         public UISprite.YR y_relative = UISprite.YR.Botton;
@@ -991,7 +1003,7 @@ public class AIAgent : MonoBehaviour
             return true;
         }
 
-        public async Task UntilGreatRequest()
+        public async Task UntilGreatRequest(int roundStartIndex)
         {
             TaskCompletionSource<bool> tcs = new();
 
@@ -1019,6 +1031,7 @@ public class AIAgent : MonoBehaviour
             //保证已经检查完毕
             info.validateAndMaybeRetry = (msg) => {
                 if (IsRoleplayReasoning(msg)) return true;
+                info.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
                 Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
                 AIRequest.SendRequest(info);
                 return false;
@@ -1029,16 +1042,12 @@ public class AIAgent : MonoBehaviour
             await tcs.Task;
 
             //Say
-            if (SpeechPass > 0)
-            {
-                GetLastAssistantContent(out string _finalContent);
-                print($"{name}:{_finalContent}");
-                return;
-            }
-            if (GetLastAssistantContent(out string finalContent))
-            {
-                Say(position,finalContent);
-            }
+            if (SpeechPass > 0) return;
+
+            // 只拼接本轮所有 content；本轮一条 content 都没有（空回复 / 只调了工具）就不发言，
+            // 不往回找上一轮的对话，避免把旧发言重复显示一遍
+            string roundContent = JoinRoundAssistantContents(roundStartIndex);
+            if (!string.IsNullOrWhiteSpace(roundContent)) Say(position, roundContent);
         }
         private void Say(int position,string content)
         {
@@ -1072,7 +1081,7 @@ public class AIAgent : MonoBehaviour
             }
             request.tool_choice = "none";
             //请求直到正确
-            await UntilGreatRequest();
+            await UntilGreatRequest(roundStartIndex);
 
             SaveOpeningCache(request.messages[^1]);
 
@@ -1103,7 +1112,7 @@ public class AIAgent : MonoBehaviour
             int roundStartIndex = history.Count;
 
             //请求直到正确
-            await UntilGreatRequest();
+            await UntilGreatRequest(roundStartIndex);
 
             int endTokens = EstimateHistoryTokens(history);
             int sampleX = Mathf.Max(0, endTokens - startTokens);
@@ -1119,8 +1128,8 @@ public class AIAgent : MonoBehaviour
         }
 
 
-        /// <summary>拼接本轮所有 assistant.content。</summary>
-        private string CollectRoundAssistantContents(int roundStartIndex)
+        /// <summary>拼接本轮所有 assistant.content；本轮没有任何 content 时返回空串。</summary>
+        private string JoinRoundAssistantContents(int roundStartIndex)
         {
             var parts = new List<string>();
             for (int i = roundStartIndex; i < history.Count; i++)
@@ -1129,7 +1138,14 @@ public class AIAgent : MonoBehaviour
                 if (msg != null && msg.role == "assistant" && !string.IsNullOrWhiteSpace(msg.content))
                     parts.Add(msg.content.Trim());
             }
-            return parts.Count > 0 ? string.Join("\n", parts) : "（无）";
+            return string.Join("\n", parts);
+        }
+
+        /// <summary>拼接本轮所有 assistant.content，空时以“（无）”占位（给检查模型看）。</summary>
+        private string CollectRoundAssistantContents(int roundStartIndex)
+        {
+            string joined = JoinRoundAssistantContents(roundStartIndex);
+            return string.IsNullOrEmpty(joined) ? "（无）" : joined;
         }
 
         /// <summary>收集本轮所有工具调用（工具名 + 参数）。</summary>
@@ -1477,20 +1493,6 @@ public class AIAgent : MonoBehaviour
                     return history[i];
             }
             return null;
-        }
-
-        private bool GetLastAssistantContent(out string out_text)
-        {
-            out_text = "";
-            for (int i = history.Count - 1; i >= 0; i--)
-            {
-                if (history[i].role == "assistant" && !string.IsNullOrWhiteSpace(history[i].content))
-                {
-                    out_text = history[i].content;
-                    return true;
-                }
-            }
-            return false;
         }
 
         private string GetLastAssistantReasoning(out string content)
