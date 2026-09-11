@@ -167,7 +167,7 @@ public class FunctionCall
 [Serializable]
 public class DeepSeekRequest
 {
-    public string model = "deepseek-v4-flash";
+    public string model = "deepseek-flash";
     public double temperature = 0.7;
     public int max_tokens = 2048;
     public bool stream = false;

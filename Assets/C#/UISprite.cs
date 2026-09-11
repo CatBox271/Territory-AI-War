@@ -69,8 +69,7 @@ public class UISprite : MonoBehaviour
     {
         try
         {
-            print(AIAgent.GetStageName(stage) + "_" + emo.ToString());
-            sp.sprite = Resources.Load(AIAgent.GetStageName(stage) + "_" + emo.ToString()) as Sprite;
+            sp.sprite = (Resources.Load(AIAgent.GetStageName(stage) + "_" + emo.ToString()) ?? Resources.Load(AIAgent.GetStageName(stage) + "_origin")) as Sprite;
             if (AIAgent.Instance != null)
             {
                 var card = AIAgent.Instance.cards.Find(c => c.position == stage);

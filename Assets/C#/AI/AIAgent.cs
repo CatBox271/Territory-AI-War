@@ -105,45 +105,25 @@ public class AIAgent : MonoBehaviour
     }
 
     /// <summary>
-    /// 检测 reasoning_content 是否是符合人设的中文内心独白（思考模式校验，从 AIRequest 移入）。
-    /// 合格示例：(内心OS：) / （心想：） / （我想：）；不合格示例：大段英文规划/复盘。
-    /// </summary>
-    public static bool IsRoleplayReasoning(string text, string content)
-    {
-        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(content)) return false;
-        return HasRoleplayThinkingMark(text) && !ContainsAnyParenthesis(content) && !content.Contains("[skip]");
-    }
-
-    /// <summary>
     /// 完整回复校验。
     /// 纯文本回复必须无括号；工具调用允许 content 为空，但仍要求思考里有内心独白标记。
     /// </summary>
     public static bool IsRoleplayReasoning(DeepSeekMessage message)
     {
         if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content)) return false;
-
-        bool contentRight;
-        if (string.IsNullOrWhiteSpace(message.content))
-            contentRight = message.tool_calls != null && message.tool_calls.Count > 0;
-        else
-            contentRight = !ContainsAnyParenthesis(message.content) && !message.content.Contains("[skip]");
-
-        return HasRoleplayThinkingMark(message.reasoning_content) && contentRight;
+        return (HasRoleplayThinkingMark(message.reasoning_content) && !ContainsAnyParenthesis(message.content)) || (message.tool_calls?.Count > 0);
     }
 
     private static bool HasRoleplayThinkingMark(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        bool hasParen = text.Contains("（") || text.Contains("(");
-        return hasParen &&
-               (text.Contains("我想") || text.Contains("心想：") || text.Contains("内心OS："));
+        return text.Contains("（我想：");
     }
 
     private static bool ContainsAnyParenthesis(string text)
     {
         if (string.IsNullOrEmpty(text)) return false;
-        return text.IndexOf('（') >= 0 || text.IndexOf('）') >= 0 ||
-               text.IndexOf('(') >= 0 || text.IndexOf(')') >= 0;
+        return text.Contains('（') || text.Contains('）') || text.Contains('(') || text.Contains(')');
     }
 
     private bool _isWaiting;
@@ -156,6 +136,7 @@ public class AIAgent : MonoBehaviour
     //cardset 只放 Inspector 里显示/编辑的角色载体（CharacterCardPreset），运行期真正用的 CharacterCard 由它生成后放进 cards
     public List<CharacterCardPreset> cardset = new();
     public readonly List<CharacterCard> cards = new();
+    public int EachPassRound = 1;
     private readonly HashSet<int> deadStages = new();
     private int soloSinceRound = -1;
 
@@ -240,6 +221,7 @@ public class AIAgent : MonoBehaviour
     }
 
     private bool cycle_start = true;
+    private static int SpeechPass = 0;
     private async void RunCycleLoop()
     {
         while (_isRunning)
@@ -263,12 +245,15 @@ public class AIAgent : MonoBehaviour
             _isWaiting = true;
             _round++;
 
+
             CapturePause.Pause();
             //past实际执行
             //await RunAIAnalysic(null);
 
             await tcs.Task;
             //等它完成
+            SpeechPass++;
+            if (SpeechPass > EachPassRound) SpeechPass = 0;
 
             CapturePause.Resume();
             cycle_start = false;
@@ -306,6 +291,9 @@ public class AIAgent : MonoBehaviour
                 builder = new();
                 InformGetter.GetInfo(builder, card.position);
             }
+
+            if (SpeechPass > 0) builder.AppendLine("当前回合content不会广播。");
+            else builder.AppendLine("当前回合content会广播，整合你在非广播时的信息，保持文风和角色正式说出。");
 
             tasks.Add(RunCardAsync(card, builder.ToString()));
         }
@@ -680,6 +668,7 @@ public class AIAgent : MonoBehaviour
 2. 别露内心戏，别露你的情报。
 3. 夸张化的沉浸在角色中，字数限制在25字。
 4. 除了emoji来表达情绪用[emo:] 参数允许的值: origin,smile,laugh,shock,angry,sad 来表达情绪。
+5.当提示不在广播content时只留自己的分析，在广播content时把上回合没有说的一起说了。
 ";
 
         public static string ModePrompt => character_mode_prompt;
@@ -688,8 +677,9 @@ public class AIAgent : MonoBehaviour
         [HideInInspector] public string url = "";
         public int position = -1;//地图上的位置//派系记得告诉AI
         public string color;//派系颜色,000~255 RGBA中间|分割，完整的为如122|122|122|255，
-        [HideInInspector] public DeepSeekRequest request = new() { reasoning_effort = "low"
-
+        [HideInInspector] public DeepSeekRequest request = new() {
+            reasoning_effort = "low",
+            max_tokens = 512
         };
         public UISprite.XR x_relative = UISprite.XR.Left;
         public UISprite.YR y_relative = UISprite.YR.Botton;
@@ -1029,18 +1019,22 @@ public class AIAgent : MonoBehaviour
             //保证已经检查完毕
             info.validateAndMaybeRetry = (msg) => {
                 if (IsRoleplayReasoning(msg)) return true;
-
-                info.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
                 Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
                 AIRequest.SendRequest(info);
                 return false;
-            }; 
+            };
 
             AIRequest.SendRequest(info);
 
             await tcs.Task;
 
             //Say
+            if (SpeechPass > 0)
+            {
+                GetLastAssistantContent(out string _finalContent);
+                print($"{name}:{_finalContent}");
+                return;
+            }
             if (GetLastAssistantContent(out string finalContent))
             {
                 Say(position,finalContent);
@@ -1207,6 +1201,7 @@ public class AIAgent : MonoBehaviour
             return result;
         }
 
+        private static readonly List<string> 游戏关键词 = new() { "大球", "护盾", "弹药", "霰弹" };
         /// <summary>
         /// 行为检查：把本轮 content 与工具调用交给 thinking disabled 的 flash 模型判断。
         /// 返回“说了要做但没调用”的工具名列表。
@@ -1215,6 +1210,9 @@ public class AIAgent : MonoBehaviour
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             string roundContents = CollectRoundAssistantContents(roundStartIndex);
+
+            if (游戏关键词.TrueForAll(s => !roundContents.Contains(s))) return new();
+
             string roundToolCalls = CollectRoundToolCalls(roundStartIndex);
 
             DeepSeekRequest checkerRequest = new DeepSeekRequest
