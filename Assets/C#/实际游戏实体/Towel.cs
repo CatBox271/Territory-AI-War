@@ -52,6 +52,59 @@ public class Towel : MonoBehaviour, IStageValue
     private float baseGuardSpeed = -1f;
     public bool IsInvincible => shieldUpgradeOwned > 0 && Time.time < invincibleUntil;
 
+    /// <summary>无敌窗口剩余秒数；不在无敌中时为 0。</summary>
+    public float InvincibleRemaining => IsInvincible ? Mathf.Max(0f, invincibleUntil - Time.time) : 0f;
+
+    [Header("无敌闪烁")]
+    /// <summary>无敌期间是否让塔身闪烁（走 Towel玻璃 那份 shader 的 _InvincibleGlow 闪白 Pass）</summary>
+    public bool invincibleBlink = true;
+    /// <summary>每秒亮灭多少个周期</summary>
+    public float invincibleBlinkSpeed = 3f;
+    /// <summary>峰值闪白强度：1 = 材质里的闪白颜色原样叠加，>1 更刺眼（闪白颜色本身可填 HDR）</summary>
+    [Range(0f, 4f)] public float invincibleBlinkPeak = 1f;
+    /// <summary>一个周期里"亮"的占比</summary>
+    [Range(0.05f, 0.95f)] public float invincibleBlinkDuty = 0.5f;
+    /// <summary>过渡宽度（占周期比例）：0.001 = 硬闪方波，越大越像呼吸；实际会被压到不超过 duty 的一半</summary>
+    [Range(0.001f, 0.5f)] public float invincibleBlinkSoftness = 0.15f;
+    /// <summary>手动相位偏移（0~1，1 = 整整错开一个周期）</summary>
+    [Range(0f, 1f)] public float invincibleBlinkPhase = 0f;
+    /// <summary>勾上则每座塔按自己的实例 ID 错开相位（不消耗 Random，不影响其它随机数）</summary>
+    public bool invincibleBlinkRandomPhase = false;
+
+    private static readonly int InvincibleGlowID = Shader.PropertyToID("_InvincibleGlow");
+    private MaterialPropertyBlock blinkBlock;
+    private float blinkGlow = -1f;
+    private float blinkPhase;
+
+    /// <summary>把闪白强度写进塔身渲染器：0=原样玻璃，越大越亮（shader 第二个 Pass 加法叠白，不动塔的 alpha）。只在值变化时写，不新建材质实例、不动共享材质。</summary>
+    void SetInvincibleGlow(float glow)
+    {
+        if (sp == null || glow == blinkGlow) return;
+        blinkGlow = glow;
+        blinkBlock ??= new MaterialPropertyBlock();
+        sp.GetPropertyBlock(blinkBlock);
+        blinkBlock.SetFloat(InvincibleGlowID, glow);
+        sp.SetPropertyBlock(blinkBlock);
+    }
+
+    /// <summary>无敌窗口内闪烁：每个周期前 duty 段"亮"（叠白加亮，不改塔的透明度），两侧各留 softness 宽度做平滑过渡（softness 压到最小就退化成硬闪方波）；窗口一结束立刻还原成 0。</summary>
+    void UpdateInvincibleBlink()
+    {
+        float glow = 0f;
+        if (invincibleBlink && IsInvincible && invincibleBlinkSpeed > 0.001f)
+        {
+            float period = 1f / invincibleBlinkSpeed;
+            float wave = Mathf.Repeat(Time.time / period + blinkPhase, 1f);
+            float duty = invincibleBlinkDuty;
+            float edge = Mathf.Clamp(invincibleBlinkSoftness, 0.001f, duty * 0.5f);   // 保证亮段两侧的过渡不重叠
+            float fadeIn = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(wave / edge));
+            float fadeOut = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((wave - (duty - edge)) / edge));
+            // 量化到 1/32：过渡段照样顺滑，但 MPB 只在跨过一档时才写（不每帧写）
+            glow = Mathf.Round(Mathf.Min(fadeIn, fadeOut) * 32f) / 32f * Mathf.Max(0f, invincibleBlinkPeak);
+        }
+        SetInvincibleGlow(glow);
+    }
+
     /// <summary>每级炮塔升级叠加上去的子弹显示半径倍率：1 + (倍率-1)  等级。</summary>
     public float CurrentBulletRadiusScale => 1f + (upgradedBulletRadiusScale - 1f) * Mathf.Max(0, turretUpgraded);
     /// <summary>每级炮塔升级叠加上去的子弹动量倍率：1 + (倍率-1)  等级。</summary>
@@ -64,6 +117,10 @@ public class Towel : MonoBehaviour, IStageValue
         value = _value;
         shield_value = _shield_value;
         TryGetComponent(out sp);
+        // 错相位：随机模式用实例 ID 散列（黄金比小数），确定性、不碰 UnityEngine.Random
+        blinkPhase = invincibleBlinkRandomPhase
+            ? Mathf.Repeat((Mathf.Abs(GetInstanceID()) % 997) * 0.6180339887f, 1f)
+            : Mathf.Repeat(invincibleBlinkPhase, 1f);
         config = MapConfig.Instance;
         canvas = FindObjectOfType<TerritoryCanvas>();
         AllTowel[stage] = this;
@@ -91,6 +148,7 @@ public class Towel : MonoBehaviour, IStageValue
     void Update()
     {
         if (isDead) return;
+        UpdateInvincibleBlink();
         float interval = bulletInterval.Evaluate(value);
         clock += Time.deltaTime;
 
@@ -123,7 +181,6 @@ public class Towel : MonoBehaviour, IStageValue
 
     public bool Say(string content, bool force = false) => messageDisplayer.Say(content, force);
 
-    private TowelTip tip;
     private Transform _tipPool;
     private Transform tipPool
     {
@@ -138,9 +195,17 @@ public class Towel : MonoBehaviour, IStageValue
         }
     }
 
+    /// <summary>这座炮塔上还在播的飘字（播完自销毁后会被清掉）</summary>
+    private readonly List<TowelTip> activeTips = new List<TowelTip>();
+    /// <summary>同一座炮塔上多条飘字之间的竖直空隙（世界单位）</summary>
+    public float tipStackGap = 0.25f;
+    /// <summary>量不到上一条飘字高度时，按这个高度给它让位（世界单位）</summary>
+    public float tipFallbackHeight = 0.6f;
+
     /// <summary>
     /// 直接显示一条飘字（ShowTMP）：从炮塔位置缩放出现，缓慢漂向 y=0，停留后淡出。
-    /// 同一座炮塔复用同一个实例，新文案直接顶掉上一条。没配 tipPrefab 时退回原来的逐字飘字。
+    /// 每条飘字各建一份独立实例，同一座炮塔上同时存在的多条沿 y 上下排开，不再互相顶掉。
+    /// 没配 tipPrefab 时退回原来的逐字飘字。
     /// </summary>
     public void ShowTip(string content)
     {
@@ -152,20 +217,52 @@ public class Towel : MonoBehaviour, IStageValue
             return;
         }
 
-        if (tip == null)
+        // 清掉已经播完（自销毁）的实例，把它们占的位置腾出来
+        for (int i = activeTips.Count - 1; i >= 0; i--)
         {
-            Transform pool = tipPool;
-            GameObject go = pool != null ? Instantiate(tipPrefab, pool) : Instantiate(tipPrefab);
-            tip = go.GetComponent<TowelTip>();
-            if (tip == null)
-            {
-                Destroy(go);
-                return;
-            }
+            if (activeTips[i] == null || !activeTips[i].IsPlaying) activeTips.RemoveAt(i);
+        }
+
+        Transform pool = tipPool;
+        GameObject go = pool != null ? Instantiate(tipPrefab, pool) : Instantiate(tipPrefab);
+        TowelTip newTip = go.GetComponent<TowelTip>();
+        if (newTip == null)
+        {
+            Destroy(go);
+            return;
         }
 
         Color color = config != null ? config.GetColor(stage, MapConfig.ColorStage.Bright) : Color.white;
-        tip.Play(content, color, transform.position);
+        newTip.Play(content, color, transform.position);
+        newTip.SetStackOffset(NextStackOffset(newTip));
+        activeTips.Add(newTip);
+    }
+
+    /// <summary>
+    /// 给新来的这条算竖直错开量：把已经在播的每一条的高度 + 空隙累加起来，
+    /// 朝远离漂移终点（yTarget = 0）的方向排，避免堆到场地中间去。
+    /// 每一步取「上一条高度」与「这条高度」的较大值，保证上下两条不重叠。
+    /// </summary>
+    private float NextStackOffset(TowelTip incoming)
+    {
+        float gap = tipStackGap > 0f ? tipStackGap : 0.25f;
+        float fallback = tipFallbackHeight > 0f ? tipFallbackHeight : 0.6f;
+        float inH = incoming != null ? incoming.WorldHeight : 0f;
+        if (inH <= 0f) inH = fallback;
+
+        float used = 0f;
+        foreach (TowelTip t in activeTips)
+        {
+            if (t == null || !t.IsPlaying) continue;
+            float h = t.WorldHeight;
+            if (h <= 0f) h = fallback;
+            used += Mathf.Max(h, inH) + gap;
+        }
+        if (used <= 0f) return 0f;
+
+        float target = incoming != null ? incoming.yTarget : 0f;
+        float dir = transform.position.y >= target ? 1f : -1f;
+        return dir * used;
     }
 
     /// <summary>选择 2：炮塔升级。后坐力带来的子弹显示半径与动量由开火参数处理；这里翻倍自动护卫的极限转速，常态转速不动。</summary>
@@ -243,6 +340,7 @@ public class Towel : MonoBehaviour, IStageValue
     {
         if (isDead) return;
         isDead = true;
+        SetInvincibleGlow(0f); // 死亡序列期间别再闪（Update 已停，这里手动把闪白还原成 0）
         this.killerStage = killerStage;
         this.killerWeapon = killerWeapon ?? "";
 

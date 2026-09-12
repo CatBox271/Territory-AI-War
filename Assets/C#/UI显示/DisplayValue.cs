@@ -9,8 +9,12 @@ public class DisplayValue : MonoBehaviour
     public bool shortDisplay = true;
     public Color outlineColor = new Color(0, 0, 0, 0);
     public float outlineWidth = 0f;
+    /// <summary>无敌倒计时的前缀（只有护盾数字会用到）</summary>
+    public string invincibleLabel = "无敌时间: ";
 
     private IStageValue stageValue;
+    /// <summary>aim 是塔的护盾（挂了 ShieldEffect）时才非空：护盾碎后的无敌窗口内改显示倒计时</summary>
+    private Towel shieldTowel;
     private HugeInt last = -1;
     private StringBuilder sb = new();
     private char[] buf = new char[256];
@@ -19,7 +23,12 @@ public class DisplayValue : MonoBehaviour
 
     void Start()
     {
-        aim.TryGetComponent(out stageValue);
+        if (aim != null)
+        {
+            aim.TryGetComponent(out stageValue);
+            if (aim.TryGetComponent(out ShieldEffect _))
+                shieldTowel = aim.GetComponentInParent<Towel>();
+        }
         if (text == null) TryGetComponent(out text);
         if (text != null && outlineWidth > 0)
         {
@@ -48,6 +57,15 @@ public class DisplayValue : MonoBehaviour
 
     void Update()
     {
+        // 无敌窗口内：这个数字改成显示剩余无敌时间，窗口一结束就自动回到正常数值显示
+        if (shieldTowel != null && shieldTowel.IsInvincible)
+        {
+            skip = 0;
+            last = -1; // 让窗口结束后的第一帧必定重写一次正常数值
+            SetText(invincibleLabel + Mathf.CeilToInt(shieldTowel.InvincibleRemaining));
+            return;
+        }
+
         if (++skip < 15) return;
         skip = 0;
 
@@ -59,6 +77,12 @@ public class DisplayValue : MonoBehaviour
             text.text = stageValue.value.ToShortString();
         else
             text.text = ToDetail(stageValue.value);
+    }
+
+    void SetText(string s)
+    {
+        if (text == null || text.text == s) return;
+        text.text = s;
     }
 
     string ToDetail(HugeInt value)

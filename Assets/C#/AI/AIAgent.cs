@@ -165,6 +165,10 @@ public class AIAgent : MonoBehaviour
     public int EachPassRound = 1;
     private readonly HashSet<int> deadStages = new();
     private int soloSinceRound = -1;
+    // 只剩一个阵营后的两条感言：宣告说出口就不再发；终局获奖感言说完（soloWinSpeechDone）才允许停 AI
+    private bool soloDeclareSpeechFired;
+    private bool soloWinSpeechRequested;
+    private bool soloWinSpeechDone;
 
     private static string LoadApiKey()
     {
@@ -230,6 +234,10 @@ public class AIAgent : MonoBehaviour
                 if (_isRunning) return;
                 _isRunning = true;
                 _round = 0;
+                soloSinceRound = -1;
+                soloDeclareSpeechFired = false;
+                soloWinSpeechRequested = false;
+                soloWinSpeechDone = false;
                 RunCycleLoop();
             }
         }
@@ -288,6 +296,18 @@ public class AIAgent : MonoBehaviour
     {
         if (ShouldStopSoloSpeech())
         {
+            complete?.Invoke();
+            return;
+        }
+
+        // 只剩一个阵营 + 熬够回合 + 场上没有敌方大球 = 该收尾：先让赢家把获奖感言说完，下一轮才准停
+        int soloWinner = SoloWinnerStage();
+        if (soloWinner > 0 && soloSinceRound >= 0 && _round - soloSinceRound >= 3
+            && !InformGetter.HasEnemyBigBall(soloWinner) && !soloWinSpeechRequested)
+        {
+            soloWinSpeechRequested = true;
+            await RequestWinSpeechAsync(soloWinner, true);
+            soloWinSpeechDone = true;
             complete?.Invoke();
             return;
         }
@@ -438,15 +458,39 @@ public class AIAgent : MonoBehaviour
         return Task.FromResult("无言的告别");
     }
 
-    private void UpdateSoloState()
+    /// <summary>场上只剩一个阵营时返回那个阵营；否则返回 -1。</summary>
+    private int SoloWinnerStage()
     {
+        int winner = -1;
         int alive = 0;
         foreach (CharacterCard card in cards)
-            if (!deadStages.Contains(card.position)) alive++;
-
-        if (alive == 1)
         {
-            if (soloSinceRound < 0) soloSinceRound = _round;
+            if (deadStages.Contains(card.position)) continue;
+            winner = card.position;
+            alive++;
+        }
+        return alive == 1 ? winner : -1;
+    }
+
+    /// <summary>场上只剩一个阵营，且活下来的就是 stage 这个阵营。</summary>
+    public bool IsSoloWinner(int stage) => SoloWinnerStage() == stage;
+
+    private void UpdateSoloState()
+    {
+        int winner = SoloWinnerStage();
+
+        if (winner > 0)
+        {
+            if (soloSinceRound < 0)
+            {
+                soloSinceRound = _round;
+                // 成为唯一阵营那一刻：先说一句宣告，飘字 + 中央列表两条都发
+                if (!soloDeclareSpeechFired)
+                {
+                    soloDeclareSpeechFired = true;
+                    _ = RequestWinSpeechAsync(winner, false);
+                }
+            }
         }
         else
         {
@@ -456,10 +500,82 @@ public class AIAgent : MonoBehaviour
 
     private bool ShouldStopSoloSpeech()
     {
-        int alive = 0;
-        foreach (CharacterCard card in cards)
-            if (!deadStages.Contains(card.position)) alive++;
-        return alive == 1 && soloSinceRound >= 0 && _round - soloSinceRound >= 3;
+        int winner = SoloWinnerStage();
+        if (winner <= 0 || soloSinceRound < 0 || _round - soloSinceRound < 3) return false;
+        if (InformGetter.HasEnemyBigBall(winner)) return false;   // 还有敌方大球 → 不许停（防被反杀）
+        if (!soloWinSpeechDone) return false;                     // 终局获奖感言没说完 → 不许停
+        return true;
+    }
+
+    /// <summary>
+    /// 唯一存活阵营的两条感言。final=false 是成为唯一阵营那一刻的宣告，final=true 是关对话前的终局获奖感言。
+    /// 两条都跟遗言一样：炮塔飘字 + 中央发言列表；表情强制 win，盖掉模型自己写的 [emo:xxx]。
+    /// </summary>
+    private async Task RequestWinSpeechAsync(int stage, bool final)
+    {
+        CharacterCard card = cards.Find(c => c.position == stage);
+        if (card == null) return;
+
+        string words = final ? "赢到最后的，是我。" : "剩下的，只有我了。";
+        CapturePause.Pause();
+        try
+        {
+            DeepSeekRequest copy = card.request.DeepCopy();
+            if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
+            copy.messages.Add(new DeepSeekMessage("user", final
+                ? "全场只剩你一个阵营，你是最后的赢家。说你的获奖感言，25字以内，只回复感言本身，不要调用工具，不要用括号，不要写动作描写。"
+                : "场上只剩你一个阵营，其他人都出局了。说一句宣告，25字以内，只回复这句话本身，不要调用工具，不要用括号，不要写动作描写。"));
+            copy.tools = null;
+            copy.tool_choice = null;
+
+            var tcs = new TaskCompletionSource<string>();
+            RequestInfo info = new(copy,
+                msgs =>
+                {
+                    DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
+                    tcs.TrySetResult(last != null ? last.content : "");
+                },
+                error => tcs.TrySetResult(""),
+                toolkit: null,
+                back_tool: false,
+                toolStage: stage);
+            info.apiKey = LoadApiKey();
+            info.apiUrl = card.url;
+
+            AIRequest.SendRequest(info);
+            string answer = await tcs.Task;
+            if (!string.IsNullOrWhiteSpace(answer)) words = answer.Trim();
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[获奖感言] stage {stage} 请求异常：{e}");
+        }
+        finally
+        {
+            CapturePause.Resume();
+        }
+
+        words = ExtractEmotion(words, out _, out _).Trim();
+        if (string.IsNullOrWhiteSpace(words)) words = final ? "赢到最后的，是我。" : "剩下的，只有我了。";
+
+        try
+        {
+            if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null) towel.Say(words, true);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[获奖感言] 飘字失败：{e}");
+        }
+
+        InformGetter.SetAIContent(stage, words);
+        UIMessageManager.Instance?.AddMessage(new UIMInfo
+        {
+            stage = stage,
+            content = words,
+            emo = SpriteEmotion.win,
+            forceEmo = true   // 强制赢家的脸，盖掉模型自己写的表情
+        });
+        Debug.Log($"[获奖感言] stage {stage} final={final}：{words}");
     }
 
     private async Task<string> RequestLastWordsAsync(CharacterCard card, int stage, int killerStage)
@@ -491,6 +607,7 @@ public class AIAgent : MonoBehaviour
             AIRequest.SendRequest(info);
             Debug.Log($"[遗言] stage {stage} 请求已发送");
             words = await tcs.Task;
+            words = ExtractEmotion(words, out _, out _).Trim();   // 展示用文字里不保留 [emo:xxx]
             if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
             InformGetter.SetAIContent(stage, words);
         }
@@ -519,7 +636,8 @@ public class AIAgent : MonoBehaviour
         {
             stage = stage,
             content = words,
-            emo = SpriteEmotion.fail
+            emo = SpriteEmotion.fail,
+            forceEmo = true   // 强制死者的脸，盖掉模型自己写的表情
         });
         return words;
     }
@@ -1054,12 +1172,15 @@ public class AIAgent : MonoBehaviour
         private void Say(int position,string content)
         {
             InformGetter.SetAIContent(position, content);
+            // 只剩他一个阵营之后，露的就是赢家的脸：强制盖掉模型自己写的 [emo:xxx]
+            bool soloWinner = AIAgent.Instance != null && AIAgent.Instance.IsSoloWinner(position);
             if (Towel.AllTowel.TryGetValue(position, out Towel towel)) towel.Say(content, true);
             UIMessageManager.Instance?.AddMessage(new UIMInfo
             {
                 stage = position,
                 content = content,
-                emo = SpriteEmotion.origin   // 没写 [emo:xxx] 时的默认表情（Deal 里以标记为准）
+                emo = soloWinner ? SpriteEmotion.win : SpriteEmotion.origin,   // 没写 [emo:xxx] 时的默认表情（Deal 里以标记为准）
+                forceEmo = soloWinner
             });
         }
         public async Task FirstRequest(string inform)

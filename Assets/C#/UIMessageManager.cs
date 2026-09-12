@@ -7,6 +7,8 @@ public struct UIMInfo
     public int stage;
     public string content;
     public SpriteEmotion emo;
+    // true 时无视正文里的 [emo:xxx]，强制用 emo（赢家定格用）
+    public bool forceEmo;
 }
 
 public class UIMessageManager : MonoBehaviour
@@ -102,9 +104,10 @@ public class UIMessageManager : MonoBehaviour
     {
         var item = need_deal.Dequeue();
         // 文本里的 [emo:xxx] 决定立绘表情；没写标记时用 UIMInfo.emo（公开发言=origin，遗言=fail）
+        // forceEmo 时（赢家）无视标记，强制盖掉模型自己写的表情
         string content = AIAgent.ExtractEmotion(item.content, out bool hasEmo, out SpriteEmotion emo);
         var lihui = human[lihui_index];
-        lihui.Set(item.stage, hasEmo ? emo : item.emo);
+        lihui.Set(item.stage, item.forceEmo ? item.emo : (hasEmo ? emo : item.emo));
         lihui.Act(true);
         for (int i = 0; i < items.Count; i++)
         {

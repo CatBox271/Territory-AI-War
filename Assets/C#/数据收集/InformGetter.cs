@@ -104,6 +104,7 @@ public class InformGetter : MonoBehaviour
             GetInfoOKey(builder, key);
         }
         AppendBallImpactWarning(builder, stage);
+        AppendFinalRoundHint(builder, stage);
         AppendAIContents(builder);
         //弹珠为阵营私有信息，只返回请求方自己的
         foreach (var key in MarbleItems.Keys)
@@ -223,6 +224,38 @@ public class InformGetter : MonoBehaviour
         }
         builder.AppendLine(); builder.Append("}");
     }
+
+    #region 终局提示
+    public const string FinalRoundHint = "【终局提示】就一回合：场上只剩你一个阵营了，先把还在飞的敌方大球清掉，别在最后被反杀。";
+
+    /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球；判据同大球撞击预警。</summary>
+    public static bool HasEnemyBigBall(int stage)
+    {
+        foreach (var kv in Oitems)
+        {
+            if (kv.Key == stage) continue;
+
+            foreach (ItemType item in kv.Value)
+            {
+                if (item.description == "大球" && item.item != null) return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 终局提示：只剩请求方一个阵营、且场上还有敌方大球时，在情报正文里多拼一行普通文本。
+    /// 其余任何时候情报内容不变；不是新消息、不是飘字、不动提示词和 [emo:xxx] 参数表。
+    /// </summary>
+    private static void AppendFinalRoundHint(StringBuilder builder, int stage)
+    {
+        if (AIAgent.Instance == null) return;
+        if (!AIAgent.Instance.IsSoloWinner(stage)) return;
+        if (!HasEnemyBigBall(stage)) return;
+
+        builder.AppendLine(); builder.AppendLine(FinalRoundHint);
+    }
+    #endregion
 
     #region 大球撞击预警
     // 轨迹推演参数：最多预测 12 秒、步长 0.02 秒。“几秒后第一次撞上护盾”按近似计算。

@@ -3,10 +3,10 @@ using RenderHeads.Media.AVProMovieCapture;
 using UnityEngine;
 
 /// <summary>
-/// 录制 + 地图涂满自动结束组件：
-/// 开局自动启动录制（CapturePause.Capture 未赋值时自动查找并回填）；
-/// 定期扫描 TerritoryCanvas 的领地网格，当某个非 0 阵营把整张地图涂满时，
-/// 自动停止 AI 循环、停止录制并结束游戏（冻结全局时间）。
+/// 占地达标自动结束组件：
+/// 定期扫描 TerritoryCanvas 的领地网格，当某个非 0 阵营的占地面积达到
+/// endThresholdPercent（默认 98%）时，自动停止 AI 循环、停止录制并结束游戏（冻结全局时间）。
+/// 录制不归它管：要么自己开 CaptureBase 的 _captureOnStart，要么用本组件的右键菜单「启动录制」。
 /// 提供测试按钮（OnGUI 游戏视口左上角）与右键菜单入口，可直接结束录制并结束游戏。
 /// </summary>
 public class GameEndMonitor : MonoBehaviour
@@ -19,16 +19,19 @@ public class GameEndMonitor : MonoBehaviour
     [Tooltip("是否在游戏视口左上角显示测试按钮")]
     public bool showTestButton = true;
 
-    [Tooltip("开局是否自动启动录制（对已录制的状态幂等，不会重复启动）")]
-    public bool startRecordingOnStart = false;
-
     [Tooltip("结束后延迟多少秒退出应用；0 = 不退出（编辑器里始终不退出）")]
     public float quitDelaySeconds = 0f;
+
+    [Tooltip("某阵营占地比例达到该百分比即判定其获胜并结束（0-100）。98 = 占满 98% 就停")]
+    [Range(0f, 100f)]
+    public float endThresholdPercent = 98f;
 
     /// <summary>是否已经结束过（幂等保护）。</summary>
     public bool GameEnded { get; private set; }
 
     private float _timer;
+    private bool _captureMissingLogged;
+    private bool _recordStartFailedLogged;
 
     private void Awake()
     {
@@ -40,74 +43,54 @@ public class GameEndMonitor : MonoBehaviour
         if (Instance == this) Instance = null;
     }
 
-    private void Start()
-    {
-        if (startRecordingOnStart)
-            StartRecording();
-    }
-
-    /// <summary>
-    /// 启动录制（幂等）：优先复用 CapturePause.Capture，未赋值时按与 AIAgent 相同的方式
-    /// 查找场景中的 CaptureBase 并回填。若录制组件自身的 _captureOnStart 已经启动，这里不会重复启动。
-    /// </summary>
-    [ContextMenu("启动录制")]
-    public void StartRecording()
-    {
-        var capture = CapturePause.Capture;
-        if (capture == null)
-            capture = FindObjectOfType<CaptureBase>();
-        if (capture == null)
-        {
-            Debug.LogWarning("[GameEndMonitor] 未找到录制组件（CaptureBase），录制未启动");
-            return;
-        }
-        if (CapturePause.Capture == null)
-            CapturePause.Capture = capture;
-        if (capture.IsCapturing())
-        {
-            Debug.Log("[GameEndMonitor] 录制已在运行，无需启动");
-            return;
-        }
-        if (capture.StartCapture())
-            Debug.Log("[GameEndMonitor] 录制已启动");
-        else
-            Debug.LogError("[GameEndMonitor] 录制启动失败（StartCapture 返回 false）");
-    }
-
     private void Update()
     {
         if (GameEnded) return;
+
         _timer += Time.deltaTime;
         if (_timer < checkInterval) return;
         _timer = 0f;
 
-        int winner = FindFullMapOwner();
+        int winner = FindOwnerOverThreshold();
         if (winner > 0)
         {
-            Debug.Log($"[GameEndMonitor] 阵营 {winner} 已涂满整张地图，结束录制并结束游戏");
+            Debug.Log($"[GameEndMonitor] 阵营 {winner} 占地已达 {endThresholdPercent:0.#}%，结束录制并结束游戏");
             EndGame(winner);
         }
     }
 
     /// <summary>
-    /// 扫描领地网格：所有像素都属于同一个非 0 阵营时返回该阵营编号，否则返回 0。
-    /// 地图未就绪时也返回 0。
+    /// 扫描领地网格：统计各阵营占地像素数，占比最高者达到 endThresholdPercent（默认 98%）
+    /// 时返回该阵营编号，否则返回 0。地图未就绪时也返回 0。
     /// </summary>
-    public int FindFullMapOwner()
+    public int FindOwnerOverThreshold()
     {
         var canvas = TerritoryCanvas.Instance;
         if (canvas == null || !canvas.territoryMap.IsCreated) return 0;
 
         var map = canvas.territoryMap;
-        byte owner = 0;
-        for (int i = 0; i < map.Length; i++)
+        int total = map.Length;
+        if (total == 0) return 0;
+
+        // 阵营编号是 byte 且数量很少，直接开表计数（0 = 中立/未占领，一起统计）
+        var counts = new int[256];
+        for (int i = 0; i < total; i++)
+            counts[map[i]]++;
+
+        int owner = 0;
+        int ownerCount = 0;
+        for (int stage = 1; stage < counts.Length; stage++)
         {
-            byte stage = map[i];
-            if (stage == 0) return 0;            // 仍有未占领像素
-            if (owner == 0) owner = stage;       // 记下第一个出现的阵营
-            else if (stage != owner) return 0;   // 出现第二个阵营
+            if (counts[stage] > ownerCount)
+            {
+                ownerCount = counts[stage];
+                owner = stage;
+            }
         }
-        return owner;
+        if (owner == 0) return 0;
+
+        float percent = ownerCount * 100f / total;
+        return percent >= endThresholdPercent ? owner : 0;
     }
 
     /// <summary>测试入口：直接结束录制并结束游戏。</summary>
@@ -133,7 +116,7 @@ public class GameEndMonitor : MonoBehaviour
 
         // 2. 播报结果（先于停录，让最终一帧录到获胜画面）
         string msg = winnerStage > 0
-            ? $"游戏结束：{AIAgent.GetStageName(winnerStage)} 涂满地图获得胜利！"
+            ? $"游戏结束：{AIAgent.GetStageName(winnerStage)} 占地 {endThresholdPercent:0.#}% 获得胜利！"
             : "游戏结束";
         UISystemMessageShow.ShowNow(msg);
 
