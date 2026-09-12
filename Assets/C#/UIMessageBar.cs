@@ -27,10 +27,19 @@ public class UIMessageBar : MonoBehaviour
         AimPos = transform.localPosition;
     }
 
+    /// <summary>立绘文本里不留空行：连续换行折成一个（\r\n 先当 \n）。</summary>
+    public static string CollapseBlankLines(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return content;
+        content = content.Replace("\r\n", "\n");
+        while (content.Contains("\n\n")) content = content.Replace("\n\n", "\n");
+        return content;
+    }
+
     public void SetLow(string content,Color col)
     {
         AimPos = transform.localPosition = new Vector3(0, YRange[0] - Yvalue);
-        text.text = content;
+        text.text = CollapseBlankLines(content);
         background.color = col;
         focus = true;
         Refresh();

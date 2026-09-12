@@ -11,9 +11,9 @@ GameObject:
   - component: {fileID: 93110425399469948}
   - component: {fileID: 4472403085510679214}
   - component: {fileID: 4899848302515844310}
-  - component: {fileID: 7693590995787239150}
+  - component: {fileID: 1713470826459836103}
   m_Layer: 0
-  m_Name: MonoSentence
+  m_Name: ShowTMP
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -36,7 +36,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 42, y: 20}
+  m_SizeDelta: {x: 20, y: 20}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!23 &4472403085510679214
 MeshRenderer:
@@ -58,7 +58,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 08ac1adc618d25449b0000e522b49046, type: 2}
+  - {fileID: 2100000, guid: 3f9d5c1ab84e4276b0e6a7c2d19f8350, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -78,7 +78,7 @@ MeshRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 5
+  m_SortingOrder: 10
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!114 &4899848302515844310
 MonoBehaviour:
@@ -103,9 +103,9 @@ MonoBehaviour:
   m_text: "\u4E0A\u4E0B\u7F29\u5927\u554A"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: e9393ad040c697e44a297e89c2cd5791, type: 2}
-  m_sharedMaterial: {fileID: 2100000, guid: 08ac1adc618d25449b0000e522b49046, type: 2}
+  m_sharedMaterial: {fileID: 2100000, guid: 3f9d5c1ab84e4276b0e6a7c2d19f8350, type: 2}
   m_fontSharedMaterials: []
-  m_fontMaterial: {fileID: 2100000, guid: 08ac1adc618d25449b0000e522b49046, type: 2}
+  m_fontMaterial: {fileID: 2100000, guid: 3f9d5c1ab84e4276b0e6a7c2d19f8350, type: 2}
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
@@ -127,10 +127,10 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 30
-  m_fontSizeBase: 30
+  m_fontSize: 32
+  m_fontSizeBase: 25
   m_fontWeight: 400
-  m_enableAutoSizing: 0
+  m_enableAutoSizing: 1
   m_fontSizeMin: 24
   m_fontSizeMax: 32
   m_fontStyle: 0
@@ -144,7 +144,7 @@ MonoBehaviour:
   m_lineSpacingMax: 0
   m_paragraphSpacing: 0
   m_charWidthMaxAdj: 0
-  m_TextWrappingMode: 1
+  m_TextWrappingMode: 3
   m_wordWrappingRatios: 0.4
   m_overflowMode: 0
   m_linkedTextComponent: {fileID: 0}
@@ -175,7 +175,7 @@ MonoBehaviour:
   m_hasFontAssetChanged: 0
   m_renderer: {fileID: 4472403085510679214}
   m_maskType: 0
---- !u!114 &7693590995787239150
+--- !u!114 &1713470826459836103
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -184,90 +184,39 @@ MonoBehaviour:
   m_GameObject: {fileID: 1804877961324344624}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9796ec81b26b84149a3fb281cd4c5985, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c4a91b2e6d54f0a8b3d2c5e9f1a6b74, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  charDuration: 0.5
-  charInterval: 0.1
-  positionCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 136
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    - serializedVersion: 3
-      time: 0.12805271
-      value: 0.37120956
-      inSlope: 2.2471526
-      outSlope: 2.2471526
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.08443281
-    - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 136
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
+  startScale: 0.15
+  scaleUpTime: 1
+  scaleOvershoot: 0.25
   scaleCurve:
     serializedVersion: 2
     m_Curve:
     - serializedVersion: 3
       time: 0
       value: 0
-      inSlope: 17.59179
-      outSlope: 17.59179
+      inSlope: 0
+      outSlope: 3
       tangentMode: 0
       weightedMode: 0
       inWeight: 0
-      outWeight: 0.018485924
-    - serializedVersion: 3
-      time: 0.6168182
-      value: 1.9056678
-      inSlope: -4.2542048
-      outSlope: -4.2542048
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.2765922
-    - serializedVersion: 3
-      time: 0.9387563
-      value: 1.0706267
-      inSlope: 6.4911895
-      outSlope: 6.4911895
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.21087198
-      outWeight: 0.19481975
+      outWeight: 0.33333334
     - serializedVersion: 3
       time: 1
       value: 1
-      inSlope: 7.584384
-      outSlope: 7.584384
+      inSlope: 0
+      outSlope: 0
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.15011907
+      inWeight: 0.33333334
       outWeight: 0
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
-  randomRotationMax: 360
-  fadable: 1
-  fallFadeTime: 0.4
-  charDisplayTime: 0.1
-  minDisplayTime: 3
-  speedMultiplier: 1
-  playOnEnable: 1
+  yTarget: 0
+  driftSpeed: 0.2
+  driftDelay: 0.1
+  holdTime: 3
+  fadeTime: 1
+  destroyOnFinish: 1

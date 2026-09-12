@@ -313,12 +313,12 @@ public class ReactionSystem : MonoBehaviour, Itool
         string aimText = aim != null ? $"，已朝向 {aim.pos}" : "";
         string result = $"已使用第 {args.index} 格道具：{prop.item}，数值 {prop.value.ToShortString()}{choiceText}{aimText}。";
 
-        // 玩家侧的具体行动描述：第几格、什么道具、多少数值、指定还是随机武器、瞄准谁。
+        // 玩家侧的具体行动描述：什么道具、多少数值、指定还是随机武器、瞄准谁。
         string actionChoice = anyChoice.HasValue
-            ? $"（触发 {anyChoice.Value}）"
-            : (prop.item == WeaponKind.任意 ? "（随机武器）" : "");
-        string actionAim = aim != null ? $" → 瞄准 {DescribeAimTarget(aim)}" : "";
-        string action = $"使用道具：第 {args.index} 格【{prop.item}】{prop.value.ToShortString()}{actionChoice}{actionAim}";
+            ? $"\n触发 {anyChoice.Value}"
+            : (prop.item == WeaponKind.任意 ? "\n随机武器" : "");
+        string actionAim = aim != null ? $"\n瞄准 {DescribeAimTarget(aim)}" : "";
+        string action = $"【{prop.item}】{prop.value.ToShortString()}{actionChoice}{actionAim}";
 
         return new ToolOutcome(result, action);
     }

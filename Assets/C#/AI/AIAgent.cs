@@ -106,11 +106,13 @@ public class AIAgent : MonoBehaviour
 
     /// <summary>
     /// 工具行动文案的出口。文案由 ReactionSystem 按调用参数拼好后传进来（ToolOutcome.action），
-    /// 目前只保留这个函数本身，不做任何显示：行动既不进中央发言列表，也不飘炮塔旁。
+    /// 交给对应炮塔用 ShowTMP 直接飘出来（缩放出现 → 漂向 y=0 → 淡出），不进中央发言列表。
     /// </summary>
     public static void ShowAction(int stage, string text)
     {
-        // 有意留空。以后要显示的时候在这里接出去。
+        if (string.IsNullOrWhiteSpace(text)) return;
+        if (Towel.AllTowel.TryGetValue(stage, out Towel towel) && towel != null)
+            towel.ShowTip(text);
     }
 
     /// <summary>

@@ -206,7 +206,7 @@ public class MarbleManager : MonoBehaviour
         else towel.ApplyShieldUpgrade();
 
         string label = choice == UpgradeChoice.Turret ? "炮塔升级" : "护盾升级";
-        towel.Say(label);
+        towel.ShowTip(label);
     }
 
     IEnumerator PlayLineToTarget(int stage, Vector3 target)

@@ -38,6 +38,8 @@ public class Towel : MonoBehaviour, IStageValue
     public Collider2D towelCollider;
     public Collider2D shieldCollider;
     public MessageDisplayer messageDisplayer;
+    /// <summary>ShowTMP 预制：直接显示的飘字（缩放出现 → 漂向 y=0 → 淡出）</summary>
+    public GameObject tipPrefab;
     public AimController aimController;
 
     [Header("炮塔升级")]
@@ -79,6 +81,8 @@ public class Towel : MonoBehaviour, IStageValue
         LookAt(Random.insideUnitCircle / 100f);
         ShotGun(1048576, 60, 1024);
 
+        Say("HelloWorld");
+
         //InformGeter初始化
         InformGetter.AddItem(stage, new ItemType(transform, "炮塔基地"));
         InformGetter.AddItem(stage, new ItemType(shield.transform, "基地护盾", shield.GetComponent<IStageValue>()));
@@ -118,6 +122,51 @@ public class Towel : MonoBehaviour, IStageValue
     }
 
     public bool Say(string content, bool force = false) => messageDisplayer.Say(content, force);
+
+    private TowelTip tip;
+    private Transform _tipPool;
+    private Transform tipPool
+    {
+        get
+        {
+            if (_tipPool == null)
+            {
+                GameObject pool = GameObject.FindGameObjectWithTag("TextPool");
+                if (pool != null) _tipPool = pool.transform;
+            }
+            return _tipPool;
+        }
+    }
+
+    /// <summary>
+    /// 直接显示一条飘字（ShowTMP）：从炮塔位置缩放出现，缓慢漂向 y=0，停留后淡出。
+    /// 同一座炮塔复用同一个实例，新文案直接顶掉上一条。没配 tipPrefab 时退回原来的逐字飘字。
+    /// </summary>
+    public void ShowTip(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return;
+
+        if (tipPrefab == null)
+        {
+            Say(content, true);
+            return;
+        }
+
+        if (tip == null)
+        {
+            Transform pool = tipPool;
+            GameObject go = pool != null ? Instantiate(tipPrefab, pool) : Instantiate(tipPrefab);
+            tip = go.GetComponent<TowelTip>();
+            if (tip == null)
+            {
+                Destroy(go);
+                return;
+            }
+        }
+
+        Color color = config != null ? config.GetColor(stage, MapConfig.ColorStage.Bright) : Color.white;
+        tip.Play(content, color, transform.position);
+    }
 
     /// <summary>选择 2：炮塔升级。后坐力带来的子弹显示半径与动量由开火参数处理；这里翻倍自动护卫的极限转速，常态转速不动。</summary>
     public void ApplyTurretUpgrade()
