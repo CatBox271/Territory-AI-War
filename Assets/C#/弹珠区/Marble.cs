@@ -67,7 +67,7 @@ public class Marble : MonoBehaviour
             col.a = sr.color.a;
             sr.color = col;
             col.a = 1;
-            EffectManager.Instance?.Boom(transform.position, col);
+            CrossEffectManager.Instance?.Boom(transform.position, col);
         }
         if (tr != null) ScheduleTrailSetup();
         if (tmp != null)

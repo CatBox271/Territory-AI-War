@@ -7,6 +7,7 @@ Shader "Custom/SimpleGrabPassBlur" {
         _MainTex ("Tint Color (RGB)", 2D) = "white" {}
         _BumpMap ("Normalmap", 2D) = "bump" {}
         _Size ("Size", Range(0, 20)) = 1
+        _Samples ("重影数量", Range(3, 33)) = 9
     }
 
     Category {
@@ -28,6 +29,7 @@ Shader "Custom/SimpleGrabPassBlur" {
                 CGPROGRAM
                 #pragma vertex vert
                 #pragma fragment frag
+                #pragma target 3.5
                 #pragma fragmentoption ARB_precision_hint_fastest
                 #include "UnityCG.cginc"
 
@@ -57,24 +59,31 @@ Shader "Custom/SimpleGrabPassBlur" {
                 sampler2D _GrabTexture;
                 float4 _GrabTexture_TexelSize;
                 float _Size;
+                float _Samples;
 
                 half4 frag( v2f i ) : COLOR {
 //                  half4 col = tex2Dproj( _GrabTexture, UNITY_PROJ_COORD(i.uvgrab));
 //                  return col;
 
-                    half4 sum = half4(0,0,0,0);
-                    #define GRABPIXEL(weight,kernelx) tex2Dproj( _GrabTexture, UNITY_PROJ_COORD(float4(i.uvgrab.x + _GrabTexture_TexelSize.x * kernelx*_Size, i.uvgrab.y, i.uvgrab.z, i.uvgrab.w))) * weight
-                    sum += GRABPIXEL(0.05, -4.0);
-                    sum += GRABPIXEL(0.09, -3.0);
-                    sum += GRABPIXEL(0.12, -2.0);
-                    sum += GRABPIXEL(0.15, -1.0);
-                    sum += GRABPIXEL(0.18,  0.0);
-                    sum += GRABPIXEL(0.15, +1.0);
-                    sum += GRABPIXEL(0.12, +2.0);
-                    sum += GRABPIXEL(0.09, +3.0);
-                    sum += GRABPIXEL(0.05, +4.0);
+                    // offset 为像素偏移；kernel 形状沿用原 9 点权重表，_Samples = 9 时逐点等价
+                    #define GRABPIXEL(wgt,off) tex2Dproj( _GrabTexture, UNITY_PROJ_COORD(float4(i.uvgrab.x + _GrabTexture_TexelSize.x * (off), i.uvgrab.y, i.uvgrab.z, i.uvgrab.w))) * (wgt)
+                    float size = max(_Size, 0.0001);
+                    float n = max(3.0, floor(_Samples + 0.5));
+                    float halfExtent = 4.0 * size;
+                    float stride = (2.0 * halfExtent) / (n - 1.0);
 
-                    return sum;
+                    half4 sum = half4(0,0,0,0);
+                    float wsum = 0.0;
+                    for (int k = 0; k < 33; k++) {
+                        if ((float)k >= n) break;
+                        float offset = -halfExtent + stride * (float)k;
+                        float d = abs(offset) / size;
+                        float w = 0.18 - 0.03 * min(d, 3.0) - 0.04 * max(d - 3.0, 0.0);
+                        sum += GRABPIXEL(w, offset);
+                        wsum += w;
+                    }
+
+                    return sum / wsum;
                 }
                 ENDCG
             }
@@ -88,6 +97,7 @@ Shader "Custom/SimpleGrabPassBlur" {
                 CGPROGRAM
                 #pragma vertex vert
                 #pragma fragment frag
+                #pragma target 3.5
                 #pragma fragmentoption ARB_precision_hint_fastest
                 #include "UnityCG.cginc"
 
@@ -117,26 +127,31 @@ Shader "Custom/SimpleGrabPassBlur" {
                 sampler2D _GrabTexture;
                 float4 _GrabTexture_TexelSize;
                 float _Size;
+                float _Samples;
 
                 half4 frag( v2f i ) : COLOR {
 //                  half4 col = tex2Dproj( _GrabTexture, UNITY_PROJ_COORD(i.uvgrab));
 //                  return col;
 
+                    // offset 为像素偏移；kernel 形状沿用原 9 点权重表，_Samples = 9 时逐点等价
+                    #define GRABPIXEL(wgt,off) tex2Dproj( _GrabTexture, UNITY_PROJ_COORD(float4(i.uvgrab.x, i.uvgrab.y + _GrabTexture_TexelSize.y * (off), i.uvgrab.z, i.uvgrab.w))) * (wgt)
+                    float size = max(_Size, 0.0001);
+                    float n = max(3.0, floor(_Samples + 0.5));
+                    float halfExtent = 4.0 * size;
+                    float stride = (2.0 * halfExtent) / (n - 1.0);
+
                     half4 sum = half4(0,0,0,0);
-                    #define GRABPIXEL(weight,kernely) tex2Dproj( _GrabTexture, UNITY_PROJ_COORD(float4(i.uvgrab.x, i.uvgrab.y + _GrabTexture_TexelSize.y * kernely*_Size, i.uvgrab.z, i.uvgrab.w))) * weight
-                    //G(X) = (1/(sqrt(2*PI*deviation*deviation))) * exp(-(x*x / (2*deviation*deviation)))
+                    float wsum = 0.0;
+                    for (int k = 0; k < 33; k++) {
+                        if ((float)k >= n) break;
+                        float offset = -halfExtent + stride * (float)k;
+                        float d = abs(offset) / size;
+                        float w = 0.18 - 0.03 * min(d, 3.0) - 0.04 * max(d - 3.0, 0.0);
+                        sum += GRABPIXEL(w, offset);
+                        wsum += w;
+                    }
 
-                    sum += GRABPIXEL(0.05, -4.0);
-                    sum += GRABPIXEL(0.09, -3.0);
-                    sum += GRABPIXEL(0.12, -2.0);
-                    sum += GRABPIXEL(0.15, -1.0);
-                    sum += GRABPIXEL(0.18,  0.0);
-                    sum += GRABPIXEL(0.15, +1.0);
-                    sum += GRABPIXEL(0.12, +2.0);
-                    sum += GRABPIXEL(0.09, +3.0);
-                    sum += GRABPIXEL(0.05, +4.0);
-
-                    return sum;
+                    return sum / wsum;
                 }
                 ENDCG
             }

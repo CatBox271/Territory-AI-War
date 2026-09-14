@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -132,6 +133,29 @@ public class ReactionSystem : MonoBehaviour, Itool
             type = "function",
             function = new Function
             {
+                name = MoveTurretToolName,
+                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。移动中可以再走一次预览+确认改道。移动不会让其他 AI 知道你的新位置——他们只能靠大球/子弹撞上你护盾或炮塔本体时的撞击情报来推断。",
+                parameters = new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    properties = new Dictionary<string, object>
+                    {
+                        { "angle", new { type = "number", description = "方向角度（度）：0=地图右(+X)，逆时针为正，90=上。与 dir_x/dir_y 二选一，第一次调用时必给一个。" } },
+                        { "dir_x", new { type = "number", description = "方向向量 x（必须与 dir_y 同时给，会自动归一化）。与 angle 二选一。" } },
+                        { "dir_y", new { type = "number", description = "方向向量 y（必须与 dir_x 同时给，会自动归一化）。与 angle 二选一。" } },
+                        { "distance", new { type = "number", description = "移动距离（世界单位，地图总宽10）。第一次调用必给；0=原地不动（停下）。" } },
+                        { "confirm", new { type = "boolean", description = "true = 执行上一次预览的移动。第二次调用只传这个，不要再传方向与距离。" } }
+                    },
+                    required = new List<string> { }
+                }
+            }
+        },
+        new Tool
+        {
+            type = "function",
+            function = new Function
+            {
                 name = WhisperToolName,
                   description = "给另一个AI发送悄悄话并等待对方回复。to=对方阵营编号(1-4，不能是自己)；content=悄悄话内容，请用对方的名字称呼对方（玩家名单见系统提示）。对方空闲时立即回复；对方忙碌时会等对方忙完再单独回复。每4回合只能使用一次。如果出现互相等待或环形等待，系统会自动调配，返回结果里会说明。",
                 parameters = new
@@ -165,7 +189,20 @@ public class ReactionSystem : MonoBehaviour, Itool
 
     private const string UsePropToolName = "use_prop";
     private const string ControlTurretToolName = "control_turret";
+    private const string MoveTurretToolName = "move_turret";
     private const string WhisperToolName = "whisper";
+
+    /// <summary>移动预览缓存：阵营 -> 上一次预览的方向与距离（4 个 AI 并行请求，不能共用一个字段）。</summary>
+    private static readonly Dictionary<int, MovePreview> pendingMoves = new();
+    /// <summary>预览有效期（秒）：过期后 confirm 会被拒绝，要求重新预览。</summary>
+    private const float MovePreviewValidSeconds = 60f;
+
+    private class MovePreview
+    {
+        public Vector2 dir;
+        public float distance;
+        public float time;
+    }
 
     [Tooltip("当前回合数，由 AIAgent 在每轮并行请求前写入，用于 whisper 每4回合冷却")]
     public int currentRound;
@@ -211,6 +248,10 @@ public class ReactionSystem : MonoBehaviour, Itool
         else if (call.function.name == ControlTurretToolName)
         {
             outcome = ControlTurret(call.function.arguments, callStage);
+        }
+        else if (call.function.name == MoveTurretToolName)
+        {
+            outcome = MoveTurret(call.function.arguments, callStage);
         }
         else if (call.function.name == WhisperToolName)
         {
@@ -403,6 +444,144 @@ public class ReactionSystem : MonoBehaviour, Itool
             $"炮塔持续瞄准 {DescribeAimTarget(aim)}");
     }
 
+    /// <summary>
+    /// 把“方向+距离”换算成移动预览：归一化方向、按最大移动距离夹距离、算目标点与警告。
+    /// 纯计算，不碰任何游戏对象，便于单独验证。
+    /// </summary>
+    public static bool ResolveMovePreview(Vector2 selfPos, Vector2 dir, float distance, float maxMoveDistance, float moveBound,
+        out Vector2 target, out float travelDistance, out string warning, out string error)
+    {
+        target = selfPos;
+        travelDistance = 0f;
+        warning = "";
+        error = "";
+
+        if (dir.sqrMagnitude < 0.0000001f)
+        {
+            error = "移动炮塔失败：方向无效（向量的长度不能为 0）。";
+            return false;
+        }
+        if (float.IsNaN(distance) || float.IsInfinity(distance) || distance < 0f)
+        {
+            error = "移动炮塔失败：distance 必须是 >= 0 的数字。";
+            return false;
+        }
+
+        Vector2 n = dir.normalized;
+        travelDistance = Mathf.Clamp(distance, 0f, Mathf.Max(0f, maxMoveDistance));
+        target = selfPos + n * travelDistance;
+
+        if (distance > maxMoveDistance + 0.0001f)
+            warning = "距离超出当前最大移动距离 " + maxMoveDistance.ToString("0.00") + "，实际只会移动 " + travelDistance.ToString("0.00") + "。";
+
+        if (Mathf.Abs(target.x) > moveBound + 0.0001f || Mathf.Abs(target.y) > moveBound + 0.0001f)
+        {
+            if (warning.Length > 0) warning += " ";
+            warning += "目标点 (" + target.x.ToString("0.00") + ", " + target.y.ToString("0.00")
+                + ") 超出可移动范围（|x|,|y| ≤ " + moveBound.ToString("0.00")
+                + "）：实际移动会在碰到地图边界时撞墙停下，走不到这个点。";
+        }
+
+        return true;
+    }
+
+    /// <summary>移动自己的炮塔：第一次只预览（不移动），第二次 confirm=true 才执行。</summary>
+    private ToolOutcome MoveTurret(string argumentsJson, int callStage)
+    {
+        if (!TryParseMoveTurretArguments(argumentsJson, out MoveTurretArguments args))
+            return new ToolOutcome("移动炮塔失败：参数无法解析，需要方向（angle 或 dir_x+dir_y）与 distance，或 confirm=true。");
+
+        if (!Towel.AllTowel.TryGetValue(callStage, out Towel towel) || towel == null)
+            return new ToolOutcome($"移动炮塔失败：找不到 {callStage} 号阵营的炮塔。");
+        if (towel.isDead)
+            return new ToolOutcome("移动炮塔失败：炮塔已阵亡。");
+
+        // 第二步：确认执行（不再需要方向与距离）
+        if (args.confirm == true)
+        {
+            if (!pendingMoves.TryGetValue(callStage, out MovePreview preview) || preview == null
+                || Time.time - preview.time > MovePreviewValidSeconds)
+            {
+                pendingMoves.Remove(callStage);
+                return new ToolOutcome("移动炮塔失败：没有待确认的移动预览（或者已超过 60 秒过期）。请先给方向和距离做一次预览，再传 confirm=true。");
+            }
+
+            pendingMoves.Remove(callStage);
+            Vector2 from = towel.transform.position;
+            towel.StartMove(preview.dir, preview.distance);
+            float eta = preview.distance / Mathf.Max(towel.moveSpeed, 0.0001f);
+            string dirText = InformGetter.CardinalDirection(preview.dir);
+            return new ToolOutcome(
+                "已开始移动：" + towel.MoveStateText + "（从 (" + from.x.ToString("0.00") + ", " + from.y.ToString("0.00")
+                + ") 朝 " + dirText + " 移动 " + preview.distance.ToString("0.00") + "，预计 " + eta.ToString("0.0")
+                + " 秒；到达、撞到地图边界或超时会通知你）。",
+                $"【移动炮塔】朝 {dirText} 移动 {preview.distance.ToString("0.00")}");
+        }
+
+        // 第一步：只预览，绝不移动
+        Vector2 dir;
+        if (args.dir_x.HasValue || args.dir_y.HasValue)
+        {
+            if (!args.dir_x.HasValue || !args.dir_y.HasValue)
+                return new ToolOutcome("移动炮塔失败：dir_x 和 dir_y 必须同时提供（或者改用 angle）。");
+            dir = new Vector2((float)args.dir_x.Value, (float)args.dir_y.Value);
+        }
+        else if (args.angle.HasValue)
+        {
+            float rad = (float)args.angle.Value * Mathf.Deg2Rad;
+            dir = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
+        }
+        else
+        {
+            return new ToolOutcome("移动炮塔失败：请给出方向——angle（角度，0=地图右、逆时针为正）或 dir_x+dir_y（向量）。");
+        }
+
+        if (!args.distance.HasValue)
+            return new ToolOutcome("移动炮塔失败：请给出 distance（移动距离，世界单位）。");
+
+        Vector2 selfPos = towel.transform.position;
+        if (!ResolveMovePreview(selfPos, dir, (float)args.distance.Value, towel.MaxMoveDistance, towel.MoveBound,
+                out Vector2 target, out float travel, out string warning, out string error))
+            return new ToolOutcome(error);
+
+        pendingMoves[callStage] = new MovePreview { dir = dir.normalized, distance = travel, time = Time.time };
+
+        Vector2 nd = dir.normalized;
+        float angleDeg = Mathf.Repeat(Vector2.SignedAngle(Vector2.right, nd), 360f);
+        float etaPreview = travel / Mathf.Max(towel.moveSpeed, 0.0001f);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("移动预览（尚未移动）：");
+        sb.AppendLine("  当前位置 (" + selfPos.x.ToString("0.00") + ", " + selfPos.y.ToString("0.00") + ")");
+        sb.AppendLine("  方向 " + angleDeg.ToString("0") + "°（" + InformGetter.CardinalDirection(nd) + "），要求距离 "
+            + ((float)args.distance.Value).ToString("0.00") + "，实际移动 " + travel.ToString("0.00"));
+        sb.AppendLine("  目标点 (" + target.x.ToString("0.00") + ", " + target.y.ToString("0.00") + ")，预计 "
+            + etaPreview.ToString("0.0") + " 秒（速度 " + towel.moveSpeed.ToString("0.00") + "/秒）");
+        sb.AppendLine("  你的最大移动距离 " + towel.MaxMoveDistance.ToString("0.00") + "，可移动范围 x,y ∈ [-"
+            + towel.MoveBound.ToString("0.00") + ", " + towel.MoveBound.ToString("0.00") + "]");
+        if (!string.IsNullOrEmpty(warning)) sb.AppendLine("  ⚠ " + warning);
+        sb.Append("如需执行，请再调用一次 move_turret 并传 confirm=true（不要再传方向与距离）。");
+
+        // 预览不算一次实际动作，不飘字。
+        return new ToolOutcome(sb.ToString());
+    }
+
+    private static bool TryParseMoveTurretArguments(string argumentsJson, out MoveTurretArguments args)
+    {
+        args = null;
+        if (string.IsNullOrWhiteSpace(argumentsJson)) return false;
+
+        try
+        {
+            args = JsonConvert.DeserializeObject<MoveTurretArguments>(argumentsJson);
+            return args != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>AI 间悄悄话：交给 WhisperManager 调度，等对方回复后作为 tool result 返回。</summary>
     private async Task<ToolOutcome> Whisper(string argumentsJson, int callStage)
     {
@@ -534,6 +713,16 @@ public class ReactionSystem : MonoBehaviour, Itool
         public string target_guid = "";
         public double? aim_x = null;
         public double? aim_y = null;
+    }
+
+    [System.Serializable]
+    private class MoveTurretArguments
+    {
+        public double? angle = null;
+        public double? dir_x = null;
+        public double? dir_y = null;
+        public double? distance = null;
+        public bool? confirm = null;
     }
 
     [System.Serializable]

@@ -189,6 +189,7 @@ public class BallPainter : MonoBehaviour, IStageValue
             HugeInt max = (value > sv.value ? value : sv.value).Multiply(config.bounceRate);//mutiple
             //确保不会出现贷款
             max = (max > value) ? value : max;
+            HugeInt shieldBefore = sv.value;
             HugeInt cost = sv.Hit(stage, max, guid, $"{stage}号阵营大球");
             if (cost > 0)
             {
@@ -196,6 +197,19 @@ public class BallPainter : MonoBehaviour, IStageValue
                 string otherGuid = sv is BallPainter bp ? bp.guid : "";
                 string otherDesc = sv is BallPainter ? $"{sv.stage}号阵营大球" : $"{sv.stage}号阵营实体";
                 ((IStageValue)this).Hit(sv.stage, cost, otherGuid, otherDesc);
+
+                // 撞击情报：撞到敌方护盾/炮塔本体时，只告诉撞人的一方（撞的是谁、撞击点、护盾前后大小）
+                bool isShield = sv is ShieldEffect;
+                if (isShield || sv is Towel)
+                {
+                    Vector2 point = collision.contactCount > 0 ? collision.GetContact(0).point : (Vector2)transform.position;
+                    InformGetter.AddImpact(stage, sv.stage,
+                        isShield ? InformGetter.ImpactKindShield : InformGetter.ImpactKindTurret,
+                        point,
+                        isShield ? shieldBefore : new HugeInt(0),
+                        isShield ? sv.value : new HugeInt(0),
+                        InformGetter.ImpactSourceBall);
+                }
             }
         }
         if (value == 0) Die();
@@ -203,7 +217,7 @@ public class BallPainter : MonoBehaviour, IStageValue
 
     void SpawnHitCrossEffect(HugeInt hitValue, Collision2D collision)
     {
-        EffectManager em = EffectManager.Instance;
+        CrossEffectManager em = CrossEffectManager.Instance;
         if (em == null || em.CE == null || hitValue <= 0) return;
 
         Vector2 point = collision.contactCount > 0 ? collision.GetContact(0).point : transform.position;

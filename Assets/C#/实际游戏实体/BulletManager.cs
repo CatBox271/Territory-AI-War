@@ -168,6 +168,9 @@ public class BulletManager : MonoBehaviour
         float dt = Time.deltaTime;
         var config = MapConfig.Instance;
 
+        // 炮塔会移动：有塔在移动时每帧同步已缓存的炮塔/护盾圆心（不受 30 帧重建节奏影响）
+        SyncCachedTowelsIfMoving();
+
         if (gatherTimer >= GATHER_INTERVAL) { gatherTimer = 0; RefreshColliders(); }
         else
         {
@@ -459,6 +462,45 @@ public class BulletManager : MonoBehaviour
         }
     }
 
+    /// <summary>炮塔移动期间每帧同步已缓存的炮塔/护盾圆心与护盾半径/数值；没塔移动时不做任何事。</summary>
+    void SyncCachedTowelsIfMoving()
+    {
+        bool anyMoving = false;
+        for (int i = 0; i < towelBodyCount; i++)
+        {
+            var t = cachedTowelsAll[i];
+            if (t != null && t.IsMoving) { anyMoving = true; break; }
+        }
+        if (!anyMoving)
+        {
+            for (int i = 0; i < shieldCount; i++)
+            {
+                var t = cachedTowels[i];
+                if (t != null && t.IsMoving) { anyMoving = true; break; }
+            }
+        }
+        if (!anyMoving) return;
+
+        for (int i = 0; i < towelBodyCount; i++)
+        {
+            var t = cachedTowelsAll[i];
+            if (t == null) continue;
+            var c = towelBodyColliders[i];
+            c.position = new float2(t.transform.position.x, t.transform.position.y);
+            towelBodyColliders[i] = c;
+        }
+        for (int i = 0; i < shieldCount; i++)
+        {
+            var t = cachedTowels[i];
+            if (t == null) continue;
+            var c = shieldColliders[i];
+            c.position = new float2(t.transform.position.x, t.transform.position.y);
+            c.radius = t.shield != null ? t.shield.transform.lossyScale.x : c.radius;
+            c.value = t.shield_value > int.MaxValue ? int.MaxValue : (int)((HugeInt)t.shield_value).ToLong();
+            shieldColliders[i] = c;
+        }
+    }
+
     /// <summary>球体列表每30帧重建一次；两次重建之间每帧同步大球当前位置，避免子弹视觉上还没碰到球就命中。</summary>
     void UpdateCachedBallColliders()
     {
@@ -517,7 +559,11 @@ public class BulletManager : MonoBehaviour
                 if (t == null || t.shieldSV == null) continue;
                 if (!hit.sameTeam)
                 {
+                    HugeInt shieldBefore = t.shield_value;
                     var cost = t.shieldSV.Hit(bullets[hit.bulletIndex].stage, new HugeInt(hit.value), "", $"{bullets[hit.bulletIndex].stage}号阵营子弹");
+                    // 撞击情报：只告诉打出一方（撞的是谁、撞击点、护盾前后大小）
+                    InformGetter.AddImpact(bullets[hit.bulletIndex].stage, t.stage, InformGetter.ImpactKindShield,
+                        new Vector2(hit.hitPosition.x, hit.hitPosition.y), shieldBefore, t.shield_value, InformGetter.ImpactSourceBullet);
                     if (t.shield_value <= 0) t.OnShieldBroken(); // 同帧开启无敌，避免脚本执行顺序差一帧被后续子弹穿死
                     var bi = bullets[hit.bulletIndex];
                     bi.value -= (int)((HugeInt)cost).ToLong();
@@ -529,6 +575,9 @@ public class BulletManager : MonoBehaviour
             {
                 var t = cachedTowelsAll[hit.targetIndex];
                 if (t == null) continue;
+                // 撞击情报：打中炮塔本体（此时已无护盾）
+                InformGetter.AddImpact(bullets[hit.bulletIndex].stage, t.stage, InformGetter.ImpactKindTurret,
+                    new Vector2(hit.hitPosition.x, hit.hitPosition.y), new HugeInt(0), new HugeInt(0), InformGetter.ImpactSourceBullet);
                 t.Die(bullets[hit.bulletIndex].stage, "子弹");
             }
         }
@@ -566,7 +615,7 @@ public class BulletManager : MonoBehaviour
     /// <summary>大球被子弹命中时，在接触点朝法线30随机方向生成 CrossEffect，数量按子弹数值0~512映射1~10。</summary>
     void SpawnBallHitEffect(BulletHit hit)
     {
-        EffectManager em = EffectManager.Instance;
+        CrossEffectManager em = CrossEffectManager.Instance;
         if (em == null || em.CE == null) return;
 
         int bulletStage = bullets[hit.bulletIndex].stage;

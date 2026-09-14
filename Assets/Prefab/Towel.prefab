@@ -313,6 +313,16 @@ MonoBehaviour:
   shieldBreakInvincibleTime: 2
   upgradedBulletRadiusScale: 1.2
   upgradedBulletImpactScale: 1.6
+  invincibleBlink: 1
+  invincibleBlinkSpeed: 3
+  invincibleBlinkPeak: 1
+  invincibleBlinkDuty: 0.5
+  invincibleBlinkSoftness: 0.15
+  invincibleBlinkPhase: 0
+  invincibleBlinkRandomPhase: 0
+  moveSpeed: 0.25
+  moveRangeBase: 2
+  moveRangePerLevel: 2
   tipStackGap: 0.25
   tipFallbackHeight: 0.6
   isDead: 0
@@ -400,6 +410,7 @@ GameObject:
   - component: {fileID: 480754872830793386}
   - component: {fileID: 4491979993208232202}
   - component: {fileID: 1050513759888372499}
+  - component: {fileID: 5851494967785416457}
   m_Layer: 0
   m_Name: Shield
   m_TagString: Shield
@@ -482,10 +493,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7c21c486afcd02d4f9bf32f2c868311e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sp: {fileID: 2351046282652987540}
-  originColor: {r: 0, g: 0, b: 0, a: 0}
+  flash: {fileID: 0}
+--- !u!114 &5851494967785416457
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2721065759024970260}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb6ee182d4c75ba458769f6d060d248c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  sp: {fileID: 0}
   intensityPerHit: 0.4
-  decayDuration: 1
+  decayDuration: 3
 --- !u!1 &4338203946166271588
 GameObject:
   m_ObjectHideFlags: 0

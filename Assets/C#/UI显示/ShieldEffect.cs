@@ -9,41 +9,14 @@ public class ShieldEffect : MonoBehaviour, IStageValue
     public string hurtSourceDesc { get; set; }
     public HugeInt value { get; set; }
 
-    public  SpriteRenderer sp;
-    public Color originColor;
-
-    [Range(0, 1)] public float intensityPerHit = 0.4f;
-    public float decayDuration = 3f;
-    private float flashIntensity;
-    private Coroutine flashCoroutine;
+    public FlashEffect flash;
 
     private void Awake()
     {
-        if (sp == null)
-        {
-            sp = GetComponent<SpriteRenderer>();
-
-        }
-        if(sp != null) originColor = sp.color;
+        TryGetComponent(out flash);
     }
-
     public void WhileBeHit(int _stage, HugeInt _value)
     {
-        flashIntensity = Mathf.Min(1, flashIntensity + intensityPerHit);
-        if (flashCoroutine == null)
-            flashCoroutine = StartCoroutine(FlashWhite());
-    }
-
-    private IEnumerator FlashWhite()
-    {
-        while (flashIntensity > 0.001f)
-        {
-            flashIntensity = Mathf.Max(0, flashIntensity - Time.deltaTime / decayDuration);
-            sp.color = Color.Lerp(originColor, Color.white, flashIntensity);
-            yield return null;
-        }
-        flashIntensity = 0;
-        sp.color = originColor;
-        flashCoroutine = null;
+        flash?.WhileBeHit();
     }
 }

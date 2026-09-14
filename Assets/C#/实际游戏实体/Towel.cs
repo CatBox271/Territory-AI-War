@@ -112,6 +112,82 @@ public class Towel : MonoBehaviour, IStageValue
     /// <summary>每级炮塔升级让极限转速再翻一倍。</summary>
     public float CurrentGuardSpeedScale => Mathf.Pow(2f, Mathf.Max(0, turretUpgraded));
 
+    #region 炮塔移动
+
+    [Header("炮塔移动")]
+    /// <summary>移动速度（世界单位/秒）。</summary>
+    public float moveSpeed = 1f;
+    /// <summary>0 级时的最大移动距离（世界单位）；每级炮塔强化再叠加 moveRangePerLevel。</summary>
+    public float moveRangeBase = 2f;
+    /// <summary>每级炮塔强化增加的最大移动距离。</summary>
+    public float moveRangePerLevel = 2f;
+
+    /// <summary>当前最大移动距离：基础值 + 每级炮塔强化叠加。</summary>
+    public float MaxMoveDistance => moveRangeBase + moveRangePerLevel * Mathf.Max(0, turretUpgraded);
+
+    /// <summary>当前最大移动时间：由最大移动距离和移动速度推出，不单独配置（走完上限距离刚好用完）。</summary>
+    public float MaxMoveTime => MaxMoveDistance / Mathf.Max(moveSpeed, 0.0001f);
+
+    /// <summary>可移动范围：炮塔中心坐标绝对值上限 = 地图半边 − 基地半径。</summary>
+    public float MoveBound => config != null ? Mathf.Max(0f, config.worldSize * 0.5f - Radius) : 4f;
+
+    private bool moving;
+    private Vector2 moveTarget;
+    private float moveStartTime;
+
+    public bool IsMoving => moving;
+
+    /// <summary>移动状态的人类可读写法（进 AI 情报）：剩余秒数按“到目标点的剩余距离/速度”算，即真实到达时间。</summary>
+    public string MoveStateText
+    {
+        get
+        {
+            if (!moving) return "静止";
+            float left = Vector2.Distance(transform.position, moveTarget) / Mathf.Max(moveSpeed, 0.0001f);
+            return "正在向 (" + moveTarget.x.ToString("0.00") + ", " + moveTarget.y.ToString("0.00") + ") 移动，剩余 " + left.ToString("0.0") + " 秒";
+        }
+    }
+
+    /// <summary>开始朝 dir 方向移动；距离按当前最大移动距离夹过（超出部分走不到）。distance=0 等于立即停下。</summary>
+    public void StartMove(Vector2 dir, float distance)
+    {
+        if (isDead) return;
+        if (dir.sqrMagnitude < 0.0000001f) { StopMove("方向无效，未移动"); return; }
+
+        dir = dir.normalized;
+        float d = Mathf.Clamp(distance, 0f, MaxMoveDistance);
+        moveTarget = (Vector2)transform.position + dir * d;
+        moveStartTime = Time.time;
+        moving = true;
+
+        if (d <= 0f) StopMove("已抵达目标(原地不动)");
+    }
+
+    /// <summary>停止移动；reason 非空时记一条一次性提示给 AI。</summary>
+    public void StopMove(string reason = null)
+    {
+        moving = false;
+        if (!string.IsNullOrEmpty(reason)) InformGetter.NotifyTurretMoveDone(stage, reason);
+    }
+
+    /// <summary>每帧推进移动：朝目标走并夹在地图可移动范围内；到达/撞墙/超时都停下并通知 AI。</summary>
+    private void UpdateMove()
+    {
+        if (!moving) return;
+
+        Vector2 next = Vector2.MoveTowards(transform.position, moveTarget, moveSpeed * Time.deltaTime);
+        float b = MoveBound;
+        Vector2 clamped = new Vector2(Mathf.Clamp(next.x, -b, b), Mathf.Clamp(next.y, -b, b));
+        bool hitWall = (clamped - next).sqrMagnitude > 0.0000001f;
+        transform.position = new Vector3(clamped.x, clamped.y, transform.position.z);
+
+        if ((clamped - moveTarget).sqrMagnitude <= 0.000001f) { StopMove("已抵达目标"); return; }
+        if (hitWall) { StopMove("撞到地图边界，已停下"); return; }
+        if (Time.time - moveStartTime >= MaxMoveTime) StopMove("移动超时中断");
+    }
+
+    #endregion
+
     void Awake()
     {
         value = _value;
@@ -140,9 +216,9 @@ public class Towel : MonoBehaviour, IStageValue
 
         Say("HelloWorld");
 
-        //InformGeter初始化
-        InformGetter.AddItem(stage, new ItemType(transform, "炮塔基地"));
-        InformGetter.AddItem(stage, new ItemType(shield.transform, "基地护盾", shield.GetComponent<IStageValue>()));
+        //InformGeter初始化：只登记开局位置（之后不再更新）
+        //炮塔与护盾不再进全局场上信息：敌方炮塔会移动，其位置只能靠撞击情报反推。
+        InformGetter.RegisterInitialPosition(stage, transform.position);
     }
 
     void Update()
@@ -177,6 +253,7 @@ public class Towel : MonoBehaviour, IStageValue
 
         ShieldTransform();
         ShotGunTest();
+        UpdateMove();
     }
 
     public bool Say(string content, bool force = false) => messageDisplayer.Say(content, force);
@@ -480,8 +557,6 @@ public class Towel : MonoBehaviour, IStageValue
             if (!shield.activeSelf)
             {
                 shield.SetActive(true);
-                var s = shield.GetComponent<ShieldEffect>();
-                s.sp.color = s.originColor;
             }
                 shield.transform.localScale = Vector3.one * shieldRadius.Evaluate(shield_value);
 

@@ -7,7 +7,7 @@ public class UIMessageBar : MonoBehaviour
 {
     public SpriteRenderer background;
     public TextMeshPro text;
-    public FlashEffect effect;
+    public MaterialSwitcher effect;
 
     public bool focus = false;
 

@@ -86,14 +86,21 @@ public struct BulletShieldCollisionJob : IJobParallelFor
         for (int i = 0; i < shieldCount; i++)
         {
             var shield = shields[i];
-            if (math.distancesq(b.position, shield.position) >= shield.radius * shield.radius) continue;
+            float sqrDist = math.distancesq(b.position, shield.position);
+            if (sqrDist >= shield.radius * shield.radius) continue;
             if (b.stage == shield.stage) return; // 同队穿过
+
+            float2 delta = b.position - shield.position;
+            float dist = math.sqrt(sqrDist);
+            float2 normal = dist > 0.0001f ? delta / dist : math.normalizesafe(b.velocity);
 
             hitWriter.AddNoResize(new BulletHit
             {
                 targetType = 1, targetIndex = i, bulletIndex = index,
                 sameTeam = false, value = b.value,
-                attackPower = b.attackPower, bulletVelocity = b.velocity
+                attackPower = b.attackPower, bulletVelocity = b.velocity,
+                // 首次接触点：从子弹当前位置沿法线推到护盾表面（子弹已在圆内，dist ≤ radius）
+                hitPosition = b.position + normal * (shield.radius - dist), hitNormal = normal
             });
 
             if (b.value <= shield.value)
@@ -121,14 +128,21 @@ public struct BulletTowelCollisionJob : IJobParallelFor
         for (int i = 0; i < towelCount; i++)
         {
             var body = towelBodies[i];
-            if (math.distancesq(b.position, body.position) >= body.radius * body.radius) continue;
+            float sqrDist = math.distancesq(b.position, body.position);
+            if (sqrDist >= body.radius * body.radius) continue;
             if (b.stage == body.stage || body.invincible != 0) return; // 无敌时间内无视敌方子弹
+
+            float2 delta = b.position - body.position;
+            float dist = math.sqrt(sqrDist);
+            float2 normal = dist > 0.0001f ? delta / dist : math.normalizesafe(b.velocity);
 
             hitWriter.AddNoResize(new BulletHit
             {
                 targetType = 2, targetIndex = i, bulletIndex = index,
                 sameTeam = false, value = b.value,
-                attackPower = b.attackPower, bulletVelocity = b.velocity
+                attackPower = b.attackPower, bulletVelocity = b.velocity,
+                // 首次接触点：从子弹当前位置沿法线推到炮塔本体表面
+                hitPosition = b.position + normal * (body.radius - dist), hitNormal = normal
             });
 
             var d = b; d.alive = 0; d.value = 0; bullets[index] = d;

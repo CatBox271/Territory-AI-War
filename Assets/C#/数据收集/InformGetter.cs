@@ -26,6 +26,20 @@ public class InformGetter : MonoBehaviour
     // 炮塔控制自动断开提示：阵营 -> 断开原因。GetInfo 输出一次后清除。
     public static Dictionary<int, string> TurretControlLostReason = new();
 
+    // 炮塔初始位置：阵营 -> 开局世界坐标。开局注册一次，之后永不变化（AI 只知道开局坐标）。
+    public static Dictionary<int, Vector2> InitialTurretPositions = new();
+
+    // 撞击情报：攻击方阵营 -> 本轮新增的撞击记录。阵营私有，只发给造成撞击的一方，GetInfo 输出后清空。
+    public static Dictionary<int, List<ImpactInfo>> ImpactStats = new();
+
+    // 炮塔移动结束/中断提示：阵营 -> 原因。GetInfo 输出一次后清除。
+    public static Dictionary<int, string> TurretMoveNotice = new();
+
+    public const string ImpactKindShield = "护盾";
+    public const string ImpactKindTurret = "炮塔本体";
+    public const string ImpactSourceBall = "大球";
+    public const string ImpactSourceBullet = "子弹";
+
     // 每个 AI 最近的公开 content（AIAgent.ReceiveResponse 写入），附加到全局信息里给所有 AI 看。
     public static Dictionary<int, string> AIContents = new();
 
@@ -95,8 +109,11 @@ public class InformGetter : MonoBehaviour
         //自己的道具栈放最前面，AI 第一眼就能看到
         GetInfoProp(builder, stage);
         AppendTurretControlNotice(builder, stage);
+        AppendTurretMoveNotice(builder, stage);
+        AppendTurretPositions(builder, stage);
         AppendNearestEnemyTerritory(builder, stage);
         TurretControlLostReason.Remove(stage);
+        TurretMoveNotice.Remove(stage);
 
         //全局可见信息
         foreach (var key in Oitems.Keys)
@@ -115,6 +132,7 @@ public class InformGetter : MonoBehaviour
         AppendUpgradeProgress(builder, stage);
         AppendTerritoryArea(builder);
         AppendDamageInfo(builder, stage);
+        AppendImpactInfo(builder, stage);
         if (clearDamage) ClearDamageStats();
         builder.AppendLine(); builder.AppendLine(IntelInfoEnd);
     }
@@ -224,6 +242,103 @@ public class InformGetter : MonoBehaviour
         }
         builder.AppendLine(); builder.Append("}");
     }
+
+    #region 炮塔位置与撞击情报
+    /// <summary>注册炮塔初始位置（开局调用一次；此后再不更新，AI 只知道开局坐标）。</summary>
+    public static void RegisterInitialPosition(int stage, Vector2 pos) => InitialTurretPositions[stage] = pos;
+
+    /// <summary>记录一次撞击情报，只发给造成撞击的一方（攻击方）。targetKind 用 ImpactKindShield / ImpactKindTurret。</summary>
+    public static void AddImpact(int attackerStage, int targetStage, string targetKind, Vector2 point,
+        HugeInt shieldBefore, HugeInt shieldAfter, string sourceKind)
+    {
+        if (attackerStage <= 0 || targetStage <= 0 || attackerStage == targetStage) return;
+        if (!ImpactStats.TryGetValue(attackerStage, out List<ImpactInfo> list))
+        {
+            list = new List<ImpactInfo>();
+            ImpactStats[attackerStage] = list;
+        }
+        list.Add(new ImpactInfo
+        {
+            targetStage = targetStage,
+            targetKind = targetKind,
+            point = point,
+            shieldBefore = shieldBefore,
+            shieldAfter = shieldAfter,
+            sourceKind = sourceKind
+        });
+    }
+
+    public static void ClearImpactStats() => ImpactStats.Clear();
+
+    /// <summary>炮塔移动结束/中断提示（抵达、撞墙、超时），GetInfo 输出一次后清除。</summary>
+    public static void NotifyTurretMoveDone(int stage, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return;
+        TurretMoveNotice[stage] = reason;
+    }
+
+    private static void AppendTurretMoveNotice(StringBuilder builder, int stage)
+    {
+        if (!TurretMoveNotice.TryGetValue(stage, out string reason) || string.IsNullOrWhiteSpace(reason)) return;
+        builder.AppendLine(); builder.AppendLine($"炮塔移动已结束：{reason}。");
+    }
+
+    /// <summary>炮塔位置情报：全体炮塔的初始位置（固定不变）+ 自己炮塔的当前位置/移动状态/最大移动距离。</summary>
+    private static void AppendTurretPositions(StringBuilder builder, int stage)
+    {
+        if (InitialTurretPositions.Count == 0) return;
+
+        builder.AppendLine(); builder.AppendLine("各炮塔初始位置(开局坐标，之后不会再更新):");
+        var keys = new List<int>(InitialTurretPositions.Keys);
+        keys.Sort();
+        foreach (int s in keys)
+        {
+            Vector2 p = InitialTurretPositions[s];
+            builder.AppendLine($"  [{s}]号阵营({AIAgent.GetStageName(s)}): ({p.x.ToString("0.00")}, {p.y.ToString("0.00")})");
+        }
+
+        if (Towel.AllTowel.TryGetValue(stage, out Towel self) && self != null)
+        {
+            Vector2 p = self.transform.position;
+            builder.Append("你的炮塔: 当前位置 (");
+            builder.Append(p.x.ToString("0.00")); builder.Append(", "); builder.Append(p.y.ToString("0.00"));
+            builder.Append(")，最大移动距离 "); builder.Append(self.MaxMoveDistance.ToString("0.00"));
+            builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
+            builder.Append(", "); builder.Append(self.MoveBound.ToString("0.00"));
+            builder.Append("]，状态: "); builder.Append(self.MoveStateText);
+            builder.AppendLine();
+        }
+        builder.AppendLine("(只有自己的位置是实时的。敌方炮塔会移动，他们的位置只能靠撞击情报反推。)");
+    }
+
+    /// <summary>撞击情报：只输出请求方自己造成的撞击（撞的是谁、撞击点、护盾前后大小）。</summary>
+    private static void AppendImpactInfo(StringBuilder builder, int stage)
+    {
+        if (!ImpactStats.TryGetValue(stage, out List<ImpactInfo> list) || list.Count == 0) return;
+
+        builder.AppendLine(); builder.AppendLine("撞击情报(你自己打出去的撞击，只有你能看到这些):");
+        foreach (ImpactInfo e in list)
+        {
+            builder.AppendLine();
+            builder.Append("  你的"); builder.Append(e.sourceKind);
+            builder.Append("撞上 "); builder.Append(e.targetStage);
+            builder.Append("号阵营("); builder.Append(AIAgent.GetStageName(e.targetStage));
+            builder.Append(") 的"); builder.Append(e.targetKind);
+            builder.Append("：撞击点 ("); builder.Append(e.point.x.ToString("0.00"));
+            builder.Append(", "); builder.Append(e.point.y.ToString("0.00")); builder.Append(")");
+            if (e.targetKind == ImpactKindShield)
+            {
+                builder.Append("，护盾 撞击前 "); builder.Append(e.shieldBefore.ToShortString());
+                builder.Append("、撞击后 "); builder.Append(e.shieldAfter.ToShortString());
+            }
+            else
+            {
+                builder.Append("，对方没有护盾");
+            }
+        }
+        builder.AppendLine();
+    }
+    #endregion
 
     #region 终局提示
     public const string FinalRoundHint = "【终局提示】就一回合：场上只剩你一个阵营了，先把还在飞的敌方大球清掉，别在最后被反杀。";
@@ -420,7 +535,7 @@ public class InformGetter : MonoBehaviour
         builder.Append("}");
     }
 
-    private static string CardinalDirection(Vector2 dir)
+    public static string CardinalDirection(Vector2 dir)
     {
         float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
         if (angle >= -22.5f && angle < 22.5f) return "右";
@@ -516,6 +631,9 @@ public class InformGetter : MonoBehaviour
         GuidToTransform = new();
         DamageStats = new();
         TurretControlLostReason = new();
+        InitialTurretPositions = new();
+        ImpactStats = new();
+        TurretMoveNotice = new();
     }
 }
 
@@ -526,6 +644,17 @@ public class DamageSourceInfo
     public string sourceGuid = "";
     public string sourceDesc = "";
     public HugeInt damage = 0;
+}
+
+/// <summary>一次撞击情报：谁撞了谁、撞击点坐标、护盾撞击前后大小。只发给撞击方。</summary>
+public class ImpactInfo
+{
+    public int targetStage;
+    public string targetKind = "";
+    public Vector2 point;
+    public HugeInt shieldBefore = 0;
+    public HugeInt shieldAfter = 0;
+    public string sourceKind = "";
 }
 
 //接下来实际的获取逻辑在InformGeter里，ItemPos不需要任何计算。
