@@ -314,6 +314,9 @@ public class AIAgent : MonoBehaviour
 
         if (reactionSystem != null) reactionSystem.currentRound = _round;
 
+        // 标签外的每轮补充消息（上一轮发言 + 存活状态 + 战况）：全场共用一条，不进情报标签所以不会被压缩
+        string roundExtra = InformGetter.BuildRoundExtra();
+
         List<Task> tasks = new List<Task>();
         for (int i = 0; i < cards.Count; i++)
         {
@@ -331,7 +334,7 @@ public class AIAgent : MonoBehaviour
                 InformGetter.GetInfo(builder, card.position);
             }
 
-            tasks.Add(RunCardAsync(card, builder.ToString()));
+            tasks.Add(RunCardAsync(card, builder.ToString(), roundExtra));
         }
         InformGetter.ClearDamageStats();
         InformGetter.ClearImpactStats();
@@ -341,6 +344,9 @@ public class AIAgent : MonoBehaviour
         }
         if (tasks.Count > 0) await Task.WhenAll(tasks);
 
+        // 一轮缓冲：本轮结束后清空发言缓冲、写入本轮发言，供下一轮情报读取
+        InformGetter.CommitRoundSpeeches();
+
         if (_round == 0)
         {
             ExitOpeningRetryPause();
@@ -348,14 +354,14 @@ public class AIAgent : MonoBehaviour
         complete?.Invoke();
     }
 
-    private async Task RunCardAsync(CharacterCard card, string inform)
+    private async Task RunCardAsync(CharacterCard card, string inform, string extra)
     {
         WhisperManager.SetBusy(card.position, true);
         try
         {
             if (deadStages.Contains(card.position)) return;
-            if(_round == 0) await card.FirstRequest(inform);
-            else await card.NormalRequest(inform);
+            if(_round == 0) await card.FirstRequest(inform, extra);
+            else await card.NormalRequest(inform, extra);
         }
         finally
         {
@@ -363,7 +369,172 @@ public class AIAgent : MonoBehaviour
         }
     }
 
-    /// <summary>升级触发时调用。仿照死亡遗言请求：用 DeepCopy 发独立请求，不污染 card.history，不阻塞任何普通轮次请求。</summary>
+    private const string ChooseUpgradeToolName = "choose_upgrade";
+
+    /// <summary>升级三选一的临时工具：只在这次强制选择里挂上，不进卡片常驻工具表。</summary>
+    private static Tool BuildChooseUpgradeTool()
+    {
+        return new Tool
+        {
+            type = "function",
+            function = new Function
+            {
+                name = ChooseUpgradeToolName,
+                description = "提交本次空槽升级的选择。必须调用且只能调用一次：choice=1 额外弹珠，2 炮塔强化，3 护盾强化。",
+                parameters = new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    properties = new Dictionary<string, object>
+                    {
+                        {
+                            "choice",
+                            new
+                            {
+                                type = "integer",
+                                @enum = new List<int> { 1, 2, 3 },
+                                description = "1=额外弹珠（立即生成并发射一枚新弹珠）；2=炮塔强化；3=护盾强化。"
+                            }
+                        }
+                    },
+                    required = new List<string> { "choice" }
+                }
+            }
+        };
+    }
+
+    /// <summary>升级选择专用工具处理器：只把选择回执成一条 tool 消息，不改任何游戏状态。</summary>
+    private class UpgradeChoiceToolkit : Itool
+    {
+        public Task<List<DeepSeekMessage>> DealToolCallsAsync(List<ToolCall> toolCalls, int stage = -1)
+        {
+            var result = new List<DeepSeekMessage>();
+            if (toolCalls == null) return Task.FromResult(result);
+
+            foreach (ToolCall call in toolCalls)
+            {
+                int choice = ParseUpgradeChoiceFromToolCall(call);
+                result.Add(new DeepSeekMessage
+                {
+                    role = "tool",
+                    content = $"已记录本次升级选择：{choice}（{UpgradeChoiceName(choice)}），系统会立刻生效。",
+                    tool_call_id = call != null ? call.id : ""
+                });
+            }
+            return Task.FromResult(result);
+        }
+    }
+
+    private readonly UpgradeChoiceToolkit upgradeChoiceToolkit = new();
+
+    [Serializable]
+    private class UpgradeChoiceArgs
+    {
+        public int choice;
+        public string choice_name = "";
+    }
+
+    private static string UpgradeChoiceName(int choice)
+        => choice == 3 ? "护盾强化" : (choice == 2 ? "炮塔强化" : "额外弹珠");
+
+    /// <summary>从 choose_upgrade 工具调用的参数里取选择；拿不到就默认 1（额外弹珠）。</summary>
+    private static int ParseUpgradeChoiceFromToolCall(ToolCall call)
+    {
+        string args = call?.function?.arguments;
+        if (string.IsNullOrWhiteSpace(args)) return 1;
+
+        upgradeChoiceFallbackText = "";
+        try
+        {
+            UpgradeChoiceArgs parsed = JsonConvert.DeserializeObject<UpgradeChoiceArgs>(args);
+            if (parsed != null)
+            {
+                if (parsed.choice >= 1 && parsed.choice <= 3) return parsed.choice;
+                upgradeChoiceFallbackText = parsed.choice_name ?? "";
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[升级选择] 参数解析失败：{args}（{e.Message}）");
+            upgradeChoiceFallbackText = args;
+        }
+
+        // 兑底：模型把选项名或数字写进了参数里（不是标准 choice）
+        string text = upgradeChoiceFallbackText ?? "";
+        if (text.Contains("护盾")) return 3;
+        if (text.Contains("炮塔")) return 2;
+        if (text.Contains("弹珠")) return 1;
+        foreach (char c in text)
+            if (c >= '1' && c <= '3') return c - '0';
+        return 1;
+    }
+
+    private static string upgradeChoiceFallbackText = "";
+
+    /// <summary>文字兑底解析（模型没按工具调用回答时）：关键词 → 数字 → 默认 1。</summary>
+    private static int ParseUpgradeChoiceFromText(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return 1;
+
+        if (content.Contains("护盾")) return 3;
+        if (content.Contains("炮塔") || content.Contains("后坐力") || content.Contains("转速")) return 2;
+        if (content.Contains("弹珠")) return 1;
+
+        foreach (char c in content)
+            if (c >= '1' && c <= '3') return c - '0';
+        return 1;
+    }
+
+    private const string UpgradeCommitPrompt =
+        "现在提交你的选择：调用 choose_upgrade 工具，choice 只能填 1（额外弹珠）、2（炮塔强化）或 3（护盾强化）。" +
+        "必须给出与上面分析一致的选择，不要用文字回答。";
+
+    /// <summary>发一次升级相关的请求，返回本次新增的 assistant 回复与 tool 回执（失败时 assistant 为 null）。</summary>
+    private async Task<(DeepSeekMessage assistant, List<DeepSeekMessage> toolReplies)> SendUpgradeRequest(
+        DeepSeekRequest request, CharacterCard card, int stage, string label)
+    {
+        int before = request.messages != null ? request.messages.Count : 0;
+
+        var tcs = new TaskCompletionSource<bool>();
+        List<DeepSeekMessage> toolReplies = null;
+        RequestInfo info = new RequestInfo(request,
+            msgs => { toolReplies = msgs; tcs.TrySetResult(true); },
+            error => { Debug.LogWarning($"[升级选择] stage {stage} {label}请求失败：{error}"); tcs.TrySetResult(false); },
+            toolkit: upgradeChoiceToolkit,
+            back_tool: false,
+            toolStage: stage);
+        info.apiKey = LoadApiKey();
+        info.apiUrl = card.url;
+
+        AIRequest.SendRequest(info);
+        await tcs.Task;
+
+        DeepSeekMessage assistant = null;
+        if (request.messages != null)
+        {
+            for (int i = request.messages.Count - 1; i >= before; i--)
+            {
+                DeepSeekMessage m = request.messages[i];
+                if (m != null && m.role == "assistant") { assistant = m; break; }
+            }
+        }
+        return (assistant, toolReplies);
+    }
+
+    /// <summary>从回复里取出 choose_upgrade 的工具调用（没有就取任意工具调用）。</summary>
+    private static ToolCall FindChooseUpgradeCall(DeepSeekMessage message)
+    {
+        if (message?.tool_calls == null || message.tool_calls.Count == 0) return null;
+        return message.tool_calls.FirstOrDefault(c => c?.function?.name == ChooseUpgradeToolName)
+            ?? message.tool_calls[0];
+    }
+
+    /// <summary>
+    /// 升级触发时调用，两步走（都不占行动轮）：
+    /// 1) 思考：thinking 开、tool_choice = null（工具表给上）——先让 AI 分析该选哪个，它也可能直接调用工具；
+    /// 2) 提交：thinking 关、tool_choice 强制 choose_upgrade——强制 tool_choice 与思考模式互斥（实测开思考会 400）。
+    /// 两步的完整新增对话（user 提示、assistant 思考、user 提交指令、assistant 工具调用、tool 回执）都写回 card.history。
+    /// </summary>
     public async Task<int> RequestUpgradeChoiceAsync(int stage)
     {
         CharacterCard card = cards.Find(c => c.position == stage);
@@ -373,28 +544,66 @@ public class AIAgent : MonoBehaviour
         CapturePause.Pause();
         try
         {
-            DeepSeekRequest copy = card.request.DeepCopy();
-            if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
-            copy.messages.Add(new DeepSeekMessage("user", BuildUpgradeChoicePrompt(card)));
-            copy.tools = null;
-            copy.tool_choice = null;
+            var exchange = new List<DeepSeekMessage>();
+            var promptMessage = new DeepSeekMessage("user", BuildUpgradeChoicePrompt(card));
+            exchange.Add(promptMessage);
 
-            var tcs = new TaskCompletionSource<string>();
-            RequestInfo info = new RequestInfo(copy,
-                msgs =>
+            // ---------- 第一步：思考（thinking 开、tool_choice = null） ----------
+            DeepSeekRequest thinkRequest = card.request.DeepCopy();
+            if (thinkRequest.messages == null) thinkRequest.messages = new List<DeepSeekMessage>();
+            thinkRequest.messages.Add(promptMessage);
+            thinkRequest.tools = new List<Tool> { BuildChooseUpgradeTool() };
+            thinkRequest.tool_choice = null;
+            thinkRequest.thinking = new ThinkingConfig(true);
+
+            var think = await SendUpgradeRequest(thinkRequest, card, stage, "思考");
+            if (think.assistant != null) exchange.Add(think.assistant);
+
+            ToolCall call = FindChooseUpgradeCall(think.assistant);
+            if (call != null)
+            {
+                // 第一步就直接调用了工具，不必再问一次
+                choice = ParseUpgradeChoiceFromToolCall(call);
+                if (think.toolReplies != null)
+                    exchange.AddRange(think.toolReplies.Where(m => m != null && m.role == "tool"));
+            }
+            else
+            {
+                // ---------- 第二步：提交（thinking 关、tool_choice 强制） ----------
+                var commitMessage = new DeepSeekMessage("user", UpgradeCommitPrompt);
+                exchange.Add(commitMessage);
+
+                DeepSeekRequest commitRequest = card.request.DeepCopy();
+                if (commitRequest.messages == null) commitRequest.messages = new List<DeepSeekMessage>();
+                commitRequest.messages.Add(promptMessage);
+                if (think.assistant != null) commitRequest.messages.Add(think.assistant);
+                commitRequest.messages.Add(commitMessage);
+                commitRequest.tools = new List<Tool> { BuildChooseUpgradeTool() };
+                commitRequest.tool_choice = new { type = "function", function = new { name = ChooseUpgradeToolName } };
+                commitRequest.thinking = new ThinkingConfig(false);
+                commitRequest.reasoning_effort = null;
+
+                var commit = await SendUpgradeRequest(commitRequest, card, stage, "提交");
+                if (commit.assistant != null) exchange.Add(commit.assistant);
+                if (commit.toolReplies != null)
+                    exchange.AddRange(commit.toolReplies.Where(m => m != null && m.role == "tool"));
+
+                call = FindChooseUpgradeCall(commit.assistant);
+                if (call != null)
                 {
-                    DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
-                    tcs.TrySetResult(last != null ? last.content : "");
-                },
-                error => tcs.TrySetResult(""),
-                toolkit: null,
-                back_tool: false,
-                toolStage: stage);
-            info.apiKey = LoadApiKey();
-            info.apiUrl = card.url;
+                    choice = ParseUpgradeChoiceFromToolCall(call);
+                }
+                else
+                {
+                    // 两步都没拿到工具调用：从文字兑底解析
+                    choice = ParseUpgradeChoiceFromText(commit.assistant?.content ?? think.assistant?.content);
+                    Debug.LogWarning($"[升级选择] stage {stage} 两步都没拿到 choose_upgrade 工具调用，改从文字解析：{choice}");
+                }
+            }
 
-            AIRequest.SendRequest(info);
-            choice = ParseUpgradeChoice(await tcs.Task);
+            // 完整新增对话写回历史（不参与公开发言拼接）
+            card.AppendUpgradeExchange(exchange);
+            Debug.Log($"[升级选择] stage {stage} 选择：{choice}（{UpgradeChoiceName(choice)}），已写回 {exchange.Count} 条对话。");
         }
         catch (Exception e)
         {
@@ -408,31 +617,31 @@ public class AIAgent : MonoBehaviour
         return choice;
     }
 
-    private static int ParseUpgradeChoice(string content)
-    {
-        if (string.IsNullOrWhiteSpace(content)) return 1;
-
-        if (content.Contains("护盾")) return 3;
-        if (content.Contains("炮塔") || content.Contains("后坐力") || content.Contains("转速")) return 2;
-        if (content.Contains("弹珠")) return 1;
-
-        foreach (char c in content)
-        {
-            if (c >= '1' && c <= '3') return c - '0';
-        }
-        return 1;
-    }
-
     private static string BuildUpgradeChoicePrompt(CharacterCard card)
     {
+        int marbleCount = 0, turretCount = 0, shieldCount = 0;
+        MarbleManager mm = MarbleManager.Instance;
+        if (mm != null) mm.TryGetUpgradeCounts(card.position, out marbleCount, out turretCount, out shieldCount);
+
+        int turretLevel = 0, shieldOwned = 0;
+        float maxMove = 0f;
+        if (Towel.AllTowel.TryGetValue(card.position, out Towel towel) && towel != null)
+        {
+            turretLevel = Mathf.Max(0, towel.turretUpgraded);
+            shieldOwned = Mathf.Max(0, towel.shieldUpgradeOwned);
+            maxMove = towel.MaxMoveDistance;
+        }
+
         var sb = new StringBuilder();
-        sb.AppendLine("[升级选择] 你的空槽升级进度已满，这是一次额外强化决策，不占用你的行动轮。");
+        sb.AppendLine("[升级选择] 你的空槽升级进度已满。这是额外强化决策，不占用你的行动轮，但会明显影响你这一整局的胜率。");
+        sb.AppendLine($"你目前已升级次数：额外弹珠 x{marbleCount}、炮塔强化 x{turretCount}、护盾强化 x{shieldCount}。");
+        sb.AppendLine($"当前状态：炮塔强化等级 {turretLevel}（最大移动距离 {maxMove:0.00}）、护盾强化等级 {shieldOwned}。");
         sb.AppendLine("从下列选项中选择本次升级，只能选择一项：");
         sb.AppendLine("1. 额外弹珠：立即生成并发射一枚你的新弹珠，增强你的长期弹珠资源与倍乘收益。");
         sb.AppendLine("2. 炮塔强化：炮塔后坐力提升，子弹显示半径变大、命中大球时的动量冲击更强，自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2）。可叠加。");
         sb.AppendLine("3. 护盾强化：护盾破碎后炮塔进入无敌时间，无视敌方子弹与大球伤害。可叠加。");
-
-        sb.AppendLine("输出要求：只回复一个数字 1、2 或 3，不要解释，不要调用工具。");
+        sb.AppendLine("请结合你已经升级过的次数决定，不要每次都选同一个：只堆一个方向会浪费其他收益。");
+        sb.AppendLine("输出要求：调用 choose_upgrade 工具，choice 只能填 1、2 或 3，不要解释。");
         return sb.ToString();
     }
     public static Task<string> OnStageDeathAsync(int stage, int killerStage, string killerWeapon = "")
@@ -452,6 +661,9 @@ public class AIAgent : MonoBehaviour
         string victimName = card != null ? card.name : AIAgent.GetStageName(stage);
         string weaponText = string.IsNullOrEmpty(killerWeapon) ? "" : $"用{killerWeapon}";
         UISystemMessageShow.ShowNow($"{killerName}{weaponText}击杀{victimName}");
+        InformGetter.PushKillEvent(killerStage > 0
+            ? $"{stage}号阵营({victimName}) 被 {killerStage}号阵营({killerName}){weaponText}击杀，已出局。"
+            : $"{stage}号阵营({victimName}) 已出局。");
 
         UpdateSoloState();
 
@@ -475,6 +687,40 @@ public class AIAgent : MonoBehaviour
 
     /// <summary>场上只剩一个阵营，且活下来的就是 stage 这个阵营。</summary>
     public bool IsSoloWinner(int stage) => SoloWinnerStage() == stage;
+
+    /// <summary>全体阵营编号（按 cards 顺序）。</summary>
+    public List<int> StageIds
+    {
+        get
+        {
+            var list = new List<int>(cards.Count);
+            for (int i = 0; i < cards.Count; i++) list.Add(cards[i].position);
+            return list;
+        }
+    }
+
+    /// <summary>指定阵营是否已被击杀（出局）。</summary>
+    public static bool IsStageEliminated(int stage) => Instance != null && Instance.deadStages.Contains(stage);
+
+    /// <summary>
+    /// 结束录制/结束游戏的完整判据（全部 &&）：98% 占地由 GameEndMonitor 判完再把 owner 传进来，
+    /// 这里要求：只剩一个阵营 && 就是 owner && 成为唯一阵营后已过 3 轮 && 场上没有敌方游离道具（大球/子弹）
+    /// && 赢家的终局感言已播出。reason 输出第一条不满足的原因，便于日志定位。
+    /// </summary>
+    public bool IsEndgameReady(int owner, out string reason)
+    {
+        reason = null;
+        int solo = SoloWinnerStage();
+
+        if (solo <= 0) { reason = "场上不止一个阵营"; return false; }
+        if (solo != owner) { reason = $"达到 98% 的是 {owner} 号阵营，场上唯一存活的是 {solo} 号阵营"; return false; }
+        if (soloSinceRound < 0 || _round - soloSinceRound < 3) { reason = "成为唯一阵营后还没过 3 轮"; return false; }
+        if (InformGetter.HasEnemyBigBall(solo)) { reason = "场上还有敌方大球在飞"; return false; }
+        if (BulletManager.Instance != null && BulletManager.Instance.CountAliveBulletsExcept(solo) > 0)
+        { reason = "场上还有敌方子弹在飞"; return false; }
+        if (!soloWinSpeechDone) { reason = "赢家的终局感言还没播完"; return false; }
+        return true;
+    }
 
     private void UpdateSoloState()
     {
@@ -568,7 +814,7 @@ public class AIAgent : MonoBehaviour
             Debug.LogError($"[获奖感言] 飘字失败：{e}");
         }
 
-        InformGetter.SetAIContent(stage, words);
+        InformGetter.StageSpeech(stage, words);
         UIMessageManager.Instance?.AddMessage(new UIMInfo
         {
             stage = stage,
@@ -610,13 +856,13 @@ public class AIAgent : MonoBehaviour
             words = await tcs.Task;
             words = ExtractEmotion(words, out _, out _).Trim();   // 展示用文字里不保留 [emo:xxx]
             if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
-            InformGetter.SetAIContent(stage, words);
+            InformGetter.StageSpeech(stage, words);
         }
         catch (Exception e)
         {
             Debug.LogError($"[遗言] stage {stage} 请求异常：{e}");
             words = "无言的告别";
-            InformGetter.SetAIContent(stage, words);
+            InformGetter.StageSpeech(stage, words);
         }
         finally
         {
@@ -740,7 +986,7 @@ public class AIAgent : MonoBehaviour
     [System.Serializable]
     public class CharacterCard
     {
-        private static string world = @$"# 实时战略游戏 AI 提示词
+        private static string world = @"# 实时战略游戏 AI 提示词
 
 ## 角色与目标
 你是一名实时战略游戏 AI。最终目标：**击败其他所有玩家，并让自己的阵营最终控制大陆。**
@@ -756,18 +1002,22 @@ public class AIAgent : MonoBehaviour
 ## 二、核心规则
 - **数值：同阵营叠加，敌方抵消**（对子弹、大球、护盾等所有携带数值的单位通用）。
 - **领土：** 子弹和大球携带数值，将等量数值转化为地图上的己方领土；数值耗尽后消失。
-- **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回。
-- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球，不阻挡己方。敌方护盾的当前大小不再是公开信息。
-- **炮塔：** 被敌方攻击有效命中即**立即死亡**。炮塔可以移动（用 move_turret），移动不会让其他 AI 知道你的新位置。
+- **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回，成堆的子弹也能把它推开、改变它的路线。
+- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球，不阻挡己方。敌方护盾的当前大小不再是公开信息。大球是一次性撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开）。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔。每次撞击都会扣掉等量盾值，所以盾被撞一次基本就碎了。
+- **炮塔：** 被敌方攻击有效命中即**立即死亡**，该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
+- **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
+- **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
+- **移动：** 炮塔可以移动（用 move_turret），移动不会让其他 AI 知道你的新位置。
+- **胜负：** 成为最后存活的一方、并把领土推到 98%（系统的结束判定）才算赢；只剩你一个阵营后，还要把场上敌方游离的大球和子弹清掉。
 - **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。想知道对手在哪，只能靠**撞击情报**——你的子弹或大球撞上对方护盾/炮塔本体时，系统会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
 
 ## 三、弹珠与资源
-- 每队初始拥有 {MarbleManager.Instance?.initialMarbleCount} 个弹珠。
+- 每队初始拥有 @MARBLE_COUNT@ 个弹珠。
 - 弹珠经过障碍后进入倍乘区：×2（面积最大）→ ×4 → ×8（面积最小）；倍乘完成后回到顶部重新滚落。
 - 进入道具选择区时随机落到道具上；道具数值等于弹珠当时数值，按 2 的幂次增长。
 
 ## 四、武器栏
-- 最多 5 格：开局解锁 2 格，1 分钟第 3 格，4 分钟第 4 格，10 分钟第 5 格。
+- 最多 5 格：开局解锁 2 格，1 分钟第 3 格，5 分钟第 4 格，7 分钟第 5 格。
 - 道具按获得顺序进入武器栏；超过当前可持有数量时，从最新获得的道具开始溢出并立即生效。
 
 ## 五、空槽升级
@@ -787,7 +1037,7 @@ public class AIAgent : MonoBehaviour
 - **任意：** 任选以上一种道具。
 
 ## 七、最重要的规则：信息延迟
-**你收到的所有游戏信息都滞后 {Instance._cycleInterval} 秒**——你看到的不是现在，而是 {Instance._cycleInterval} 秒以前的世界。
+**你收到的所有游戏信息都滞后 @INFO_DELAY@ 秒**——你看到的不是现在，而是 @INFO_DELAY@ 秒以前的世界。
 
 ## 决策原则
 选择能够最大化最终胜率的行动，而不是看起来最积极的行动。
@@ -795,7 +1045,7 @@ public class AIAgent : MonoBehaviour
         private static string character_mode_prompt = @"
 
 【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
-1. 请以角色第一人称进行内心独白，用括号包裹内心活动，必须用“（我想：……）”或“（心想：……）”
+1. 请以角色第一人称进行内心独白，用括号包裹内心活动，必须用“（我想：……）”
 2. 用第一人称描写角色的内心感受，例如“我心想”“我觉得”“我暗自”等
 3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复
 
@@ -849,7 +1099,13 @@ public class AIAgent : MonoBehaviour
 
         private string BuildSystemPrompt()
         {
-            return $"{world}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。";
+            // 这两个值依赖运行期对象，不能在静态字段初始化时就插值（那时 MarbleManager / AIAgent 可能还没 Awake），
+            // 否则会得到空值（“每队初始拥有  个弹珠”）。改成每次构建提示词时现算。
+            int marbleCount = MarbleManager.Instance != null ? MarbleManager.Instance.initialMarbleCount : 3;
+            string delayText = Instance != null ? Instance._cycleInterval.ToString("0.#") : "0";
+            string text = world.Replace("@MARBLE_COUNT@", marbleCount.ToString()).Replace("@INFO_DELAY@", delayText);
+
+            return $"{text}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。";
         }
 
         /// <summary>名单注入后刷新首条 system 消息；不清空历史，也不动压缩状态。</summary>
@@ -869,6 +1125,10 @@ public class AIAgent : MonoBehaviour
             n_0 = 5;
             n_0_index = 1;
             last_round_index.Clear();
+            roundRetryReminder = null;
+            roundRequestInFlight = false;
+            deferredUpgradeMessages.Clear();
+            upgradeExchangeMessages.Clear();
         }
 
         private void Compress()
@@ -1024,7 +1284,7 @@ public class AIAgent : MonoBehaviour
         private int n_0 = 5;
         private float avgX = 1000f; // 实测平均每轮未压缩 token 数，种子值
         private float avgL = 200f;  // 实测平均每轮压缩后 token 数，种子值
-        private const int k = 5;    // 保留最近完整轮数，与 last_round_index 的 5 对应
+        private const int k = 8;    // 保留最近完整轮数，与 last_round_index 的 8 对应
         private const float b = 30f; // DeepSeek 未命中/命中价格比
 
         // 连续系统录制回合未调用工具统计；超过 2 个系统回合未用工具时追加提醒
@@ -1033,11 +1293,11 @@ public class AIAgent : MonoBehaviour
 
         // 思考模式回复校验与重试（从 AIRequest 移入；不合格时无限重试，直到合格）
         private const string ThinkingRetryPrompt =
-            "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）或(我想：……)；" +
+            "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）；" +
             "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
 
         // ---------- AI 行为检查 ----------
-        private const string BehaviorCheckerModel = "deepseek-v4-flash";
+        private const string BehaviorCheckerModel = "deepseek-flash";
 
         private const string BehaviorCheckerSystemPrompt =
 @"你是一个严格的游戏 AI 行为检查器。你的任务只有：判断目标 AI 是否“说了要做某个具体行动，但没有调用对应工具执行”。你不调用任何工具，只输出分析文字和最终判断。
@@ -1068,6 +1328,14 @@ public class AIAgent : MonoBehaviour
         private List<DeepSeekMessage> openingLastMessages;
         private int n_0_index = 1;//排除系统消息
         private List<int> last_round_index = new();
+
+        // 思考校验重试：本轮已插入的 [格式修正]（合格后移除），保证每轮最多一条
+        private DeepSeekMessage roundRetryReminder;
+        // 当轮请求是否在飞：用于安全补写升级对话，避免插断 assistant(tool_calls) 与它的 tool 结果
+        private bool roundRequestInFlight;
+        private readonly List<DeepSeekMessage> deferredUpgradeMessages = new();
+        // 升级对话的消息引用集合：不参与公开发言拼接
+        private readonly HashSet<DeepSeekMessage> upgradeExchangeMessages = new();
 
         private int EstimateHistoryTokens(List<DeepSeekMessage> messages)
         {
@@ -1124,6 +1392,10 @@ public class AIAgent : MonoBehaviour
             }
 
             n_0 = N;
+
+            // 每次压缩后重置“连续未用工具”提醒状态：每个压缩周期最多提醒一次
+            noToolReminderSent = false;
+            roundsWithoutTool = 0;
             return true;
         }
 
@@ -1153,29 +1425,84 @@ public class AIAgent : MonoBehaviour
             info.apiUrl = url;
 
             //保证已经检查完毕
-            info.validateAndMaybeRetry = (msg) => {
-                if (IsRoleplayReasoning(msg)) return true;
-                info.AddMessage(new DeepSeekMessage("user", ThinkingRetryPrompt));
-                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
+            info.validateAndMaybeRetry = (msg) => ValidateRoundReply(msg, info);
+
+            roundRequestInFlight = true;
+            try
+            {
                 AIRequest.SendRequest(info);
-                return false;
-            };
+                await tcs.Task;
+            }
+            finally
+            {
+                roundRequestInFlight = false;
+                FlushDeferredUpgradeMessages();
+            }
+
+            // 本轮公开发言：每轮都写进“上一轮发言”缓冲（与飘字节流无关）；
+            // 本轮一条 content 都没有（空回复 / 只调了工具）就不记、也不发言，避免把旧发言重复显示一遍
+            string roundContent = JoinRoundAssistantContents(roundStartIndex);
+            if (!string.IsNullOrWhiteSpace(roundContent))
+            {
+                InformGetter.StageSpeech(position, roundContent);
+                RemindIfInvalidEmotions(roundContent);
+                if (SpeechPass == 0) Say(position, roundContent);
+            }
+        }
+
+        /// <summary>思考校验：不合格时本轮只插入一条 [格式修正]，最终合格就把这条提醒移除。</summary>
+        private bool ValidateRoundReply(DeepSeekMessage msg, RequestInfo info)
+        {
+            if (IsRoleplayReasoning(msg))
+            {
+                RemoveRoundRetryReminder();
+                return true;
+            }
+
+            if (roundRetryReminder == null)
+            {
+                roundRetryReminder = new DeepSeekMessage("user", ThinkingRetryPrompt);
+                info.AddMessage(roundRetryReminder);
+                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
+            }
+            else
+            {
+                Debug.LogWarning($"[AIRequest] 思考模式校验再次失败（本轮只插一条提醒，不重复插入）。reasoning: {msg.reasoning_content}");
+            }
 
             AIRequest.SendRequest(info);
+            return false;
+        }
 
-            await tcs.Task;
+        /// <summary>最终回复合格后，把本轮插入的 [格式修正] 从历史里移除。</summary>
+        private void RemoveRoundRetryReminder()
+        {
+            if (roundRetryReminder == null) return;
+            history.Remove(roundRetryReminder);
+            roundRetryReminder = null;
+        }
 
-            //Say
-            if (SpeechPass > 0) return;
+        /// <summary>把一次升级的完整新增对话写回历史（这条对话不参与公开发言拼接）。</summary>
+        public void AppendUpgradeExchange(List<DeepSeekMessage> messages)
+        {
+            if (messages == null || messages.Count == 0) return;
 
-            // 只拼接本轮所有 content；本轮一条 content 都没有（空回复 / 只调了工具）就不发言，
-            // 不往回找上一轮的对话，避免把旧发言重复显示一遍
-            string roundContent = JoinRoundAssistantContents(roundStartIndex);
-            if (!string.IsNullOrWhiteSpace(roundContent)) Say(position, roundContent);
+            foreach (DeepSeekMessage m in messages)
+                if (m != null) upgradeExchangeMessages.Add(m);
+
+            if (roundRequestInFlight) deferredUpgradeMessages.AddRange(messages);
+            else history.AddRange(messages);
+        }
+
+        /// <summary>当轮请求落地后，把等待中的升级对话补写进历史。</summary>
+        private void FlushDeferredUpgradeMessages()
+        {
+            if (deferredUpgradeMessages.Count == 0) return;
+            history.AddRange(deferredUpgradeMessages);
+            deferredUpgradeMessages.Clear();
         }
         private void Say(int position,string content)
         {
-            InformGetter.SetAIContent(position, content);
             // 只剩他一个阵营之后，露的就是赢家的脸：强制盖掉模型自己写的 [emo:xxx]
             bool soloWinner = AIAgent.Instance != null && AIAgent.Instance.IsSoloWinner(position);
             if (Towel.AllTowel.TryGetValue(position, out Towel towel)) towel.Say(content, true);
@@ -1187,14 +1514,16 @@ public class AIAgent : MonoBehaviour
                 forceEmo = soloWinner
             });
         }
-        public async Task FirstRequest(string inform)
+        public async Task FirstRequest(string inform, string extra)
         {
             N++;
 
             last_round_index.Add(history.Count);
-            if (last_round_index.Count > 5) last_round_index.RemoveAt(0);
+            if (last_round_index.Count > 8) last_round_index.RemoveAt(0);
             int startTokens = EstimateHistoryTokens(history);
             history.Add(new DeepSeekMessage("user", inform));
+            if (!string.IsNullOrWhiteSpace(extra))
+                history.Add(new DeepSeekMessage("user", extra));
 
             int roundStartIndex = history.Count;
 
@@ -1221,16 +1550,18 @@ public class AIAgent : MonoBehaviour
             Save();
         }
 
-        public async Task NormalRequest(string inform)
+        public async Task NormalRequest(string inform, string extra)
         {
             N++;
             bool compressed = MaybeCompress();
 
             last_round_index.Add(history.Count);
-            if (last_round_index.Count > 5) last_round_index.RemoveAt(0);
+            if (last_round_index.Count > 8) last_round_index.RemoveAt(0);
 
             int startTokens = EstimateHistoryTokens(history);
             history.Add(new DeepSeekMessage("user", inform));
+            if (!string.IsNullOrWhiteSpace(extra))
+                history.Add(new DeepSeekMessage("user", extra));
 
             // 压缩后不能只改旧历史；要在“这轮新对话”里追加 Tool 使用方法提醒
             if (compressed)
@@ -1262,7 +1593,9 @@ public class AIAgent : MonoBehaviour
             for (int i = roundStartIndex; i < history.Count; i++)
             {
                 DeepSeekMessage msg = history[i];
-                if (msg != null && msg.role == "assistant" && !string.IsNullOrWhiteSpace(msg.content))
+                if (msg == null || msg.role != "assistant") continue;
+                if (upgradeExchangeMessages.Contains(msg)) continue;   // 升级那次对话不算公开发言
+                if (!string.IsNullOrWhiteSpace(msg.content))
                     parts.Add(msg.content.Trim());
             }
             return string.Join("\n", parts);
@@ -1344,7 +1677,12 @@ public class AIAgent : MonoBehaviour
             return result;
         }
 
-        private static readonly List<string> 游戏关键词 = new() { "大球", "护盾", "弹药", "霰弹" };
+        private static readonly List<string> 游戏关键词 = new()
+        {
+            "大球", "球", "护盾", "盾", "子弹", "弹药", "霰弹", "扫射", "道具", "武器",
+            "炮塔", "瞄准", "移动", "位置", "撞击", "涂", "领土", "弹珠", "升级",
+            "攻击", "打", "轰", "推", "顶", "清", "用掉"
+        };
         /// <summary>
         /// 行为检查：把本轮 content 与工具调用交给 thinking disabled 的 flash 模型判断。
         /// 返回“说了要做但没调用”的工具名列表。
@@ -1590,6 +1928,36 @@ public class AIAgent : MonoBehaviour
         }
 
 
+        private static readonly HashSet<string> AllowedEmotions = new HashSet<string> { "origin", "smile", "laugh", "shock", "angry", "sad" };
+        private static readonly Regex EmoTagScanRegex = new Regex(@"\[\s*emo\s*:\s*([A-Za-z]+)\s*\]", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>本级回复里出现白名单外的 [emo:xxx] 时给一次提示（每轮最多一条）。</summary>
+        private void RemindIfInvalidEmotions(string roundContent)
+        {
+            if (string.IsNullOrWhiteSpace(roundContent)) return;
+
+            var bad = new List<string>();
+            foreach (Match m in EmoTagScanRegex.Matches(roundContent))
+            {
+                string value = m.Groups[1].Value.ToLowerInvariant();
+                if (!AllowedEmotions.Contains(value) && !bad.Contains(value)) bad.Add(value);
+            }
+            if (bad.Count == 0) return;
+
+            string reminder = "[格式提醒] 你用了不被支持的表情标记："
+                + string.Join("、", bad.Select(v => "[emo:" + v + "]"))
+                + "。允许的值只有 origin、smile、laugh、shock、angry、sad，下次请只用这些（非法标记不会生效，会被直接丢掉）。";
+
+            if (history.Count > 0)
+            {
+                DeepSeekMessage last = history[history.Count - 1];
+                if (last != null && last.role == "user" && last.content == reminder) return;
+            }
+
+            history.Add(new DeepSeekMessage("user", reminder));
+            Debug.Log($"[AIAgent] {name} 使用了非法表情标记：{string.Join("、", bad)}，已追加提示。");
+        }
+
         private void DisplayReceivedMessages(List<DeepSeekMessage> messages)
         {
             foreach (DeepSeekMessage message in messages)
@@ -1600,7 +1968,7 @@ public class AIAgent : MonoBehaviour
                     if (string.IsNullOrWhiteSpace(content)) continue;
                     if (content.Contains("[skip]")) continue;
 
-                    InformGetter.SetAIContent(position, content);
+                    InformGetter.StageSpeech(position, content);
                     if (Towel.AllTowel.TryGetValue(position, out Towel towel))
                     {
                         towel.Say(content);

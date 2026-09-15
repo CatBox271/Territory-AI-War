@@ -40,13 +40,37 @@ public class InformGetter : MonoBehaviour
     public const string ImpactSourceBall = "大球";
     public const string ImpactSourceBullet = "子弹";
 
-    // 每个 AI 最近的公开 content（AIAgent.ReceiveResponse 写入），附加到全局信息里给所有 AI 看。
+    // 一轮缓冲：AIContents 装的是“上一轮”的发言，每轮结束时由 CommitRoundSpeeches 整体重建。
     public static Dictionary<int, string> AIContents = new();
 
-    public static void SetAIContent(int stage, string content)
+    // 本轮暂存的发言（Say / 遗言 / 赢家感言写入），轮末提交进 AIContents。
+    private static readonly Dictionary<int, string> PendingSpeech = new();
+
+    // 本轮击杀事件，写进标签外的【战况】；输出一次后清空。
+    private static readonly List<string> KillEvents = new();
+
+    /// <summary>记录本轮某阵营说过的话（公开发言 / 遗言 / 赢家感言）。轮末由 CommitRoundSpeeches 提交。</summary>
+    public static void StageSpeech(int stage, string content)
     {
         if (stage < 0 || string.IsNullOrWhiteSpace(content)) return;
-        AIContents[stage] = content.Trim();
+        PendingSpeech[stage] = content.Trim();
+    }
+
+    /// <summary>每轮结束调用：清空上一轮发言缓冲，把本轮暂存的发言搬进去（下一轮读到的就是刚好上一轮的发言）。</summary>
+    public static void CommitRoundSpeeches()
+    {
+        AIContents.Clear();
+        foreach (var kv in PendingSpeech)
+        {
+            if (!string.IsNullOrWhiteSpace(kv.Value)) AIContents[kv.Key] = kv.Value;
+        }
+        PendingSpeech.Clear();
+    }
+
+    /// <summary>记录一次击杀事件（写进标签外的【战况】，输出后清空）。</summary>
+    public static void PushKillEvent(string text)
+    {
+        if (!string.IsNullOrWhiteSpace(text)) KillEvents.Add(text.Trim());
     }
 
     #region 注册
@@ -109,6 +133,7 @@ public class InformGetter : MonoBehaviour
         //自己的道具栈放最前面，AI 第一眼就能看到
         GetInfoProp(builder, stage);
         AppendTurretControlNotice(builder, stage);
+        AppendTurretControlState(builder, stage);
         AppendTurretMoveNotice(builder, stage);
         AppendTurretPositions(builder, stage);
         AppendNearestEnemyTerritory(builder, stage);
@@ -122,7 +147,6 @@ public class InformGetter : MonoBehaviour
         }
         AppendBallImpactWarning(builder, stage);
         AppendFinalRoundHint(builder, stage);
-        AppendAIContents(builder);
         //弹珠为阵营私有信息，只返回请求方自己的
         foreach (var key in MarbleItems.Keys)
         {
@@ -137,22 +161,54 @@ public class InformGetter : MonoBehaviour
         builder.AppendLine(); builder.AppendLine(IntelInfoEnd);
     }
 
-    /// <summary>把每个 AI 的公开 content 追加到全局信息（所有阵营都可见）。</summary>
-    private static void AppendAIContents(StringBuilder builder)
+    /// <summary>
+    /// 构建“标签外”的每轮补充消息：上一轮发言 + 存活状态 + 战况。
+    /// 故意不放进【情报信息…】里：Compress() 只压带情报标记的消息，所以这条永远不会被压成 [情报压缩]，
+    /// 成为 AI 的长期对局记忆（谁说过什么、谁被谁杀了）。击杀事件输出一次后清空。
+    /// </summary>
+    public static string BuildRoundExtra()
     {
-        bool has = false;
-        for (int s = 1; s <= 4; s++)
-        {
-            if (AIContents.TryGetValue(s, out string c) && !string.IsNullOrWhiteSpace(c)) { has = true; break; }
-        }
-        if (!has) return;
+        var sb = new StringBuilder();
 
-        builder.AppendLine(); builder.AppendLine("各AI本轮发言:");
-        for (int s = 1; s <= 4; s++)
+        // 上一轮发言（只含上一轮真的说过话的阵营；死者的遗言只在它死后的那一轮出现一次）
+        if (AIContents.Count > 0)
         {
-            if (AIContents.TryGetValue(s, out string c) && !string.IsNullOrWhiteSpace(c))
-                builder.AppendLine($"{AIAgent.GetStageName(s)}：{c}");
+            var keys = new List<int>(AIContents.Keys);
+            keys.Sort();
+            bool wrote = false;
+            foreach (int s in keys)
+            {
+                if (string.IsNullOrWhiteSpace(AIContents[s])) continue;
+                if (!wrote) { sb.AppendLine("【上一轮发言】"); wrote = true; }
+                string dead = AIAgent.IsStageEliminated(s) ? "（已出局）" : "";
+                sb.AppendLine($"  {s}号阵营({AIAgent.GetStageName(s)}){dead}：{AIContents[s]}");
+            }
         }
+
+        // 存活状态
+        if (AIAgent.Instance != null)
+        {
+            List<int> ids = AIAgent.Instance.StageIds;
+            var alive = new List<string>();
+            var dead = new List<string>();
+            foreach (int s in ids)
+            {
+                string text = $"{s}号({AIAgent.GetStageName(s)})";
+                if (AIAgent.IsStageEliminated(s)) dead.Add(text); else alive.Add(text);
+            }
+            if (alive.Count + dead.Count > 0)
+                sb.AppendLine("【存活状态】存活: " + string.Join("、", alive) + (dead.Count > 0 ? "｜已淘汰: " + string.Join("、", dead) : ""));
+        }
+
+        // 战况（击杀事件）
+        if (KillEvents.Count > 0)
+        {
+            sb.AppendLine("【战况】");
+            foreach (string e in KillEvents) sb.AppendLine("  " + e);
+            KillEvents.Clear();
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     #region 领土面积
@@ -207,7 +263,17 @@ public class InformGetter : MonoBehaviour
     {
         if (!TurretControlLostReason.TryGetValue(stage, out string reason) || string.IsNullOrWhiteSpace(reason)) return;
 
-        builder.AppendLine(); builder.AppendLine($"炮塔控制已断开：{reason}。如需继续瞄准，请重新调用 control_turret start。");
+        builder.AppendLine(); builder.AppendLine($"炮塔控制已断开：{reason}。炮塔已恢复自动旋转自动防御；除非目标进入 4 格内，不必再调用 control_turret start。");
+    }
+
+    /// <summary>手动接管中时提示：这一期间炮塔不会自动防御。</summary>
+    private static void AppendTurretControlState(StringBuilder builder, int stage)
+    {
+        if (!Towel.AllTowel.TryGetValue(stage, out Towel self) || self == null) return;
+        AimController controller = self.aimController;
+        if (controller == null || !controller.IsControlling) return;
+
+        builder.AppendLine(); builder.AppendLine("注意：你的炮塔正被手动接管瞄准，这期间它不会自动防御来袭的子弹和大球。");
     }
 
     /// <summary>附加请求方自己的弹珠升级进度（空槽升级）。</summary>
@@ -341,7 +407,7 @@ public class InformGetter : MonoBehaviour
     #endregion
 
     #region 终局提示
-    public const string FinalRoundHint = "【终局提示】就一回合：场上只剩你一个阵营了，先把还在飞的敌方大球清掉，别在最后被反杀。";
+    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球和子弹清掉，再把领土刷到 98%，这局才会结束；别在最后被反杀。";
 
     /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球；判据同大球撞击预警。</summary>
     public static bool HasEnemyBigBall(int stage)
@@ -359,16 +425,30 @@ public class InformGetter : MonoBehaviour
     }
 
     /// <summary>
-    /// 终局提示：只剩请求方一个阵营、且场上还有敌方大球时，在情报正文里多拼一行普通文本。
-    /// 其余任何时候情报内容不变；不是新消息、不是飘字、不动提示词和 [emo:xxx] 参数表。
+    /// 终局提示：只剩请求方一个阵营、且还有敌方大球或领土还没到 98% 时，在情报正文里多拼一行普通文本。
     /// </summary>
     private static void AppendFinalRoundHint(StringBuilder builder, int stage)
     {
         if (AIAgent.Instance == null) return;
         if (!AIAgent.Instance.IsSoloWinner(stage)) return;
-        if (!HasEnemyBigBall(stage)) return;
 
-        builder.AppendLine(); builder.AppendLine(FinalRoundHint);
+        float percent = 0f;
+        int[] area = GetTerritoryArea();
+        if (area != null && stage >= 0 && stage < area.Length)
+        {
+            int total = 0;
+            for (int i = 0; i < area.Length; i++) total += area[i];
+            if (total > 0) percent = area[stage] * 100f / total;
+        }
+
+        bool needBall = HasEnemyBigBall(stage);
+        bool needMore = percent < 98f;
+        if (!needBall && !needMore) return;
+
+        builder.AppendLine();
+        builder.AppendLine(needBall
+            ? $"【终局提示】场上只剩你一个阵营了：先把还在飞的敌方大球和子弹清掉，再把领土刷到 98%（当前 {percent:0.#}%）就结束，别在最后被反杀。"
+            : $"【终局提示】场上只剩你一个阵营了：把领土刷到 98% 就结束（当前 {percent:0.#}%）。");
     }
     #endregion
 
@@ -531,7 +611,7 @@ public class InformGetter : MonoBehaviour
         if (dist <= EnemyTerritoryDangerDistance) builder.Append("【危险：距离3】");
         builder.Append("，相对方向 "); builder.Append(dirText);
         builder.AppendLine();
-        builder.AppendLine("(附近存在敌方领土时，敌方的子弹会长驱直入！炮塔有子弹时会自动处理,所以不要控制炮塔去处理这个事情啦，不过大球，霰弹等有指向性的道具还是可以用来消灭敌方领土的。如想要弄死对方请使用对方炮塔的坐标而不是这个)");
+        builder.AppendLine("(这是领土边缘，不是对方炮塔的位置。想清掉它：让炮塔自动开火、或用大球/霰弹这类有指向性的道具打过来。要打对方炮塔，请用撞击情报推断出的位置，别把这块领土的坐标当成对方基地。)");
         builder.Append("}");
     }
 

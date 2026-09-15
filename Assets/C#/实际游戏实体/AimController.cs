@@ -75,18 +75,18 @@ public class AimController : MonoBehaviour
         if (aim == null) return false;
         if (aim.item == null)
         {
-            DisconnectWithNotice("目标已消失");
+            DisconnectWithNotice("目标已消失，无法瞄准");
             return false;
         }
         pos = aim.pos;
         if ((pos - self).sqrMagnitude > SqrDis)
         {
-            DisconnectWithNotice("目标超出炮塔最大跟踪距离");
+            DisconnectWithNotice("目标超出炮塔最大跟踪距离(4)，无法瞄准");
             return false;
         }
         if (Time.time - aimTime > MaxAimTime)
         {
-            DisconnectWithNotice("持续瞄准超时");
+            DisconnectWithNotice("持续瞄准超时(12秒)，无法瞄准");
             return false;
         }
         LookAt(aim.pos);

@@ -39,6 +39,11 @@ public class MarbleManager : MonoBehaviour
     private readonly Dictionary<int, float> upgradeProgress = new();
     private readonly Dictionary<int, float> upgradeCosts = new();
 
+    // 已升级次数：阵营 -> 次数（用于在升级选择时告诉 AI“你已经选过几次”，避免总选同一个）
+    private readonly Dictionary<int, int> marbleUpgradeCount = new();
+    private readonly Dictionary<int, int> turretUpgradeCount = new();
+    private readonly Dictionary<int, int> shieldUpgradeCount = new();
+
     [Tooltip("每生成一个弹珠后，该阵营下一次升级所需值乘以这个倍率")]
     public float upgradeCostGrowth = 1.5f;
 
@@ -180,15 +185,32 @@ public class MarbleManager : MonoBehaviour
         switch (choice)
         {
             case UpgradeChoice.Turret:
+                BumpUpgradeCount(turretUpgradeCount, stage);
                 StartCoroutine(TurretUpgradeSequence(stage, UpgradeChoice.Turret));
                 break;
             case UpgradeChoice.Shield:
+                BumpUpgradeCount(shieldUpgradeCount, stage);
                 StartCoroutine(TurretUpgradeSequence(stage, UpgradeChoice.Shield));
                 break;
             default:
+                BumpUpgradeCount(marbleUpgradeCount, stage);
                 StartCoroutine(UpgradeSpawnSequence(stage));
                 break;
         }
+    }
+
+    private static void BumpUpgradeCount(Dictionary<int, int> table, int stage)
+    {
+        table[stage] = (table.TryGetValue(stage, out int c) ? c : 0) + 1;
+    }
+
+    /// <summary>查询某阵营已经升级过几次（额外弹珠 / 炮塔强化 / 护盾强化）。</summary>
+    public bool TryGetUpgradeCounts(int stage, out int marble, out int turret, out int shield)
+    {
+        marble = marbleUpgradeCount.TryGetValue(stage, out int m) ? m : 0;
+        turret = turretUpgradeCount.TryGetValue(stage, out int t) ? t : 0;
+        shield = shieldUpgradeCount.TryGetValue(stage, out int s) ? s : 0;
+        return aiStages.Contains(stage) || marble + turret + shield > 0;
     }
 
     /// <summary>炮塔/护盾升级：从升级槽连线到炮塔，线到后再应用升级并弹上升文本。</summary>

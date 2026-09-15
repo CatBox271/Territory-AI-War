@@ -118,6 +118,20 @@ public class BulletManager : MonoBehaviour
         Debug.LogWarning($"BulletManager: 满! {activeCount}/{MAX_BULLETS}");
     }
 
+    /// <summary>统计当前存活、且不属于 stage 阵营的子弹数量（收尾判据用）。</summary>
+    public int CountAliveBulletsExcept(int stage)
+    {
+        if (!bullets.IsCreated) return 0;
+
+        int count = 0;
+        for (int i = 0; i < MAX_BULLETS; i++)
+        {
+            var b = bullets[i];
+            if (b.alive != 0 && b.stage != stage) count++;
+        }
+        return count;
+    }
+
     public void DebugStats()
     {
         int alive = 0;

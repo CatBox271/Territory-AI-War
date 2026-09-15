@@ -4,8 +4,9 @@ using UnityEngine;
 
 /// <summary>
 /// 占地达标自动结束组件：
-/// 定期扫描 TerritoryCanvas 的领地网格，当某个非 0 阵营的占地面积达到
-/// endThresholdPercent（默认 98%）时，自动停止 AI 循环、停止录制并结束游戏（冻结全局时间）。
+/// 定期扫描 TerritoryCanvas 的领地网格，当某个非 0 阵营的占地面积达到 endThresholdPercent（默认 98%），
+/// 并且【全部 &&】：只剩一个阵营（且就是它）、场上没有敌方游离道具（大球/子弹）、赢家终局感言已播出时，
+/// 自动停止 AI 循环、停止录制并结束游戏（冻结全局时间）。
 /// 录制不归它管：要么自己开 CaptureBase 的 _captureOnStart，要么用本组件的右键菜单「启动录制」。
 /// 提供测试按钮（OnGUI 游戏视口左上角）与右键菜单入口，可直接结束录制并结束游戏。
 /// </summary>
@@ -32,6 +33,7 @@ public class GameEndMonitor : MonoBehaviour
     private float _timer;
     private bool _captureMissingLogged;
     private bool _recordStartFailedLogged;
+    private string _lastWaitReason;
 
     private void Awake()
     {
@@ -51,12 +53,23 @@ public class GameEndMonitor : MonoBehaviour
         if (_timer < checkInterval) return;
         _timer = 0f;
 
-        int winner = FindOwnerOverThreshold();
-        if (winner > 0)
+        int owner = FindOwnerOverThreshold();
+        if (owner <= 0) return;
+
+        // 完整结束判据（全部 &&）：98% 占地（上面已过）&& 只剩一个阵营 && 无敌方游离道具（大球/子弹）&& 赢家终局感言已播出
+        if (AIAgent.Instance == null) return;
+        if (!AIAgent.Instance.IsEndgameReady(owner, out string reason))
         {
-            Debug.Log($"[GameEndMonitor] 阵营 {winner} 占地已达 {endThresholdPercent:0.#}%，结束录制并结束游戏");
-            EndGame(winner);
+            if (_lastWaitReason != reason)
+            {
+                _lastWaitReason = reason;
+                Debug.Log($"[GameEndMonitor] 阵营 {owner} 占地已过 {endThresholdPercent:0.#}%，但还不满足结束条件：{reason}");
+            }
+            return;
         }
+
+        Debug.Log($"[GameEndMonitor] 阵营 {owner} 占地 {endThresholdPercent:0.#}% 且场上已无敌方游离道具，结束录制并结束游戏");
+        EndGame(owner);
     }
 
     /// <summary>

@@ -201,9 +201,23 @@ public class DeepSeekRequest
 
     public DeepSeekRequest DeepCopy()
     {
-        // 使用 Newtonsoft.Json 深拷贝（独立副本，修改不影响原对象）
-        string json = JsonConvert.SerializeObject(this);
-        return JsonConvert.DeserializeObject<DeepSeekRequest>(json);
+        // tool_choice 是 object（匿名对象/字符串），Newtonsoft 无法把它 JSON 往返到 object，
+        // 会让整个 DeepCopy 抛 JsonSerializationException（Path 'tool_choice.type'）；
+        // 所以这里临时摘掉它，拷完再原样挂回（引用共享，不影响两边使用）。
+        object keepToolChoice = tool_choice;
+        tool_choice = null;
+        try
+        {
+            // 使用 Newtonsoft.Json 深拷贝（独立副本，修改不影响原对象）
+            string json = JsonConvert.SerializeObject(this);
+            DeepSeekRequest copy = JsonConvert.DeserializeObject<DeepSeekRequest>(json);
+            copy.tool_choice = keepToolChoice;
+            return copy;
+        }
+        finally
+        {
+            tool_choice = keepToolChoice;
+        }
     }
 }
 #endregion
@@ -679,6 +693,15 @@ public static class AIRequest
         }
     }
 
+    /// <summary>把 HTTP 失败信息拼成可诊断的字符串：错误、状态码、响应体（服务端的真实原因通常只在 body 里）。</summary>
+    private static string DescribeHttpFailure(UnityWebRequest request)
+    {
+        string body = "";
+        try { body = request.downloadHandler != null ? request.downloadHandler.text : ""; } catch { body = ""; }
+        if (body != null && body.Length > 600) body = body.Substring(0, 600) + "...";
+        return $"API Error: {request.error} / HTTP {(int)request.responseCode} / body: {body}";
+    }
+
     //非流式
     private static async Task SendAsync(string jsonData, RequestInfo requestInfo)
     {
@@ -766,7 +789,7 @@ public static class AIRequest
         }
         else
         {
-            requestInfo.onError?.Invoke($"API Error: {request.error}");
+            requestInfo.onError?.Invoke(DescribeHttpFailure(request));
         }
         request.Dispose();
     }
@@ -860,7 +883,7 @@ public static class AIRequest
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            requestInfo.onError?.Invoke($"API Error: {request.error}");
+            requestInfo.onError?.Invoke(DescribeHttpFailure(request));
             request.Dispose();
             return;
         }

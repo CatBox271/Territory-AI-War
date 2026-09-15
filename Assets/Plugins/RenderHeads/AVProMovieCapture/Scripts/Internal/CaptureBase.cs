@@ -1294,6 +1294,7 @@ namespace RenderHeads.Media.AVProMovieCapture
 			return result;
 		}
 
+		public Action CaptureUpdate;
 		protected bool CanOutputFrame()
 		{
 			bool result = false;
@@ -1327,6 +1328,7 @@ namespace RenderHeads.Media.AVProMovieCapture
 					result = (_handle >= 0) && (watchdog < WatchDogLimit);
 				}
 			}
+			CaptureUpdate?.Invoke();
 			return result;
 		}
 

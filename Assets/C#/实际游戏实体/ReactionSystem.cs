@@ -294,7 +294,7 @@ public class ReactionSystem : MonoBehaviour, Itool
     {
         MapConfig config = MapConfig.Instance;
         if (config == null)
-            return new ToolOutcome("使用道具失败：炮塔无法锁定4格外的目标，但是指向具体的坐标可以。");
+            return new ToolOutcome("使用道具失败：游戏配置(MapConfig)不存在。");
 
         if (callStage < 0 || callStage >= config.teamProps.Length)
             return new ToolOutcome($"使用道具失败：当前角色阵营 {callStage} 无效。");
@@ -312,9 +312,9 @@ public class ReactionSystem : MonoBehaviour, Itool
         PropEntry prop = props[args.index - 1];
 
         // 先解析朝向，失败时不消耗道具。
-        ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y);
+        ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y, out string aimError);
         if (!string.IsNullOrWhiteSpace(args.target_guid) && aim == null)
-            return new ToolOutcome($"使用道具失败：找不到目标 guid：{args.target_guid}。");
+            return new ToolOutcome($"使用道具失败：{aimError}。");
         if (string.IsNullOrWhiteSpace(args.target_guid) && (args.aim_x.HasValue != args.aim_y.HasValue))
             return new ToolOutcome("使用道具失败：aim_x 和 aim_y 必须同时提供。");
 
@@ -368,19 +368,28 @@ public class ReactionSystem : MonoBehaviour, Itool
     /// 朝向解析：
     /// 1. 优先 target_guid：直接用 InformGetter 注册过的场上实体。
     /// 2. 其次 aim_x/aim_y：移动一个无渲染的隐藏锚点，让 AimController 持续锁定该点。
+    /// 失败时 error 说明具体原因（目标已被击杀 / guid 不存在 / 没给目标），供工具文案直接回给 AI。
     /// </summary>
-    private ItemType ResolveAim(string targetGuid, double? aimX, double? aimY)
+    private ItemType ResolveAim(string targetGuid, double? aimX, double? aimY, out string error)
     {
+        error = null;
+        string guidMissReason = null;
+
         if (!string.IsNullOrWhiteSpace(targetGuid))
         {
-            if (InformGetter.GuidToTransform.TryGetValue(targetGuid.Trim(), out Transform target) && target != null)
+            string guid = targetGuid.Trim();
+            if (InformGetter.GuidToTransform.TryGetValue(guid, out Transform target) && target != null)
             {
                 IStageValue targetSv = target.GetComponent<IStageValue>();
                 if (targetSv != null && WhisperManager.IsDead(targetSv.stage))
+                {
+                    error = $"{targetSv.stage}号阵营({AIAgent.GetStageName(targetSv.stage)}) 已被击杀，这个 guid 已失效";
                     return null;//目标角色已被击杀，禁止工具指向它
+                }
                 return new ItemType(target, "AI瞄准目标");
             }
-            // guid 失效时继续尝试坐标瞄准
+            // guid 失效时继续尝试坐标瞄准，但记下原因
+            guidMissReason = $"找不到目标 guid：{guid}（目标可能已被摧毁或已过期）";
         }
 
         if (aimX.HasValue && aimY.HasValue)
@@ -394,6 +403,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             return new ItemType(aimAnchor, "AI瞄准点");
         }
 
+        error = guidMissReason ?? "没有给出瞄准目标（target_guid 或 aim_x+aim_y）";
         return null;
     }
 
@@ -421,26 +431,31 @@ public class ReactionSystem : MonoBehaviour, Itool
         if (action == "stop")
         {
             aimController.StopControl();
-            return new ToolOutcome("已停止炮塔控制，炮塔恢复自动旋转。", "停止炮塔控制");
+            return new ToolOutcome("已停止炮塔控制，炮塔恢复自动旋转自动防御。", "停止炮塔控制");
         }
         if (action != "start")
             return new ToolOutcome($"炮塔控制失败：action 无效：{args.action}。可选值：start、stop。");
 
-        ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y);
+        ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y, out string aimError);
         if (aim == null)
         {
-            if (!string.IsNullOrWhiteSpace(args.target_guid))
-                return new ToolOutcome($"炮塔控制失败：找不到目标 guid：{args.target_guid}。");
             if (args.aim_x.HasValue != args.aim_y.HasValue)
-                return new ToolOutcome("炮塔控制失败：aim_x 和 aim_y 必须同时提供。");
-            return new ToolOutcome("炮塔控制失败：start 需要指定瞄准目标（target_guid 或 aim_x+aim_y）。");
+                return new ToolOutcome("炮塔控制失败：aim_x 和 aim_y 必须同时提供。炮塔保持自动旋转自动防御。");
+            return new ToolOutcome($"炮塔控制失败：{aimError}。炮塔保持自动旋转自动防御。");
         }
 
+        // 瞄不了就别接管：超过 4 格 AimController 会立刻断开，那还不如不接管、保持自动防御。
+        float distance = Vector2.Distance(aim.pos, towel.transform.position);
+        if (distance > aimController.MaxDis)
+            return new ToolOutcome(
+                $"炮塔控制失败：目标距离 {distance:0.00} 超过炮塔最大跟踪距离 {aimController.MaxDis:0.00}，无法瞄准；"
+                + "未接管炮塔，它保持自动旋转自动防御。想打远处请用大球、霰弹这类有指向性的道具。");
+
         if (!aimController.StartControl(aim))
-            return new ToolOutcome("炮塔控制失败：瞄准目标无效。");
+            return new ToolOutcome("炮塔控制失败：瞄准目标无效。炮塔保持自动旋转自动防御。");
 
         return new ToolOutcome(
-            $"炮塔开始持续瞄准 {aim.pos}（最多持续12秒，超时或目标消失会自动恢复自动旋转）。",
+            $"炮塔开始持续瞄准 {aim.pos}（距离 {distance:0.00}，最多持续12秒；超时、目标离开 4 格或目标消失会自动恢复自动旋转）。",
             $"炮塔持续瞄准 {DescribeAimTarget(aim)}");
     }
 

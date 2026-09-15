@@ -1003,11 +1003,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8276730081192506186, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_LocalScale.x
-      value: 2.414122
+      value: 2.5106869
       objectReference: {fileID: 0}
     - target: {fileID: 9053751718362533022, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_Name
-      value: 2 (1)
+      value: "\xD74"
       objectReference: {fileID: 0}
     - target: {fileID: 9053751718362533022, guid: 1b16c4f54d47db745a6930fac5038312, type: 3}
       propertyPath: m_Layer
