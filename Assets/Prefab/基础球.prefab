@@ -41,7 +41,7 @@ TrailRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1595531244661921068}
   m_Enabled: 1
-  m_CastShadows: 1
+  m_CastShadows: 0
   m_ReceiveShadows: 0
   m_DynamicOccludee: 0
   m_StaticShadowCaster: 0
@@ -203,7 +203,7 @@ TrailRenderer:
     textureScale: {x: 1, y: 1}
     shadowBias: 0.5
     generateLightingData: 0
-  m_MinVertexDistance: 0.5
+  m_MinVertexDistance: 0.02
   m_MaskInteraction: 0
   m_Autodestruct: 0
   m_Emitting: 1
@@ -589,6 +589,7 @@ MonoBehaviour:
   shortDisplay: 1
   outlineColor: {r: 0, g: 0, b: 0, a: 0}
   outlineWidth: 0
+  invincibleLabel: "\u65E0\u654C\u65F6\u95F4: "
 --- !u!23 &3967913570602742917
 MeshRenderer:
   m_ObjectHideFlags: 0

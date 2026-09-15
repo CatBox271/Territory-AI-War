@@ -134,7 +134,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = MoveTurretToolName,
-                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。移动中可以再走一次预览+确认改道。移动不会让其他 AI 知道你的新位置——他们只能靠大球/子弹撞上你护盾或炮塔本体时的撞击情报来推断。",
+                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动固定消耗升级能量（固定单次扣除、与距离无关，具体数值见预览返回），能量不足则无法移动。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。移动中可以再走一次预览+确认改道；改道算新的一次移动、再扣一次能量。移动不会让其他 AI 知道你的新位置——他们只能靠大球/子弹撞上你护盾或炮塔本体时的撞击情报来推断。",
                 parameters = new
                 {
                     type = "object",
@@ -521,15 +521,28 @@ public class ReactionSystem : MonoBehaviour, Itool
                 return new ToolOutcome("移动炮塔失败：没有待确认的移动预览（或者已超过 60 秒过期）。请先给方向和距离做一次预览，再传 confirm=true。");
             }
 
+            // 先检查能量、再扣除，最后才开始移动
+            MarbleManager mm = MarbleManager.Instance;
+            float cost = mm != null ? mm.moveEnergyCost : 0f;
+            if (mm != null && !mm.TrySpendUpgradeEnergy(callStage, cost))
+                return new ToolOutcome("移动炮塔失败：升级能量不足（本次移动需要 " + cost.ToString("0.#")
+                    + "，当前 " + mm.GetUpgradeEnergy(callStage).ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。");
+
             pendingMoves.Remove(callStage);
             Vector2 from = towel.transform.position;
             towel.StartMove(preview.dir, preview.distance);
             float eta = preview.distance / Mathf.Max(towel.moveSpeed, 0.0001f);
             string dirText = InformGetter.CardinalDirection(preview.dir);
+            string energyText = mm != null
+                ? "已扣除 " + cost.ToString("0.#") + " 能量（剩余 " + mm.GetUpgradeEnergy(callStage).ToString("0.#") + "）。"
+                : "";
+            if (preview.distance <= 0f)
+                return new ToolOutcome("炮塔已停下（原地不动）。" + energyText, "【炮塔停下】");
+
             return new ToolOutcome(
                 "已开始移动：" + towel.MoveStateText + "（从 (" + from.x.ToString("0.00") + ", " + from.y.ToString("0.00")
                 + ") 朝 " + dirText + " 移动 " + preview.distance.ToString("0.00") + "，预计 " + eta.ToString("0.0")
-                + " 秒；到达、撞到地图边界或超时会通知你）。",
+                + " 秒；到达、撞到地图边界或超时会通知你）。" + energyText,
                 $"【移动炮塔】朝 {dirText} 移动 {preview.distance.ToString("0.00")}");
         }
 
@@ -559,6 +572,14 @@ public class ReactionSystem : MonoBehaviour, Itool
                 out Vector2 target, out float travel, out string warning, out string error))
             return new ToolOutcome(error);
 
+        // 能量：预览阶段先查一遗（不足就不给预览，避免白确认一次）
+        MarbleManager mmPreview = MarbleManager.Instance;
+        float moveCost = mmPreview != null ? mmPreview.moveEnergyCost : 0f;
+        float moveEnergy = mmPreview != null ? mmPreview.GetUpgradeEnergy(callStage) : 0f;
+        if (mmPreview != null && moveEnergy < moveCost)
+            return new ToolOutcome("移动炮塔失败：升级能量不足（本次移动需要 " + moveCost.ToString("0.#")
+                + "，当前 " + moveEnergy.ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。");
+
         pendingMoves[callStage] = new MovePreview { dir = dir.normalized, distance = travel, time = Time.time };
 
         Vector2 nd = dir.normalized;
@@ -574,6 +595,9 @@ public class ReactionSystem : MonoBehaviour, Itool
             + etaPreview.ToString("0.0") + " 秒（速度 " + towel.moveSpeed.ToString("0.00") + "/秒）");
         sb.AppendLine("  你的最大移动距离 " + towel.MaxMoveDistance.ToString("0.00") + "，可移动范围 x,y ∈ [-"
             + towel.MoveBound.ToString("0.00") + ", " + towel.MoveBound.ToString("0.00") + "]");
+        if (mmPreview != null)
+            sb.AppendLine("  本次移动消耗 " + moveCost.ToString("0.#") + " 能量（固定单次扣除，与距离无关；当前 "
+                + moveEnergy.ToString("0.#") + " → 移动后剩余 " + (moveEnergy - moveCost).ToString("0.#") + "）");
         if (!string.IsNullOrEmpty(warning)) sb.AppendLine("  ⚠ " + warning);
         sb.Append("如需执行，请再调用一次 move_turret 并传 confirm=true（不要再传方向与距离）。");
 

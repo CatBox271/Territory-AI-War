@@ -16,7 +16,7 @@ using UnityEngine.Rendering;
 /// * 网格用 HideFlags.DontSave 且能复用，不污染工程；改参数或重开时自动重建。
 /// </summary>
 [ExecuteAlways]
-public class SpriteMeshDisplay : MonoBehaviour
+public class SceneSpriteDisplay : MonoBehaviour
 {
     [Header("Sprite（一个组件只显示这一个）")]
     public Sprite sprite;
@@ -181,12 +181,12 @@ public class SpriteMeshDisplay : MonoBehaviour
         return spriteSize * k;
     }
 
-    /// <summary>容器框尺寸：WallEditor 可能在自己身上、也可能在子物体或父物体上（脚本常挂在容器上一层）。</summary>
+    /// <summary>容器框尺寸：ContainerMesh 可能在自己身上、也可能在子物体或父物体上（脚本常挂在容器上一层）。</summary>
     public Vector2 GetFrameSize()
     {
-        WallEditor frame = GetComponent<WallEditor>();
-        if (frame == null) frame = GetComponentInChildren<WallEditor>(true);
-        if (frame == null) frame = GetComponentInParent<WallEditor>(true);
+        ContainerMesh frame = GetComponent<ContainerMesh>();
+        if (frame == null) frame = GetComponentInChildren<ContainerMesh>(true);
+        if (frame == null) frame = GetComponentInParent<ContainerMesh>(true);
         return frame != null ? new Vector2(frame.width, frame.heigth) : Vector2.zero;
     }
 

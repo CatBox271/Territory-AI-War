@@ -160,7 +160,7 @@ public class Towel : MonoBehaviour, IStageValue
         moveStartTime = Time.time;
         moving = true;
 
-        if (d <= 0f) StopMove("已抵达目标(原地不动)");
+        if (d <= 0f) StopMove("原地停下");
     }
 
     /// <summary>停止移动；reason 非空时记一条一次性提示给 AI。</summary>

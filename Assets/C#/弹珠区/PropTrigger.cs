@@ -28,7 +28,7 @@ public class PropTrigger : MonoBehaviour
         if (MarbleManager.Instance != null)
         {
             marble.SetInitialValue(MarbleManager.Instance.initialValueExponent);
-            var shooter = MarbleManager.Instance.GetRandomShooter();
+            var shooter = MarbleManager.Instance.GetShooter();
             if (shooter != null)
                 marble.Home(shooter);
         }

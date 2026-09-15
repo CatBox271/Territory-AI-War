@@ -506,7 +506,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eb6ee182d4c75ba458769f6d060d248c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sp: {fileID: 0}
+  sp: {fileID: 2351046282652987540}
   intensityPerHit: 0.4
   decayDuration: 3
 --- !u!1 &4338203946166271588

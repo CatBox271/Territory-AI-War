@@ -1007,7 +1007,7 @@ public class AIAgent : MonoBehaviour
 - **炮塔：** 被敌方攻击有效命中即**立即死亡**，该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
-- **移动：** 炮塔可以移动（用 move_turret），移动不会让其他 AI 知道你的新位置。
+- **移动：** 炮塔可以移动（用 move_turret），**每次移动固定消耗 @MOVE_ENERGY_COST@ 点升级能量**（固定单次扣除、与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动）。移动不会让其他 AI 知道你的新位置。
 - **胜负：** 成为最后存活的一方、并把领土推到 98%（系统的结束判定）才算赢；只剩你一个阵营后，还要把场上敌方游离的大球和子弹清掉。
 - **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。想知道对手在哪，只能靠**撞击情报**——你的子弹或大球撞上对方护盾/炮塔本体时，系统会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
 
@@ -1103,7 +1103,10 @@ public class AIAgent : MonoBehaviour
             // 否则会得到空值（“每队初始拥有  个弹珠”）。改成每次构建提示词时现算。
             int marbleCount = MarbleManager.Instance != null ? MarbleManager.Instance.initialMarbleCount : 3;
             string delayText = Instance != null ? Instance._cycleInterval.ToString("0.#") : "0";
-            string text = world.Replace("@MARBLE_COUNT@", marbleCount.ToString()).Replace("@INFO_DELAY@", delayText);
+            string moveCostText = MarbleManager.Instance != null ? MarbleManager.Instance.moveEnergyCost.ToString("0.#") : "50";
+            string text = world.Replace("@MARBLE_COUNT@", marbleCount.ToString())
+                .Replace("@INFO_DELAY@", delayText)
+                .Replace("@MOVE_ENERGY_COST@", moveCostText);
 
             return $"{text}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。";
         }

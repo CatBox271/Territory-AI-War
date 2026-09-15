@@ -18,8 +18,8 @@ public class TerritoryCanvas : MonoBehaviour
     public ComputeShader clearFlagCompute;
     public Material quadMaterial;
 
-    [Header("阵营领土贴图（1~4号阵营，1024x1024，正片叠底）")]
-    public Texture[] territoryTextures = new Texture[4];
+    [Header("阵营领土贴图（0~4号阵营，索引=阵营号，1024x1024，正片叠底）")]
+    public Texture[] territoryTextures = new Texture[5];
     [Header("交界提亮（按方向，bright=1 表示无效果）")]
     public BorderDirectionSettings borderUp = new BorderDirectionSettings { width = 2f, bright = 1f };
     public BorderDirectionSettings borderDown = new BorderDirectionSettings { width = 2f, bright = 1f };
@@ -40,14 +40,16 @@ public class TerritoryCanvas : MonoBehaviour
         Shader.PropertyToID("_TerritoryTex0"),
         Shader.PropertyToID("_TerritoryTex1"),
         Shader.PropertyToID("_TerritoryTex2"),
-        Shader.PropertyToID("_TerritoryTex3")
+        Shader.PropertyToID("_TerritoryTex3"),
+        Shader.PropertyToID("_TerritoryTex4")
     };
     private static readonly int[] HasTexIds =
     {
         Shader.PropertyToID("_HasTex0"),
         Shader.PropertyToID("_HasTex1"),
         Shader.PropertyToID("_HasTex2"),
-        Shader.PropertyToID("_HasTex3")
+        Shader.PropertyToID("_HasTex3"),
+        Shader.PropertyToID("_HasTex4")
     };
     private Texture2D whiteTex;
     private int displayKernel = -1;
@@ -126,7 +128,7 @@ public class TerritoryCanvas : MonoBehaviour
 
         paintCompute.SetTexture(displayKernel, "DataResult", dataRT);
         paintCompute.SetTexture(displayKernel, "DisplayResult", displayRT);
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 5; i++)
         {
             bool has = territoryTextures != null && i < territoryTextures.Length && territoryTextures[i] != null;
             paintCompute.SetTexture(displayKernel, TerritoryTexIds[i], has ? territoryTextures[i] : whiteTex);

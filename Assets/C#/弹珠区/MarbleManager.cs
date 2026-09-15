@@ -12,13 +12,13 @@ public class MarbleManager : MonoBehaviour
     [Header("Prefabs & Refs")]
     public GameObject MarbleOb;
     public Transform Shooter;
-    public Transform Shooter2;
     public Transform spawnArea;
 
     [Header("Settings")]
     public int initialMarbleCount = 3;
     public float initialSpawnDelay = 0.3f;
     public uint initialValueExponent = 10;
+    public uint FirstValueExponent = 20;
     public uint startValueExponent = 10;
     public HugeInt maxValue;
     public float gravity = 0.1f;
@@ -33,6 +33,8 @@ public class MarbleManager : MonoBehaviour
     public float upgradePerEmptySlotPerSecond = 1f;
     [Tooltip("升级值达到该数值后，给对应 AI 阵营额外生成一个弹珠")]
     public float upgradeCost = 100f;
+    [Tooltip("炮塔移动一次消耗的升级能量（固定单次扣除，与移动距离无关）")]
+    public float moveEnergyCost = 50f;
 
     // 参与空槽升级的 AI 阵营，以及各自的升级进度。
     private readonly HashSet<int> aiStages = new();
@@ -77,6 +79,7 @@ public class MarbleManager : MonoBehaviour
         StartCoroutine(SpawnInitial());
     }
 
+    bool first = true;
     IEnumerator SpawnInitial()
     {
         for (int i = 0; i < initialMarbleCount; i++)
@@ -85,6 +88,7 @@ public class MarbleManager : MonoBehaviour
                 SpawnAndLaunch(stage);
             yield return new WaitForSeconds(initialSpawnDelay);
         }
+        first = false;
     }
 
     void Update()
@@ -274,6 +278,22 @@ public class MarbleManager : MonoBehaviour
         cost = upgradeCosts.TryGetValue(stage, out float c) ? c : upgradeCost;
         return aiStages.Contains(stage) || upgradeProgress.ContainsKey(stage);
     }
+
+    /// <summary>当前可用的升级能量（即空槽升级进度）。</summary>
+    public float GetUpgradeEnergy(int stage)
+    {
+        return upgradeProgress.TryGetValue(stage, out float p) ? p : 0f;
+    }
+
+    /// <summary>尝试扣除升级能量：足够则扣掉并返回 true；不够则返回 false 且不扣。</summary>
+    public bool TrySpendUpgradeEnergy(int stage, float amount)
+    {
+        if (amount <= 0f) return true;
+        float progress = GetUpgradeEnergy(stage);
+        if (progress < amount) return false;
+        upgradeProgress[stage] = progress - amount;
+        return true;
+    }
     /// <summary>供空槽升级等系统外部调用，给指定阵营额外生成并发射一个弹珠。</summary>
     public void SpawnMarbleForStage(int stage)
     {
@@ -296,7 +316,7 @@ public class MarbleManager : MonoBehaviour
         if (m != null)
         {
             m.stage = stage;
-            m.SetInitialValue(startValueExponent);
+            m.SetInitialValue(first? FirstValueExponent: startValueExponent);
             //注册到InformGeter供AI数据收集
             InformGetter.AddMarble(stage, m);
         }
@@ -305,6 +325,13 @@ public class MarbleManager : MonoBehaviour
         {
             Rigidbody2D rb = ob.GetComponent<Rigidbody2D>();
             if (rb != null) shooterComp.Launch(rb);
+        }
+
+        var col = ob.GetComponent<Collider2D>();
+        foreach (var teamob in teamMarbleObs[stage])
+        {
+            //同队无碰撞
+            Physics2D.IgnoreCollision(col, teamob.GetComponent<Collider2D>());
         }
 
         teamMarbleObs[stage].Add(ob);
@@ -333,10 +360,8 @@ public class MarbleManager : MonoBehaviour
         list.Clear();
     }
 
-    public Shooter GetRandomShooter()
+    public Shooter GetShooter()
     {
-        if (Shooter2 != null && Random.value < 0.5f)
-            return Shooter2.GetComponent<Shooter>();
         return Shooter != null ? Shooter.GetComponent<Shooter>() : null;
     }
 }

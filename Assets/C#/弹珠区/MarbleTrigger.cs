@@ -19,7 +19,7 @@ public class MarbleTrigger : MonoBehaviour
 
         if (MarbleManager.Instance != null)
         {
-            var shooter = MarbleManager.Instance.GetRandomShooter();
+            var shooter = MarbleManager.Instance.GetShooter();
             if (shooter != null)
                 marble.Home(shooter);
         }

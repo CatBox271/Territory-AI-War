@@ -95,6 +95,10 @@ PrefabInstance:
       propertyPath: m_Color.a
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 957933178049866600, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: m_Mesh
+      value: 
+      objectReference: {fileID: 0}
     - target: {fileID: 1517615015914164464, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_Name
       value: Mesh
@@ -123,6 +127,22 @@ PrefabInstance:
       propertyPath: m_LocalPosition.y
       value: -5.05
       objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: width
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: heigth
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: wall_color.a
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: background_color.a
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 4401578595131417059, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_Color.a
       value: 0
@@ -147,13 +167,17 @@ PrefabInstance:
       propertyPath: m_LocalPosition.x
       value: 5.05
       objectReference: {fileID: 0}
+    - target: {fileID: 5636479345541305707, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: m_Mesh
+      value: 
+      objectReference: {fileID: 0}
     - target: {fileID: 6206934735769479382, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_LocalScale.x
-      value: 10
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 6206934735769479382, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_LocalScale.y
-      value: 10
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 6800007801421364090, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: width

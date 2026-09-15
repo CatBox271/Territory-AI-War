@@ -369,6 +369,12 @@ public class InformGetter : MonoBehaviour
             builder.Append("你的炮塔: 当前位置 (");
             builder.Append(p.x.ToString("0.00")); builder.Append(", "); builder.Append(p.y.ToString("0.00"));
             builder.Append(")，最大移动距离 "); builder.Append(self.MaxMoveDistance.ToString("0.00"));
+            MarbleManager mm = MarbleManager.Instance;
+            if (mm != null)
+            {
+                builder.Append("，移动一次消耗 "); builder.Append(mm.moveEnergyCost.ToString("0.#"));
+                builder.Append(" 能量(当前可用 "); builder.Append(mm.GetUpgradeEnergy(stage).ToString("0.#")); builder.Append(")");
+            }
             builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append(", "); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append("]，状态: "); builder.Append(self.MoveStateText);

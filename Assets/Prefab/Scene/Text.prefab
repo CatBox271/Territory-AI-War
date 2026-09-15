@@ -58,7 +58,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 08ac1adc618d25449b0000e522b49046, type: 2}
+  - {fileID: 2100000, guid: 450969fe4dd512848b8a52945dd37d39, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -103,7 +103,7 @@ MonoBehaviour:
   m_text: 12
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: e9393ad040c697e44a297e89c2cd5791, type: 2}
-  m_sharedMaterial: {fileID: 2100000, guid: 08ac1adc618d25449b0000e522b49046, type: 2}
+  m_sharedMaterial: {fileID: 2100000, guid: 450969fe4dd512848b8a52945dd37d39, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 2100000, guid: 08ac1adc618d25449b0000e522b49046, type: 2}
   m_fontMaterials: []
@@ -291,6 +291,10 @@ PrefabInstance:
       propertyPath: m_LocalPosition.x
       value: 2.55
       objectReference: {fileID: 0}
+    - target: {fileID: 5636479345541305707, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: m_Mesh
+      value: 
+      objectReference: {fileID: 0}
     - target: {fileID: 8939411327253701158, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -337,10 +341,30 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 8939411327253701158, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       insertIndex: -1
       addedObject: {fileID: 2826728683461867700}
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 1517615015914164464, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 3267943613406078906}
   m_SourcePrefab: {fileID: 100100000, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
 --- !u!4 &768548140086074770 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8939411327253701158, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
   m_PrefabInstance: {fileID: 8549315656402698164}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &7181802814644793156 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 1517615015914164464, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+  m_PrefabInstance: {fileID: 8549315656402698164}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &3267943613406078906
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7181802814644793156}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5575a66ed62e0746a463888371a7b74, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
