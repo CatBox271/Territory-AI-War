@@ -46,6 +46,15 @@ public class FieldArrivalModifier : MonoBehaviour
     [Header("通用")]
     [Tooltip("全局动画速度倍率")]
     public float speedMultiplier = 1f;
+    [Tooltip("用不受 timeScale 影响的真实时间推进（useStageClock 关闭时才生效）")]
+    public bool useUnscaledTime = false;
+    [Tooltip("用**舞台时钟**推进：一个游戏帧一 tick，一 tick = 1/CaptureFrame 秒。" +
+             "舞台上的 Text 用这个（和 WaitForCaptureUpdate 同一个钟），速度和演出其它部分一致、录像里确定；" +
+             "战场上的飘字保持关闭")]
+    public bool useStageClock = false;
+
+    private int _stageFrame = int.MinValue;
+    private int _stageWait;
     [Tooltip("激活时自动播放")]
     public bool playOnEnable = true;
 
@@ -98,6 +107,7 @@ public class FieldArrivalModifier : MonoBehaviour
         if (_text == null) return;
         _state = State.Entering;
         _timer = 0f;
+        _stageFrame = int.MinValue;   // 舞台时钟：下一帧只记基准，不把中间停的时间补进来
         _text.alpha = 1f;
         CacheTargetVertices();
     }
@@ -107,6 +117,17 @@ public class FieldArrivalModifier : MonoBehaviour
         if (_text == null) return;
         _text.text = newText;
         Play();
+    }
+
+    /// <summary>
+    /// 立刻按 t=0 把入场状态算一遍（不推进时间）。
+    /// Play / PlayWithText 之后必须调一次：不然这一段字会先以「最终位置 + 全亮」渲染一帧，
+    /// 下一帧 Update 才把它们拉回起点 —— 看起来就是「先出现到最终位置再弹动画」。
+    /// </summary>
+    public void ApplyEnterNow()
+    {
+        if (_state != State.Entering || _text == null || _originalVertices == null) return;
+        ApplyEnterModification();
     }
 
     public void PlayFallOut()
@@ -248,7 +269,28 @@ public class FieldArrivalModifier : MonoBehaviour
     void Update()
     {
         if (_text == null || _originalVertices == null) return;
-        float dt = Time.deltaTime * speedMultiplier;
+
+        float dt;
+        if (useStageClock)
+        {
+            dt = StageClockDelta();
+            if (dt <= 0f)
+            {
+                // 舞台时钟这一帧没动（没 tick / 没有 StoryTeller）：连续几帧不动就退回真实时间，
+                // 免得整段字一直卡在「还没入场」的不可见状态出不来。
+                _stageWait++;
+                if (_stageWait < 5) return;
+                dt = Time.unscaledDeltaTime * speedMultiplier;
+            }
+            else
+            {
+                _stageWait = 0;
+            }
+        }
+        else
+        {
+            dt = (useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime) * speedMultiplier;
+        }
 
         switch (_state)
         {
@@ -256,6 +298,29 @@ public class FieldArrivalModifier : MonoBehaviour
             case State.Idle:     UpdateIdle(dt);  break;
             case State.Falling:  UpdateFall(dt);  break;
         }
+    }
+
+    /// <summary>
+    /// 这一帧舞台推进了多少秒。只**读**舞台时钟的帧计数（StoryTeller.ClockFrame），不订阅、不改它的逻辑：
+    /// 舞台一帧 = 1/CaptureFrame 秒，游戏跑多少帧它就推进多少，所以录像里的速度是确定的。
+    /// 舞台不在（编辑器里单独看 prefab）时返回 0，动画就停着。
+    /// </summary>
+    private float StageClockDelta()
+    {
+        StoryTeller stage = StoryTeller.Instance;
+        if (stage == null) return 0f;
+
+        int f = stage.ClockFrame;
+        if (_stageFrame == int.MinValue)   // 刚播：只记基准，不补这一帧
+        {
+            _stageFrame = f;
+            return 0f;
+        }
+        if (f == _stageFrame) return 0f;   // 舞台这一帧没动
+
+        int ticks = f - _stageFrame;
+        _stageFrame = f;
+        return ticks * stage.ClockDelta * speedMultiplier;
     }
 
     void UpdateIdle(float dt)

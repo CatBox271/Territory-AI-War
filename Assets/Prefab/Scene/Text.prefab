@@ -78,7 +78,7 @@ MeshRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 5
+  m_SortingOrder: 3
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!114 &7318217043385592606
 MonoBehaviour:
@@ -100,7 +100,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 12
+  m_text: 
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: e9393ad040c697e44a297e89c2cd5791, type: 2}
   m_sharedMaterial: {fileID: 2100000, guid: 450969fe4dd512848b8a52945dd37d39, type: 2}
@@ -145,7 +145,7 @@ MonoBehaviour:
   m_paragraphSpacing: 0
   m_charWidthMaxAdj: 0
   m_TextWrappingMode: 1
-  m_wordWrappingRatios: 0.4
+  m_wordWrappingRatios: 0
   m_overflowMode: 0
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
@@ -171,7 +171,7 @@ MonoBehaviour:
   m_isVolumetricText: 0
   _SortingLayer: 0
   _SortingLayerID: 0
-  _SortingOrder: 0
+  _SortingOrder: 3
   m_hasFontAssetChanged: 0
   m_renderer: {fileID: 1756807768914609510}
   m_maskType: 0
@@ -265,12 +265,14 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   randomRotationMax: 360
-  fadable: 1
+  fadable: 0
   fallFadeTime: 0.4
   charDisplayTime: 0.1
   minDisplayTime: 3
   speedMultiplier: 1
-  playOnEnable: 1
+  useUnscaledTime: 0
+  useStageClock: 1
+  playOnEnable: 0
 --- !u!1001 &8549315656402698164
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -282,6 +284,26 @@ PrefabInstance:
     - target: {fileID: 1517615015914164464, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_Name
       value: Text
+      objectReference: {fileID: 0}
+    - target: {fileID: 2331557120238434796, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: wall_width.w
+      value: 0.08
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: wall_width.x
+      value: 0.08
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: wall_width.y
+      value: 0.08
+      objectReference: {fileID: 0}
+    - target: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+      propertyPath: wall_width.z
+      value: 0.08
       objectReference: {fileID: 0}
     - target: {fileID: 4991728983364554510, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
       propertyPath: m_LocalPosition.x
@@ -351,6 +373,17 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 8939411327253701158, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
   m_PrefabInstance: {fileID: 8549315656402698164}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &4834941235912824411 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 3872088685414033903, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
+  m_PrefabInstance: {fileID: 8549315656402698164}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7181802814644793156}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 10ae61b946f4f4344adb0989622b5120, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &7181802814644793156 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 1517615015914164464, guid: ff5029a57dce3c644b54366c050750d4, type: 3}
@@ -368,3 +401,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a5575a66ed62e0746a463888371a7b74, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  container: {fileID: 4834941235912824411}
+  text: {fileID: 7318217043385592606}
+  anim: {fileID: 5527435774066037030}
+  size: {x: 5, y: 5}
+  containerColor: {r: 0.21960784, g: 0.21960784, b: 0.21960784, a: 1}
+  wallColor: {r: 1, g: 1, b: 1, a: 1}
+  textColor: {r: 1, g: 1, b: 1, a: 1}
+  cornerRadius: 0.5
+  wallWidth: 0.08
+  content: 
+  fontSize: 30
+  alignment: 514
+  textPadding: 0
+  typeMaxSeconds: 3
+  overflow: 0
+  sortingOrder: 1
+  textMaterial: {fileID: 0}
+  outlineWidth: 0
+  outlineColor: {r: 0, g: 0, b: 0, a: 1}
+  faceDilate: 0
+  refresh: 0

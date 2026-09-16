@@ -109,9 +109,16 @@ Shader "Custom/ContainerMesh"
                 float dInner = sdRoundBox(p, innerHalf, cornerRadius(p, _RadiusInner));
                 float covInner = saturate(0.5 - dInner / aa);
 
+                // 墙厚为 0 时（舞台卡片就是这种：StageStyle.Wall = 0）没有"墙环"这回事：
+                // innerHalf 与内角半径都等于外框，dInner 与 dOuter 逐像素相同，t 会恒等于 1 - covOuter，
+                // 整块底板就被画成"墙色"、背景色只剩边缘一圈 AA —— 脚本传进来的 _BackColor 形同失效。
+                // 按墙厚总量判断：没有墙 → 整块取背景色。
+                float wallSum = _WallWidth.x + _WallWidth.y + _WallWidth.z + _WallWidth.w;
+                float noWall = step(wallSum, 1e-5);
+                float t = (1.0 - covInner) * (1.0 - noWall);   // 墙环权重：1 = 墙色，0 = 背景色
+
                 // 一个 pass 把整块容器画完：内孔边界只是同一个像素里的颜色过渡（自带抗锯齿，不存在
                 // 两个渲染器叠加导致的 1 像素透底），外轮廓再用 covOuter 收边。
-                float t = 1.0 - covInner;   // 墙环权重：1 = 墙色，0 = 背景色
                 fixed4 c;
                 c.rgb = lerp(_BackColor.rgb, _WallColor.rgb, t);
                 c.a = lerp(_BackColor.a, _WallColor.a, t) * covOuter;

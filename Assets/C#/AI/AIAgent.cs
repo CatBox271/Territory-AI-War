@@ -10,6 +10,19 @@ using System.Linq;
 using System.Text.RegularExpressions;
 
 /// <summary>
+/// 升级选择的完整结果：选择项 + AI 的思考内容（升级选择演出要用）。
+/// </summary>
+public class UpgradeChoiceResult
+{
+    /// <summary>1 = 额外弹珠，2 = 炮塔强化，3 = 护盾强化。</summary>
+    public int choice = 1;
+    /// <summary>AI 在“思考”那一步写的 reasoning_content（拿不到就空串）。</summary>
+    public string thinking = "";
+    /// <summary>AI 自己的正文回复（充当它“说出口的话”，可能为空）。</summary>
+    public string speech = "";
+}
+
+/// <summary>
 /// 拆分，在agent里留视频流程控制其他去掉
 /// </summary>
 public class AIAgent : MonoBehaviour
@@ -164,6 +177,10 @@ public class AIAgent : MonoBehaviour
     public readonly List<CharacterCard> cards = new();
     public int EachPassRound = 1;
     private readonly HashSet<int> deadStages = new();
+
+    /// <summary>开局那一轮正在进行：这一轮的发言交给开场演出按顺序播，不走飘字 / 立绘列表。</summary>
+    private bool openingRoundActive;
+    public bool OpeningRoundActive => openingRoundActive;
     private int soloSinceRound = -1;
     // 只剩一个阵营后的两条感言：宣告说出口就不再发；终局获奖感言说完（soloWinSpeechDone）才允许停 AI
     private bool soloDeclareSpeechFired;
@@ -318,6 +335,8 @@ public class AIAgent : MonoBehaviour
         string roundExtra = InformGetter.BuildRoundExtra();
 
         List<Task> tasks = new List<Task>();
+        bool openingRound = _round == 0;
+        openingRoundActive = openingRound;
         for (int i = 0; i < cards.Count; i++)
         {
             CharacterCard card = cards[i];
@@ -343,15 +362,48 @@ public class AIAgent : MonoBehaviour
             EnterOpeningRetryPause();
         }
         if (tasks.Count > 0) await Task.WhenAll(tasks);
+        openingRoundActive = false;
 
         // 一轮缓冲：本轮结束后清空发言缓冲、写入本轮发言，供下一轮情报读取
         InformGetter.CommitRoundSpeeches();
 
-        if (_round == 0)
+        if (openingRound)
         {
             ExitOpeningRetryPause();
+            PlayOpeningScene();
         }
         complete?.Invoke();
+    }
+
+    /// <summary>
+    /// 开场一条龙，三段在同一个舞台上连着演（背景不重开，所以是无缝的）：
+    ///   1) 游戏规则介绍  2) 四位角色的赛前狠话（先出思考、再放狠话）  3) 「游戏正式开始」横幅。
+    /// 原来的做法是四座炮塔同时飘字，互相盖住，现在改成一个人一个人上台。
+    /// </summary>
+    private void PlayOpeningScene()
+    {
+        if (!StoryTeller.CanPlay) return;
+
+        var lines = new List<OpeningTalkScene.Line>();
+        foreach (CharacterCard card in cards)
+        {
+            if (deadStages.Contains(card.position)) continue;
+            string speech = string.IsNullOrWhiteSpace(card.openingSpeech)
+                ? "……"
+                : ExtractEmotion(card.openingSpeech, out _, out _).Trim();
+            lines.Add(new OpeningTalkScene.Line
+            {
+                owner = card.position,
+                thinking = card.openingThinking ?? "",
+                speech = speech
+            });
+        }
+        if (lines.Count == 0) return;
+
+        StoryTeller show = StoryTeller.Instance;
+        //show.Play(new OpeningTalkScene(lines));             // 角色开场白
+        //show.Play(new GameStartBannerScene());              // 游戏正式开始
+        Debug.Log($"[开场演出] 已入队：规则 + {lines.Count} 位角色 + 开始横幅。");
     }
 
     private async Task RunCardAsync(CharacterCard card, string inform, string extra)
@@ -529,16 +581,25 @@ public class AIAgent : MonoBehaviour
             ?? message.tool_calls[0];
     }
 
+    /// <summary>旧签名：只要选择项（1 额外弹珠 / 2 炮塔强化 / 3 护盾强化）。</summary>
+    public async Task<int> RequestUpgradeChoiceAsync(int stage)
+    {
+        UpgradeChoiceResult result = await UpgradeChoiceRequestAsync(stage);
+        return result != null ? result.choice : 1;
+    }
+
     /// <summary>
     /// 升级触发时调用，两步走（都不占行动轮）：
     /// 1) 思考：thinking 开、tool_choice = null（工具表给上）——先让 AI 分析该选哪个，它也可能直接调用工具；
     /// 2) 提交：thinking 关、tool_choice 强制 choose_upgrade——强制 tool_choice 与思考模式互斥（实测开思考会 400）。
     /// 两步的完整新增对话（user 提示、assistant 思考、user 提交指令、assistant 工具调用、tool 回执）都写回 card.history。
+    /// 返回值带着 AI 的思考，供升级选择演出先播思考、再揭晓结果。
     /// </summary>
-    public async Task<int> RequestUpgradeChoiceAsync(int stage)
+    public async Task<UpgradeChoiceResult> UpgradeChoiceRequestAsync(int stage)
     {
+        UpgradeChoiceResult result = new UpgradeChoiceResult();
         CharacterCard card = cards.Find(c => c.position == stage);
-        if (card == null) return 1;
+        if (card == null) return result;
 
         int choice = 1;
         CapturePause.Pause();
@@ -557,7 +618,12 @@ public class AIAgent : MonoBehaviour
             thinkRequest.thinking = new ThinkingConfig(true);
 
             var think = await SendUpgradeRequest(thinkRequest, card, stage, "思考");
-            if (think.assistant != null) exchange.Add(think.assistant);
+            if (think.assistant != null)
+            {
+                exchange.Add(think.assistant);
+                result.thinking = think.assistant.reasoning_content ?? "";
+                result.speech = think.assistant.content ?? "";
+            }
 
             ToolCall call = FindChooseUpgradeCall(think.assistant);
             if (call != null)
@@ -584,7 +650,12 @@ public class AIAgent : MonoBehaviour
                 commitRequest.reasoning_effort = null;
 
                 var commit = await SendUpgradeRequest(commitRequest, card, stage, "提交");
-                if (commit.assistant != null) exchange.Add(commit.assistant);
+                if (commit.assistant != null)
+                {
+                    exchange.Add(commit.assistant);
+                    if (string.IsNullOrWhiteSpace(result.thinking)) result.thinking = commit.assistant.reasoning_content ?? "";
+                    result.speech = commit.assistant.content ?? "";
+                }
                 if (commit.toolReplies != null)
                     exchange.AddRange(commit.toolReplies.Where(m => m != null && m.role == "tool"));
 
@@ -614,7 +685,9 @@ public class AIAgent : MonoBehaviour
         {
             CapturePause.Resume();
         }
-        return choice;
+
+        result.choice = choice;
+        return result;
     }
 
     private static string BuildUpgradeChoicePrompt(CharacterCard card)
@@ -899,11 +972,13 @@ public class AIAgent : MonoBehaviour
         copy.tools = null;
         copy.tool_choice = null;
 
+        string thinking = "";
         var tcs = new TaskCompletionSource<string>();
         RequestInfo info = new(copy,
             msgs =>
             {
                 DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
+                if (last != null) thinking = last.reasoning_content ?? "";
                 tcs.TrySetResult(last != null ? last.content : "");
             },
             error => tcs.TrySetResult($"（回复请求失败：{error}）"),
@@ -914,7 +989,21 @@ public class AIAgent : MonoBehaviour
         info.apiUrl = card.url;
 
         AIRequest.SendRequest(info);
-        return await tcs.Task;
+        string reply = await tcs.Task;
+
+        // 把这次会晤搬到舞台上：两方上台 → 先出思考、再出回复。
+        // 返回给 WhisperManager 的仍然是原始回复文本，只在展示时去掉 [emo:xxx]。
+        if (StoryTeller.CanPlay)
+        {
+            StoryTeller.Instance.Play(new WhisperMeetingScene(
+                senderStage,
+                targetStage,
+                whisper,
+                thinking,
+                string.IsNullOrWhiteSpace(reply) ? "（无回复）" : ExtractEmotion(reply, out _, out _).Trim()));
+        }
+
+        return reply;
     }
 
 
@@ -1003,7 +1092,7 @@ public class AIAgent : MonoBehaviour
 - **数值：同阵营叠加，敌方抵消**（对子弹、大球、护盾等所有携带数值的单位通用）。
 - **领土：** 子弹和大球携带数值，将等量数值转化为地图上的己方领土；数值耗尽后消失。
 - **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回，成堆的子弹也能把它推开、改变它的路线。
-- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球，不阻挡己方。敌方护盾的当前大小不再是公开信息。大球是一次性撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开）。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔。每次撞击都会扣掉等量盾值，所以盾被撞一次基本就碎了。
+- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球（挡不住穿甲弹），不阻挡己方。敌方护盾的当前大小不再是公开信息。大球是一次性撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开）。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔。每次撞击都会扣掉等量盾值，所以盾被撞一次基本就碎了。
 - **炮塔：** 被敌方攻击有效命中即**立即死亡**，该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
@@ -1034,6 +1123,7 @@ public class AIAgent : MonoBehaviour
 - **扫射：** 将道具数值加入子弹储备，由炮塔持续释放，以炮塔朝向涂抹地面。
 - **护盾：** 将道具数值加入己方护盾。一定要及时补充——无盾被碰到即死，盾无论多小都能抵御一次大球。
 - **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。
+- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾不改变方向但会被拖慢、并持续啃掉盾值；撞到敌方炮塔本体即秒杀，击杀后弹体数值减半、可继续飞（能连杀）。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗与连杀。
 - **任意：** 任选以上一种道具。
 
 ## 七、最重要的规则：信息延迟
@@ -1235,6 +1325,9 @@ public class AIAgent : MonoBehaviour
         private void SaveOpeningCache(DeepSeekMessage message)
         {
             if (message == null || string.IsNullOrWhiteSpace(message.content)) return;
+            // 只缓存「assistant 说的开场白」：之前这里可能把最后一条任意消息（比如每轮补充情报）当开场白存下来
+            if (!string.Equals(message.role, "assistant", StringComparison.OrdinalIgnoreCase)) return;
+            if (message.content.Contains("【存活状态】")) return;
 
             try
             {
@@ -1255,8 +1348,16 @@ public class AIAgent : MonoBehaviour
             try
             {
                 string hash = GetOcHash();
-                message = SLManager.ImportFromJson<DeepSeekMessage>("Character/Cache", hash + ".json");
-                return message != null && !string.IsNullOrWhiteSpace(message.content);
+                DeepSeekMessage cached = SLManager.ImportFromJson<DeepSeekMessage>("Character/Cache", hash + ".json");
+
+                // 缓存必须是「assistant 说的开场白」。旧版本可能把每轮补充情报（【存活状态】…）当成开场白存了进去，
+                // 搬到舞台上就是一句情报当台词念。不合格就当没缓存，老老实实重问一次。
+                if (cached == null || string.IsNullOrWhiteSpace(cached.content)) return false;
+                if (!string.Equals(cached.role, "assistant", StringComparison.OrdinalIgnoreCase)) return false;
+                if (cached.content.Contains("【存活状态】")) return false;
+
+                message = cached;
+                return true;
             }
             catch (System.Exception e)
             {
@@ -1306,7 +1407,7 @@ public class AIAgent : MonoBehaviour
 @"你是一个严格的游戏 AI 行为检查器。你的任务只有：判断目标 AI 是否“说了要做某个具体行动，但没有调用对应工具执行”。你不调用任何工具，只输出分析文字和最终判断。
 
 目标 AI 可用的工具只有 4 个：
-- use_prop：使用自己武器栏里的道具（护盾、霰弹、扫射、大球等）
+- use_prop：使用自己武器栏里的道具（护盾、霰弹、扫射、大球、穿甲等）
 - control_turret：控制自己炮塔瞄准
 - move_turret：移动自己的炮塔（第一次调用只是预览、不会移动，确认后才会真的移动）
 - whisper：给其他 AI 发悄悄话
@@ -1329,6 +1430,10 @@ public class AIAgent : MonoBehaviour
 
         private bool openingRetryMode;
         private List<DeepSeekMessage> openingLastMessages;
+
+        /// <summary>开局那一轮的赛前宣言与思考，供开场演出按顺序播。</summary>
+        public string openingSpeech = "";
+        public string openingThinking = "";
         private int n_0_index = 1;//排除系统消息
         private List<int> last_round_index = new();
 
@@ -1445,11 +1550,26 @@ public class AIAgent : MonoBehaviour
             // 本轮公开发言：每轮都写进“上一轮发言”缓冲（与飘字节流无关）；
             // 本轮一条 content 都没有（空回复 / 只调了工具）就不记、也不发言，避免把旧发言重复显示一遍
             string roundContent = JoinRoundAssistantContents(roundStartIndex);
+            // 防御：模型偶尔会把上面那条情报原样复述回来当台词，这种不算发言（否则舞台上会念一句情报）
+            if (roundContent.Contains("【存活状态】"))
+            {
+                Debug.LogWarning($"[AIAgent] {name} 本轮把情报当成台词复述了，已丢弃：{roundContent}");
+                roundContent = "";
+            }
             if (!string.IsNullOrWhiteSpace(roundContent))
             {
                 InformGetter.StageSpeech(position, roundContent);
                 RemindIfInvalidEmotions(roundContent);
-                if (SpeechPass == 0) Say(position, roundContent);
+
+                // 开局这一轮交给开场演出按顺序播（先思考、再放狠话），不再走飘字 / 立绘列表
+                bool openingHandled = AIAgent.Instance != null && AIAgent.Instance.OpeningRoundActive;
+                if (openingHandled)
+                {
+                    openingSpeech = roundContent;
+                    openingThinking = GetLastAssistantReasoning(out _) ?? "";
+                }
+                if (SpeechPass == 0 && !(openingHandled && StoryTeller.SuppressLegacy))
+                    Say(position, roundContent);
             }
         }
 
@@ -1524,9 +1644,11 @@ public class AIAgent : MonoBehaviour
             last_round_index.Add(history.Count);
             if (last_round_index.Count > 8) last_round_index.RemoveAt(0);
             int startTokens = EstimateHistoryTokens(history);
-            history.Add(new DeepSeekMessage("user", inform));
+            // 开局这轮：情报（存活状态 / 战况）先给，最后一条 user 才是「赛前放狠话」这条指令。
+            // 反过来的话模型容易把最后那条情报当指令，直接复述一遍情报当台词（舞台上就是一句【存活状态】…）。
             if (!string.IsNullOrWhiteSpace(extra))
                 history.Add(new DeepSeekMessage("user", extra));
+            history.Add(new DeepSeekMessage("user", inform));
 
             int roundStartIndex = history.Count;
 
@@ -1534,7 +1656,18 @@ public class AIAgent : MonoBehaviour
             if (TryLoadOpeningCache(out DeepSeekMessage cachedOpening))
             {
                 history.Add(cachedOpening);
-                Say(position, cachedOpening.content);
+
+                // 缓存的这条也必须喂给开场演出：它是从 UntilGreatRequest 的早退路径回来的，
+                // 那两个字段本来就只在那里赋值 —— 不补的话舞台上永远是「……」+「没有留下思考过程」，
+                // 而旧的飘字/列表通道又被舞台盖住，整场戏等于一个字的 AI 内容都没有。
+                bool openingHandled = AIAgent.Instance != null && AIAgent.Instance.OpeningRoundActive;
+                if (openingHandled)
+                {
+                    openingSpeech = cachedOpening.content;
+                    openingThinking = cachedOpening.reasoning_content ?? "";
+                }
+                if (!(openingHandled && StoryTeller.SuppressLegacy))
+                    Say(position, cachedOpening.content);
 
                 return;
             }
@@ -1682,7 +1815,7 @@ public class AIAgent : MonoBehaviour
 
         private static readonly List<string> 游戏关键词 = new()
         {
-            "大球", "球", "护盾", "盾", "子弹", "弹药", "霰弹", "扫射", "道具", "武器",
+            "大球", "球", "护盾", "盾", "子弹", "弹药", "霰弹", "扫射", "穿甲", "道具", "武器",
             "炮塔", "瞄准", "移动", "位置", "撞击", "涂", "领土", "弹珠", "升级",
             "攻击", "打", "轰", "推", "顶", "清", "用掉"
         };

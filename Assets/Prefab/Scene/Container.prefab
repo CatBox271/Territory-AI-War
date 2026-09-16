@@ -51,6 +51,7 @@ MonoBehaviour:
   corner_radius: {x: 0.5, y: 0.5, z: 0.5, w: 0.5}
   wall_color: {r: 1, g: 1, b: 1, a: 1}
   background_color: {r: 0.21960784, g: 0.21960784, b: 0.21960784, a: 1}
+  alpha: 1
   sortingOrder: 1
   edge_padding: 0.25
   material: {fileID: 2100000, guid: 97d941a0a58bce24a9b424397afe5b1e, type: 2}
@@ -117,7 +118,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 97d941a0a58bce24a9b424397afe5b1e, type: 2}
+  - {fileID: 0}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

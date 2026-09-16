@@ -456,7 +456,7 @@ public class ReactionSystem : MonoBehaviour, Itool
 
         return new ToolOutcome(
             $"炮塔开始持续瞄准 {aim.pos}（距离 {distance:0.00}，最多持续12秒；超时、目标离开 4 格或目标消失会自动恢复自动旋转）。",
-            $"炮塔持续瞄准 {DescribeAimTarget(aim)}");
+            $"炮塔持续瞄准\n{DescribeAimTarget(aim)}");
     }
 
     /// <summary>

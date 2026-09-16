@@ -606,6 +606,32 @@ public class Towel : MonoBehaviour, IStageValue
         InformGetter.AddItem(stage, ballItem);
     }
 
+    /// <summary>
+    /// 穿甲弹：在炮塔位置生成物理弹体，朝炮塔朝向射出（穿盾直取敌方炮塔，命中即杀）。
+    /// 数值即弹体初始数值；与大球的扣减不在这里管，交给大球默认逻辑。
+    /// </summary>
+    public void FirePierce(HugeInt val)
+    {
+        if (isDead || val <= 0) return;
+        if (config == null || config.pierceShellPrefab == null) return;
+
+        var go = Instantiate(config.pierceShellPrefab, transform.position, Quaternion.identity);
+        var shell = go.GetComponent<PierceShell>();
+        if (shell == null)
+        {
+            Destroy(go);
+            return;
+        }
+
+        // 数值口径统一放在 MapConfig，预制体上只留引用与质量/出界这类固定参数
+        shell.shieldDrainPercentPerSecond = config.PierceShieldDrainPercentPerSecond;
+        shell.shieldSlowFactor = config.PierceShieldSlowFactor;
+        shell.exitDeflectAngle = config.PierceExitDeflectAngle;
+        shell.killCostRatio = config.PierceKillCostRatio;
+
+        shell.Launch(val, stage, transform.up, config.PierceShellSpeed);
+    }
+
     public void ShotGun(HugeInt val,float angle = 0,int defaultNum = 0,int minVal = 0,int maxVal = 0)
     {
         ScreenShake.Instance?.ShortGunShake(val);

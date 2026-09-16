@@ -9,7 +9,8 @@ public enum WeaponKind
     扫射,
     护盾,
     大球,
-    任意
+    任意,
+    穿甲
 }
 
 [System.Serializable]
@@ -89,6 +90,21 @@ public class MapConfig : MonoBehaviour
     public int ShotGunMaxVal = 1073741824;
     public float ShotGunBulletSpeed = 4f; // 霰弹子弹速度
     public float NormalBulletSpeed = 4f; // 普通扫射/炮塔自动射击子弹速度
+    [Header("穿甲弹")]
+    [Tooltip("穿甲弹预制体：物理弹体（Rigidbody2D + CircleCollider2D + 穿甲弹贴图 + Trail + 数值文本）")]
+    public GameObject pierceShellPrefab;
+    [Tooltip("出膛速度（世界单位/秒）")]
+    public float PierceShellSpeed = 8f;
+    [Tooltip("穿盾时每秒扣护盾当前值的比例")]
+    public float PierceShieldDrainPercentPerSecond = 0.25f;
+    [Range(0.05f, 1f)]
+    [Tooltip("在敌方护盾内时的速度倍率（照 LifeGame：穿甲弹在盾内被拖慢，但不改方向）")]
+    public float PierceShieldSlowFactor = 0.5f;
+    [Tooltip("离开护盾时的随机偏转角（±度）")]
+    public float PierceExitDeflectAngle = 30f;
+    [Range(0.01f, 1f)]
+    [Tooltip("每次击杀炮塔后弹体数值的倍率（照 LifeGame：减半）")]
+    public float PierceKillCostRatio = 0.5f;
 
     [Header("Towel")]
     public int TowelDefaultBullets = 4096;
@@ -199,6 +215,9 @@ public class MapConfig : MonoBehaviour
                 break;
             case WeaponKind.大球:
                 towel.SpawnBigBall(val);
+                break;
+            case WeaponKind.穿甲:
+                towel.FirePierce(val);
                 break;
         }
     }

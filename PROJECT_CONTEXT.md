@@ -52,3 +52,5 @@
 - `AIAgent.RunCycleLoop` 里 `TestAIAsyncWithRecord` 先发请求再等 tcs，注释与实现顺序有微妙之处（请求与录制并行，_cycleInterval 到点才暂停）
 - `MapConfig.useAIDecision=false` 时道具入栈立即溢出执行（非 AI 演示模式）
 - `Towel.Start` 里有 `ShotGun(1048576, 60, 1024)` 开局试射，及 `ShotGunTest`（按 S 手动测试）等调试入口
+- 舞台卡片底板 / 过程网格的原理与排查记录见 `舞台卡片网格_原理记录.md`（过程网格必须**每实例独占**，
+  复用 `mf.sharedMesh` 会让所有卡共用一份 quad，表现成"所有底板都变成最后重建那张的尺寸"）

@@ -155,9 +155,30 @@ public class MarbleManager : MonoBehaviour
         upgradeProgress[stage] = progress;
     }
 
-    /// <summary>useAI 模式下：暂停并询问 AI 选择升级，选择后在 Say 里强制显示并执行对应升级。</summary>
+    /// <summary>
+    /// useAI 模式下：询问 AI 选择升级，选择后执行对应升级。
+    /// 舞台演出可用时，整件事交给 UpgradeChoiceScene 演（三张选项卡 + 先思考再揭晓），
+    /// 演出播完再让升级真正生效 —— 这样炮塔升级的连线与飘字仍然留在战场上播。
+    /// </summary>
     IEnumerator AIUpgradeSequence(int stage)
     {
+        if (AIAgent.Instance == null)
+        {
+            ApplyUpgradeChoice(stage, UpgradeChoice.Marble);
+            yield break;
+        }
+
+        if (StoryTeller.CanPlay)
+        {
+            var scene = new UpgradeChoiceScene(stage);
+            StoryTeller.Instance.Play(scene);
+            while (!scene.Finished)
+                yield return null;
+            ApplyUpgradeChoice(stage, (UpgradeChoice)scene.Choice);
+            yield break;
+        }
+
+        // 演出关掉时的旧路径：直接问 AI，不进舞台
         Task<int> choiceTask = AIAgent.Instance.RequestUpgradeChoiceAsync(stage);
         while (!choiceTask.IsCompleted)
             yield return null;

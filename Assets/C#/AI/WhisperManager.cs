@@ -98,7 +98,9 @@ public static class WhisperManager
             PreviousCooldownRound = previousCooldownRound,
             Round = currentRound
         };
-        UISystemMessageShow.Show($"{AIAgent.GetStageName(sender)}对{AIAgent.GetStageName(target)}说悄悄话：{message}");
+        // 演出开着的时候这次会晤会整段演在舞台上，横幅别再剧透一遍
+        if (!StoryTeller.SuppressLegacy)
+            UISystemMessageShow.Show($"{AIAgent.GetStageName(sender)}对{AIAgent.GetStageName(target)}说悄悄话：{message}");
 
         if (IsBusy(target))
         {
@@ -156,7 +158,9 @@ public static class WhisperManager
 
             if (string.IsNullOrWhiteSpace(reply)) reply = "（无回复）";
             req.Tcs.TrySetResult($"{AIAgent.GetStageName(req.Target)}的悄悄话回复：{reply}");
-            UISystemMessageShow.Show($"{AIAgent.GetStageName(req.Target)}回复{AIAgent.GetStageName(req.Sender)}的悄悄话：{reply}");
+            // 同上：回复也已经由舞台演出来了
+            if (!StoryTeller.SuppressLegacy)
+                UISystemMessageShow.Show($"{AIAgent.GetStageName(req.Target)}回复{AIAgent.GetStageName(req.Sender)}的悄悄话：{reply}");
         }
         finally
         {
