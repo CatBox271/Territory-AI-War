@@ -134,7 +134,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = MoveTurretToolName,
-                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动固定消耗升级能量（固定单次扣除、与距离无关，具体数值见预览返回），能量不足则无法移动。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。移动中可以再走一次预览+确认改道；改道算新的一次移动、再扣一次能量。移动不会让其他 AI 知道你的新位置——他们只能靠大球/子弹撞上你护盾或炮塔本体时的撞击情报来推断。",
+                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动固定消耗升级能量（固定单次扣除、与距离无关，具体数值见预览返回），能量不足则无法移动。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。移动中可以再走一次预览+确认改道；改道算新的一次移动、再扣一次能量。移动本身不会主动广播你的新位置（对方要么靠大球/子弹撞上你护盾或炮塔本体时的撞击情报反推，要么你正好落进他 move_turret 预览附带的视野截图里被看到）。距离由你自己定：最大移动距离是上限、不是必须走满；确认前先核对目标点是否靠近各炮塔初始位置或撞击情报推测出的敌方方位，炮塔重叠不会被弹开、也不会自动停下，停到别人身上等于把命送出去。预览时还会附一张以你炮塔为圆心、半径约最大移动距离 0.6 倍的圆形俯视截图（黑色环带 = 圆形视野之外，暗红色 = 地图之外），先看图再决定方向和距离。",
                 parameters = new
                 {
                     type = "object",
@@ -221,17 +221,23 @@ public class ReactionSystem : MonoBehaviour, Itool
         if (toolCalls == null) return result;
 
         int callStage = toolStage >= 0 ? toolStage : stage;
+        var sights = new List<DeepSeekMessage>();
         foreach (ToolCall call in toolCalls)
         {
-            result.Add(await DealToolCall(call, callStage));
+            DeepSeekMessage toolMsg = await DealToolCall(call, callStage, sights);
+            if (toolMsg != null) result.Add(toolMsg);
         }
 
+        // 截图统一放到所有 tool 消息之后：role=tool 的消息必须紧跟 assistant(tool_calls)，
+        // 中间插一条 user 会让 API 认为工具回执不成对（严格实现直接 400）。
+        result.AddRange(sights);
         return result;
     }
 
-    private async Task<DeepSeekMessage> DealToolCall(ToolCall call, int callStage)
+    private async Task<DeepSeekMessage> DealToolCall(ToolCall call, int callStage, List<DeepSeekMessage> sights)
     {
         ToolOutcome outcome;
+        bool movePreviewCreated = false;
 
         if (call == null)
         {
@@ -251,7 +257,7 @@ public class ReactionSystem : MonoBehaviour, Itool
         }
         else if (call.function.name == MoveTurretToolName)
         {
-            outcome = MoveTurret(call.function.arguments, callStage);
+            outcome = MoveTurret(call.function.arguments, callStage, out movePreviewCreated);
         }
         else if (call.function.name == WhisperToolName)
         {
@@ -266,12 +272,56 @@ public class ReactionSystem : MonoBehaviour, Itool
         // 调用失败时 action 为空，这一条就不飘字：没做成的事没必要播。
         ShowActionText(callStage, outcome.action);
 
+        // 移动预览额外附一张炮塔视野截图：图片只能放在 user 消息里，
+        // 先攒到 sights，等这一批 tool 消息都发完再统一追加（见 DealToolCallsAsync）。
+        if (movePreviewCreated) AppendMoveSight(sights, callStage);
+
         return new DeepSeekMessage
         {
             role = "tool",
             content = outcome.result,
             tool_call_id = call != null ? call.id : ""
         };
+    }
+
+    /// <summary>
+    /// 给这次移动预览附一张「以炮塔为圆心、半径 = 0.6 × 最大移动距离」的圆形俯视图。
+    /// 截图是临时的：这一轮结束后 AIAgent 会把 contentBlocks 清掉、只留文字，不会每轮重复上传。
+    /// 截图失败不影响移动流程，只打一条 warning。
+    /// </summary>
+    private static void AppendMoveSight(List<DeepSeekMessage> messages, int callStage)
+    {
+        if (!MoveSightCapture.IsEnabled) return;
+        if (!Towel.AllTowel.TryGetValue(callStage, out Towel towel) || towel == null) return;
+
+        // 先清掉上一张：同一轮里连续预览好几次时只带最新那张，省 token。
+        // 只清自己这一张卡 —— 四张卡是并行请求的，清全部会把别人正在用的截图抹掉。
+        AIAgent.DropMoveShotImages(callStage);
+
+        MoveSightCapture.Shot shot = MoveSightCapture.Capture(towel, callStage);
+        if (shot == null || !shot.ok)
+        {
+            Debug.LogWarning($"[移动截图] stage {callStage} 生成失败：{shot?.error}");
+            return;
+        }
+
+        string text =
+            $"【移动视野】这是以你的炮塔为圆心、半径 {shot.radius:0.00} 的俯视截图" +
+            $"（半径 = 你当前最大移动距离 {shot.maxMove:0.00} 的 {MoveSightCapture.RadiusFactor:0.##} 倍）。" +
+            "圆心就是你炮塔的当前位置；图片上方 = +y（北），右方 = +x（东）。" +
+            "图中黑色环带是圆形视野之外、暗红色区域是地图之外——那两种地方没有信息，也去不了。" +
+            "先看清附近有没有别的炮塔 / 护盾 / 大球，再决定方向和距离（不必走满最大距离）。";
+
+        var msg = new DeepSeekMessage { role = "user", content = text };
+        msg.contentBlocks = new List<DeepSeekContentBlock>
+        {
+            DeepSeekContentBlock.Text(text),
+            DeepSeekContentBlock.Image(shot.dataUrl)
+        };
+        messages.Add(msg);
+
+        Debug.Log($"[移动截图] stage {callStage} 半径 {shot.radius:0.00}（{shot.size}x{shot.size}，" +
+                  $"PNG {shot.png?.Length ?? 0} 字节）已存：{shot.savedPath}");
     }
 
     /// <summary>工具行动的出口：把拼好的 action 交给 AIAgent.ShowAction（当前不显示）。</summary>
@@ -500,9 +550,12 @@ public class ReactionSystem : MonoBehaviour, Itool
         return true;
     }
 
-    /// <summary>移动自己的炮塔：第一次只预览（不移动），第二次 confirm=true 才执行。</summary>
-    private ToolOutcome MoveTurret(string argumentsJson, int callStage)
+    /// <summary>移动自己的炮塔：第一次只预览（不移动），第二次 confirm=true 才执行。
+    /// previewCreated = true 表示这次确实产出了一份新预览（调用方据此附上炮塔视野截图）。</summary>
+    private ToolOutcome MoveTurret(string argumentsJson, int callStage, out bool previewCreated)
     {
+        previewCreated = false;
+
         if (!TryParseMoveTurretArguments(argumentsJson, out MoveTurretArguments args))
             return new ToolOutcome("移动炮塔失败：参数无法解析，需要方向（angle 或 dir_x+dir_y）与 distance，或 confirm=true。");
 
@@ -581,6 +634,7 @@ public class ReactionSystem : MonoBehaviour, Itool
                 + "，当前 " + moveEnergy.ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。");
 
         pendingMoves[callStage] = new MovePreview { dir = dir.normalized, distance = travel, time = Time.time };
+        previewCreated = true;
 
         Vector2 nd = dir.normalized;
         float angleDeg = Mathf.Repeat(Vector2.SignedAngle(Vector2.right, nd), 360f);

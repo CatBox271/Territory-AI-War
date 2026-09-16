@@ -4,6 +4,7 @@ using UnityEngine;
 using System;
 using Newtonsoft;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine.Networking;
 using System.Text;
 using System.Linq;
@@ -90,13 +91,87 @@ public class StreamDownloadHandler : DownloadHandlerScript
 #endregion
 
 #region 发送
+
+/// <summary>图片内容块的 image_url 部分（OpenAI 兼容）。detail：low / high / original / auto。</summary>
+public class DeepSeekImageUrl
+{
+    [JsonProperty("url")] public string url;
+    [JsonProperty("detail", NullValueHandling = NullValueHandling.Ignore)] public string detail;
+}
+
+/// <summary>
+/// user 消息的内容块（OpenAI 兼容：content 既可以是字符串，也可以是块数组）。
+/// 图片**只允许出现在 user 消息里**（system / assistant 带图会返回 400），所以移动截图走这里。
+/// </summary>
+public class DeepSeekContentBlock
+{
+    [JsonProperty("type")] public string type;
+    [JsonProperty("text", NullValueHandling = NullValueHandling.Ignore)] public string text;
+    [JsonProperty("image_url", NullValueHandling = NullValueHandling.Ignore)] public DeepSeekImageUrl image_url;
+
+    public static DeepSeekContentBlock Text(string t)
+        => new DeepSeekContentBlock { type = "text", text = t };
+
+    public static DeepSeekContentBlock Image(string dataUrl, string detail = "original")
+        => new DeepSeekContentBlock { type = "image_url", image_url = new DeepSeekImageUrl { url = dataUrl, detail = detail } };
+}
+
 public class DeepSeekMessage
 {
     [JsonProperty("role")]
     public string role;
 
-    [JsonProperty("content")]
+    /// <summary>纯文本内容。要带图片时用 contentBlocks（两者序列化时共用同一个 "content" 字段）。</summary>
+    [JsonIgnore]
     public string content;
+
+    /// <summary>
+    /// 非空时 "content" 会序列化成内容块数组（文本块 + 图片块）。
+    /// 只给「带截图的 user 消息」用，而且是**临时**的：用完之后 AIAgent.DropMoveShotImages() 会把它清掉、只留文本，
+    /// 否则同一张图会被之后每一轮请求重复上传。
+    /// </summary>
+    [JsonIgnore]
+    public List<DeepSeekContentBlock> contentBlocks;
+
+    /// <summary>
+    /// 真正序列化出去的 "content"：有块就是块数组，否则就是纯文本字符串。
+    /// set 必须能把块数组读回来 —— 发送前 SendRequest 会对整个 request 做 DeepCopy（JSON 往返），
+    /// 只还原文本的话图片会在发出去之前就被吃掉。
+    /// </summary>
+    [JsonProperty("content")]
+    public object ContentForJson
+    {
+        get => contentBlocks != null && contentBlocks.Count > 0 ? (object)contentBlocks : content;
+        set
+        {
+            if (value == null) { content = null; return; }
+            if (value is string s) { content = s; contentBlocks = null; return; }
+
+            var arr = value as JArray;
+            if (arr == null) { content = value.ToString(); return; }
+
+            var blocks = new List<DeepSeekContentBlock>();
+            var sb = new StringBuilder();
+            foreach (JToken t in arr)
+            {
+                string type = t["type"]?.ToString();
+                if (type == "image_url")
+                {
+                    blocks.Add(DeepSeekContentBlock.Image(
+                        t["image_url"]?["url"]?.ToString(),
+                        t["image_url"]?["detail"]?.ToString()));
+                }
+                else
+                {
+                    string txt = t["text"]?.ToString() ?? "";
+                    blocks.Add(DeepSeekContentBlock.Text(txt));
+                    sb.Append(txt);
+                }
+            }
+            content = sb.ToString();
+            contentBlocks = blocks.Count > 0 ? blocks : null;
+        }
+    }
 
     [JsonProperty("reasoning_content", NullValueHandling = NullValueHandling.Ignore)]
     public string reasoning_content;

@@ -45,7 +45,7 @@ public class OpeningTalkScene : StoryScene
         StoryTeller s = stage;
         if (s == null || lines == null || lines.Count == 0) yield break;
 
-        StoryTeller.Item title = Title("赛 前 放 狠 话", 4.05f, 0.95f);
+        StoryTeller.Item title = Title("出 厂 角 色", 4.05f, 0.95f);
         yield return s.SlideIn(title, StoryTeller.Direction.Top, StageStyle.Distance, StageStyle.In);
         yield return s.WaitStage(StageStyle.Short);
 

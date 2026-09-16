@@ -380,7 +380,7 @@ public class InformGetter : MonoBehaviour
             builder.Append("]，状态: "); builder.Append(self.MoveStateText);
             builder.AppendLine();
         }
-        builder.AppendLine("(只有自己的位置是实时的。敌方炮塔会移动，他们的位置只能靠撞击情报反推。)");
+        builder.AppendLine("(只有自己的位置是实时的。敌方炮塔会移动：近处靠 move_turret 预览附带的视野截图直接看，更远处只能靠撞击情报反推。)");
     }
 
     /// <summary>撞击情报：只输出请求方自己造成的撞击（撞的是谁、撞击点、护盾前后大小）。</summary>

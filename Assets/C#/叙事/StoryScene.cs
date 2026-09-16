@@ -224,8 +224,6 @@ public abstract class StoryScene
         {
             Vector2 drawn = item.spriteDisplay.GetDrawnSize(sprite);
             StoryTeller s2 = stage;
-            Debug.Log($"[立绘] stage {owner} 为了不出画收了一下：版面 {want.x:0.##}×{want.y:0.##} → {box.x:0.##}×{box.y:0.##}" +
-                      $"，实际画 {drawn.x:0.##}×{drawn.y:0.##}；舞台 {(s2 != null ? s2.StageSize.x : 0f):0.##}×{(s2 != null ? s2.StageSize.y : 0f):0.##}");
         }
         return item;
     }

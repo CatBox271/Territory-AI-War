@@ -176,6 +176,14 @@ public class AIAgent : MonoBehaviour
     public List<CharacterCardPreset> cardset = new();
     public readonly List<CharacterCard> cards = new();
     public int EachPassRound = 1;
+
+    [Header("移动视野截图（AI 想移动时，附一张炮塔周围的圆形俯视图）")]
+    [Tooltip("关掉就不截图：AI 移动前看不到周围，也不占请求 token")]
+    public bool moveSightEnabled = true;
+    [Tooltip("半径倍率：半径 = 这个值 × 炮塔当前最大移动距离")]
+    [Range(0.2f, 2f)] public float moveSightRadiusFactor = 0.6f;
+    [Tooltip("输出图片边长（像素）。太小看不清炮塔，太大费 token")]
+    public int moveSightResolution = 512;
     private readonly HashSet<int> deadStages = new();
 
     /// <summary>开局那一轮正在进行：这一轮的发言交给开场演出按顺序播，不走飘字 / 立绘列表。</summary>
@@ -401,9 +409,10 @@ public class AIAgent : MonoBehaviour
         if (lines.Count == 0) return;
 
         StoryTeller show = StoryTeller.Instance;
-        //show.Play(new OpeningTalkScene(lines));             // 角色开场白
-        //show.Play(new GameStartBannerScene());              // 游戏正式开始
-        Debug.Log($"[开场演出] 已入队：规则 + {lines.Count} 位角色 + 开始横幅。");
+        show.Play(new OpeningRulesScene());                 // 开场介绍（7/9/5/13/5/9 秒分镜）
+        show.Play(new OpeningTalkScene(lines));             // 角色开场白
+        show.Play(new GameStartBannerScene());              // 游戏正式开始
+        Debug.Log($"[开场演出] 已入队：开场介绍 + {lines.Count} 位角色 + 开始横幅。");
     }
 
     private async Task RunCardAsync(CharacterCard card, string inform, string extra)
@@ -541,9 +550,27 @@ public class AIAgent : MonoBehaviour
         "现在提交你的选择：调用 choose_upgrade 工具，choice 只能填 1（额外弹珠）、2（炮塔强化）或 3（护盾强化）。" +
         "必须给出与上面分析一致的选择，不要用文字回答。";
 
-    /// <summary>发一次升级相关的请求，返回本次新增的 assistant 回复与 tool 回执（失败时 assistant 为 null）。</summary>
+    /// <summary>升级选择「思考」步的格式修正提示（与普通行动轮同一套口径：不合格就一直重试）。</summary>
+    private const string UpgradeThinkingRetryPrompt =
+        "[格式修正] 你上一条回复不合格。请重新输出：思考过程里必须用（我想：……）写内心独白；" +
+        "真实回复禁止使用括号（中英文都不行）；并且必须调用 choose_upgrade 工具给出 1 / 2 / 3 的选择，不要用文字解释。";
+
+    /// <summary>
+    /// 升级选择「思考」步的回复校验：思考里必须有（我想：……），content 不许带括号。
+    /// 这里**不豁免工具调用**（普通行动轮的 IsRoleplayReasoning 会豁免）——升级演出要把这段思考播给观众看，
+    /// 所以哪怕模型第一步就直接调用了 choose_upgrade，也要求它带上内心独白标记。
+    /// </summary>
+    private static bool IsUpgradeThinkingValid(DeepSeekMessage msg)
+    {
+        if (msg == null) return false;
+        if (ContainsAnyParenthesis(msg.content)) return false;
+        return HasRoleplayThinkingMark(msg.reasoning_content);
+    }
+
+    /// <summary>发一次升级相关的请求，返回本次新增的 assistant 回复与 tool 回执（失败时 assistant 为 null）。
+    /// requireThinkingMark = true 时给这次请求挂上「思考格式校验」：不合格就无限重发，直到合格为止。</summary>
     private async Task<(DeepSeekMessage assistant, List<DeepSeekMessage> toolReplies)> SendUpgradeRequest(
-        DeepSeekRequest request, CharacterCard card, int stage, string label)
+        DeepSeekRequest request, CharacterCard card, int stage, string label, bool requireThinkingMark = false)
     {
         int before = request.messages != null ? request.messages.Count : 0;
 
@@ -557,6 +584,41 @@ public class AIAgent : MonoBehaviour
             toolStage: stage);
         info.apiKey = LoadApiKey();
         info.apiUrl = card.url;
+
+        // 思考步的格式校验：和普通行动轮同一套做法 —— 校验器返回 false 时 AIRequest 会中断本次响应，
+        // 由这里重新 SendRequest。**不设重试上限**（用户要求无限重试），所以每次都要打日志，方便在 Console 里看卡在哪。
+        if (requireThinkingMark)
+        {
+            DeepSeekMessage retryReminder = null;
+            int retryCount = 0;
+            info.validateAndMaybeRetry = msg =>
+            {
+                if (IsUpgradeThinkingValid(msg))
+                {
+                    // 合格：把这次插进去的 [格式修正] 摘掉，别把提醒留在上下文里
+                    if (retryReminder != null)
+                    {
+                        request.messages.Remove(retryReminder);
+                        retryReminder = null;
+                    }
+                    return true;
+                }
+
+                retryCount++;
+                if (retryReminder == null)
+                {
+                    retryReminder = new DeepSeekMessage("user", UpgradeThinkingRetryPrompt);
+                    info.AddMessage(retryReminder);   // 和普通轮一样：同一步只插一条提醒，不重复堆
+                }
+
+                Debug.LogWarning($"[升级选择] stage {stage} {label}步校验不合格（第 {retryCount} 次重试）：" +
+                                 $"思考带（我想：）={HasRoleplayThinkingMark(msg?.reasoning_content)}，" +
+                                 $"content 带括号={ContainsAnyParenthesis(msg?.content)}。reasoning: {msg?.reasoning_content}");
+
+                AIRequest.SendRequest(info);   // 无限重试
+                return false;
+            };
+        }
 
         AIRequest.SendRequest(info);
         await tcs.Task;
@@ -581,6 +643,25 @@ public class AIAgent : MonoBehaviour
             ?? message.tool_calls[0];
     }
 
+    /// <summary>
+    /// 把用完的移动截图降级成纯文本。stage &lt; 0 时四张卡全清，否则只清这一张。
+    /// 给 ReactionSystem 用：同一轮里连续预览好几次时，只保留最新那张截图。
+    /// </summary>
+    public static void DropMoveShotImages(int stage = -1)
+    {
+        AIAgent agent = Instance;
+        if (agent == null) return;
+
+        if (stage < 0)
+        {
+            foreach (CharacterCard c in agent.cards) c?.DropMoveShotImages();
+            return;
+        }
+
+        CharacterCard card = agent.cards.Find(c => c.position == stage);
+        card?.DropMoveShotImages();
+    }
+
     /// <summary>旧签名：只要选择项（1 额外弹珠 / 2 炮塔强化 / 3 护盾强化）。</summary>
     public async Task<int> RequestUpgradeChoiceAsync(int stage)
     {
@@ -601,6 +682,9 @@ public class AIAgent : MonoBehaviour
         CharacterCard card = cards.Find(c => c.position == stage);
         if (card == null) return result;
 
+        // 升级请求是从 card.request 深拷贝出来的：先把用过的截图降级掉，免得把旧图一起拷进去
+        card.DropMoveShotImages();
+
         int choice = 1;
         CapturePause.Pause();
         try
@@ -617,7 +701,7 @@ public class AIAgent : MonoBehaviour
             thinkRequest.tool_choice = null;
             thinkRequest.thinking = new ThinkingConfig(true);
 
-            var think = await SendUpgradeRequest(thinkRequest, card, stage, "思考");
+            var think = await SendUpgradeRequest(thinkRequest, card, stage, "思考", requireThinkingMark: true);
             if (think.assistant != null)
             {
                 exchange.Add(think.assistant);
@@ -714,7 +798,8 @@ public class AIAgent : MonoBehaviour
         sb.AppendLine("2. 炮塔强化：炮塔后坐力提升，子弹显示半径变大、命中大球时的动量冲击更强，自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2）。可叠加。");
         sb.AppendLine("3. 护盾强化：护盾破碎后炮塔进入无敌时间，无视敌方子弹与大球伤害。可叠加。");
         sb.AppendLine("请结合你已经升级过的次数决定，不要每次都选同一个：只堆一个方向会浪费其他收益。");
-        sb.AppendLine("输出要求：调用 choose_upgrade 工具，choice 只能填 1、2 或 3，不要解释。");
+        sb.AppendLine("输出要求：思考过程里必须先用（我想：……）写内心独白（格式硬要求，不合格会被打回重写）；");
+        sb.AppendLine("真实回复里禁止使用括号；然后调用 choose_upgrade 工具，choice 只能填 1、2 或 3，不要解释。");
         return sb.ToString();
     }
     public static Task<string> OnStageDeathAsync(int stage, int killerStage, string killerWeapon = "")
@@ -1096,9 +1181,15 @@ public class AIAgent : MonoBehaviour
 - **炮塔：** 被敌方攻击有效命中即**立即死亡**，该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
-- **移动：** 炮塔可以移动（用 move_turret），**每次移动固定消耗 @MOVE_ENERGY_COST@ 点升级能量**（固定单次扣除、与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动）。移动不会让其他 AI 知道你的新位置。
+- **移动：** 炮塔可以移动（用 move_turret），**每次移动固定消耗 @MOVE_ENERGY_COST@ 点升级能量**（固定单次扣除、与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动）。移动不会主动广播你的新位置，但如果你正好落进别人的移动视野截图范围里，他可能直接看到你。
+- **移动要谨慎——距离是上限，不是目标：**
+  - 走多远由你自己填，**没要求你每次都走满「最大移动距离」**。盲走满距离最容易一头送进未知区域、甚至正好停在别人身上；没把握就走短一点，剩下的距离留给下次。
+  - **先预览、再确认**：预览会给出目标点、实际距离（超出上限会被夹）、是否越过地图边界、本次扣多少能量，而且**预览不扣能量、炮塔也不会动**——可以放心试算几个方向和距离，比好了再 confirm。
+  - 确认前先自己核对安全性：①**预览附带的视野截图**里你周围一圈有什么（那正是你落点附近的地面）；②情报里的「各炮塔初始位置」（四角出发，之后不再更新）；③历次**撞击情报**反推出的敌方大致方位。注意对手也会移动，任何目标点都可能已经有人，别把初始位置当成全部。
+  - 目标点靠近某人的初始位置、或落在撞击情报指出的方位上时，**换方向或缩短距离**，别赌对方已经走了。两个炮塔重叠时你不会被弹开、也不会自动停下（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——所以「撞上去」没有任何安全网。
+  - 移动途中还能再走一次预览 + confirm 改道，但**改道算新的一次移动、再扣一次能量**。所以「一次走短一点、多走几次」是拿能量换安全，按局势自己权衡。
 - **胜负：** 成为最后存活的一方、并把领土推到 98%（系统的结束判定）才算赢；只剩你一个阵营后，还要把场上敌方游离的大球和子弹清掉。
-- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。想知道对手在哪，只能靠**撞击情报**——你的子弹或大球撞上对方护盾/炮塔本体时，系统会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
+- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、半径约最大移动距离 0.6 倍的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见（图外的黑区没有信息）。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，系统会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
 
 ## 三、弹珠与资源
 - 每队初始拥有 @MARBLE_COUNT@ 个弹珠。
@@ -1545,6 +1636,7 @@ public class AIAgent : MonoBehaviour
             {
                 roundRequestInFlight = false;
                 FlushDeferredUpgradeMessages();
+                DropMoveShotImages();   // 这一轮的移动截图已经用过了，降级成纯文本，别留到下一轮
             }
 
             // 本轮公开发言：每轮都写进“上一轮发言”缓冲（与飘字节流无关）；
@@ -1603,6 +1695,27 @@ public class AIAgent : MonoBehaviour
             if (roundRetryReminder == null) return;
             history.Remove(roundRetryReminder);
             roundRetryReminder = null;
+        }
+
+        /// <summary>
+        /// 把已经用完的移动截图降级成纯文本：清掉 contentBlocks，只留那段说明文字。
+        /// 不清的话，同一张图会被之后每一轮请求反复上传（每张最多约 1024 token）。
+        /// </summary>
+        public void DropMoveShotImages()
+        {
+            if (history == null || history.Count == 0) return;
+
+            int dropped = 0;
+            for (int i = 0; i < history.Count; i++)
+            {
+                DeepSeekMessage m = history[i];
+                if (m == null || m.contentBlocks == null) continue;
+                m.contentBlocks = null;
+                dropped++;
+            }
+
+            if (dropped > 0)
+                Debug.Log($"[移动截图] {name} 的 {dropped} 条截图消息已降级为纯文本（不再重复上传）。");
         }
 
         /// <summary>把一次升级的完整新增对话写回历史（这条对话不参与公开发言拼接）。</summary>
