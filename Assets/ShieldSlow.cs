@@ -36,7 +36,11 @@ public class ShieldSlow : MonoBehaviour
         stageValue = GetComponent<IStageValue>();
         guid = GetComponent<IStringGetter>();
         if (rb == null) rb = GetComponent<Rigidbody2D>();
-        origin_speed = valueEditor.value;
+        // 基准取弹体自己的 SpeedTimes（穿甲弹上就是 Towel 写进来的 MapConfig 口径）。
+        // 不能拿"巡航速度"来当基准：巡航速度 = SpeedCurve × SpeedTimes，把它回写进 SpeedTimes
+        // 等于又乘了一次曲线值，越进出盾越偏。
+        BallPainter painter = GetComponent<BallPainter>();
+        origin_speed = painter != null ? painter.SpeedTimes : valueEditor.value;
         for (int i = 1; i < 5; i++)
         {
             if (i == stageValue.stage) continue;

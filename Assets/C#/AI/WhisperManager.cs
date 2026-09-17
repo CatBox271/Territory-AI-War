@@ -89,13 +89,17 @@ public static class WhisperManager
             return "悄悄话失败：你已被击杀，无法使用工具。";
         if (IsDead(target))
             return $"悄悄话失败：{AIAgent.GetStageName(target)}已被击杀，无法接收悄悄话。";
-        // 冷却轮数与能量消耗都取 MapConfig：冷却不再写死 4 回合，能量与移动共用同一个池子
+        // 冷却轮数取 MapConfig；能量消耗也按"每用一次涨价"现算（基础价与倍率都在 MapConfig）
         MapConfig cfg = MapConfig.Instance;
         int cooldownRounds = cfg != null ? Mathf.Max(1, cfg.whisperCooldownRounds) : 4;
-        float energyCost = cfg != null ? cfg.whisperEnergyCost : 0f;
         MarbleManager mm = MarbleManager.Instance;
+        float energyCost = mm != null
+            ? mm.GetActionEnergyCost(sender, MarbleManager.EnergyAction.Whisper)
+            : (cfg != null ? cfg.whisperEnergyCost : 0f);
+        int whisperUsed = mm != null ? mm.GetActionUseCount(sender, MarbleManager.EnergyAction.Whisper) : 0;
         if (mm != null && energyCost > 0f && mm.GetUpgradeEnergy(sender) < energyCost)
             return "悄悄话失败：升级能量不足（本次需要 " + energyCost.ToString("0.#")
+                + (whisperUsed > 0 ? "（已经说过 " + whisperUsed + " 次，每用一次涨价）" : "")
                 + "，当前 " + mm.GetUpgradeEnergy(sender).ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。";
 
         // 开局就算"在冷却中"：没记录过就按第 0 回合算，所以第一发要等到第 cooldownRounds 回合。
@@ -104,8 +108,15 @@ public static class WhisperManager
         if (!TryAcquireCooldown(sender, currentRound, cooldownRounds, out string cooldownError))
             return cooldownError;
 
-        // 冷却拿到手了才扣能量（冷却没拿到就直接返回，不会白扣）
-        if (mm != null && energyCost > 0f) mm.TrySpendUpgradeEnergy(sender, energyCost);
+        // 冷却拿到手了才扣能量（冷却没拿到就直接返回，不会白扣）；TrySpendActionEnergy 顺手把"用过几次"累加，
+        // 下次价格就按新次数算。扣费失败（中间被别处花掉了）就把刚拿到的冷却退回去。
+        if (mm != null && !mm.TrySpendActionEnergy(sender, MarbleManager.EnergyAction.Whisper, out energyCost))
+        {
+            lastWhisperRound.Remove(sender);
+            if (previousCooldownRound.HasValue) lastWhisperRound[sender] = previousCooldownRound.Value;
+            return "悄悄话失败：升级能量不足（本次需要 " + energyCost.ToString("0.#")
+                + "，当前 " + mm.GetUpgradeEnergy(sender).ToString("0.#") + "）。";
+        }
 
         var req = new WhisperRequest
         {
@@ -279,7 +290,8 @@ public static class WhisperManager
         if (waitingOn.TryGetValue(req.Sender, out var cur) && cur == req) waitingOn.Remove(req.Sender);
         waitOrder.Remove(req);
 
-        // 被系统终止（繁忙 / 环形调配）的悄悄话退还这次冷却机会**和升级能量**，下一回合可继续使用。
+        // 被系统终止（繁忙 / 环形调配）的悄悄话退还这次冷却机会**和升级能量**。
+        // 退款走 RefundActionEnergy：它同时把"用过几次"减回去，所以下次价格也回到这次涨价前的水平。
         if (refundCooldown)
         {
             if (req.PreviousCooldownRound.HasValue)
@@ -288,7 +300,7 @@ public static class WhisperManager
                 lastWhisperRound.Remove(req.Sender);
 
             if (req.EnergyCost > 0f && MarbleManager.Instance != null)
-                MarbleManager.Instance.AddUpgradeEnergy(req.Sender, req.EnergyCost);
+                MarbleManager.Instance.RefundActionEnergy(req.Sender, MarbleManager.EnergyAction.Whisper, req.EnergyCost);
         }
 
         req.Tcs.TrySetResult(result);

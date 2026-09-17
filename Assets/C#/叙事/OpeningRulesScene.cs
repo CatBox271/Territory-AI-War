@@ -28,7 +28,7 @@ public class OpeningRulesScene : StoryScene
     private const float D6 = 9f;
 
     // 开头 7 秒角落里的小字（要改空降时间就改这一处）
-    private const string SkydiveNote = "【空降00:00skip~~~】";
+    private const string SkydiveNote = "【空降1:10跳过讲解】";
 
     // —— 文案带（整场不动）——
     private const float TextY = 2.62f;      // 文案带中心

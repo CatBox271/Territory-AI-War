@@ -4,7 +4,8 @@ using TMPro;
 using UnityEngine;
 
 /// <summary>
-/// 移动前的「炮塔视野截图」：以炮塔为圆心、半径 = 0.6 × 当前最大移动距离 的圆形俯视图。
+/// 移动前的「炮塔视野截图」：以炮塔为圆心、半径 = 1.0 × 当前最大移动距离 的圆形俯视图
+/// （半径倍率见 RadiusFactor，1 = 整个最大移动范围都拍进图里）。
 ///
 /// 为什么要有它：AI 看不到场上别的东西，移动时很容易一头扎进别人的火力范围，或者正好停在别人身上。
 /// 所以每次 move_turret **预览**时给它一张自己周围的俯视图，让它先看清再决定方向与距离。
@@ -20,8 +21,8 @@ public static class MoveSightCapture
 {
     /// <summary>关掉就完全不截图（连 data:URL 都不生成，不占请求 token）。</summary>
     public static bool Enabled = true;
-    /// <summary>半径倍率：半径 = 这个值 × 炮塔当前最大移动距离。</summary>
-    public static float RadiusFactor = 0.6f;
+    /// <summary>半径倍率：半径 = 这个值 × 炮塔当前最大移动距离。1 = 整个最大移动范围都在这张图里。</summary>
+    public static float RadiusFactor = 1f;
     /// <summary>输出图片边长（像素，正方形）。</summary>
     public static int Resolution = 512;
     /// <summary>PNG 存盘目录名（在 Application.persistentDataPath 下）。</summary>
@@ -55,13 +56,15 @@ public static class MoveSightCapture
     /// </summary>
     public static bool IsEnabled { get { SyncFromAgent(); return Enabled; } }
 
-    /// <summary>面板上的开关 / 倍率 / 分辨率优先（在 AIAgent 上调），没挂 AIAgent 时用这里的静态默认值。</summary>
+    /// <summary>开关 / 分辨率在 AIAgent 面板上；**半径倍率在 MapConfig**（玩法口径，和移动距离配套）。</summary>
     private static void SyncFromAgent()
     {
+        MapConfig cfg = MapConfig.Instance;
+        if (cfg != null) RadiusFactor = cfg.moveSightRadiusFactor;
+
         AIAgent agent = AIAgent.Instance;
         if (agent == null) return;
         Enabled = agent.moveSightEnabled;
-        RadiusFactor = agent.moveSightRadiusFactor;
         Resolution = agent.moveSightResolution;
     }
 
@@ -168,6 +171,12 @@ public static class MoveSightCapture
         tex.SetPixels32(px);
         tex.Apply();
 
+        // 刷完视野遮罩之后再画标记与数字：球的位置、球身上的数值都要出现在图里
+        OverlayEntities(px, shot.size, center, radius);
+
+        tex.SetPixels32(px);
+        tex.Apply();
+
         shot.png = tex.EncodeToPNG();
         UnityEngine.Object.Destroy(tex);
 
@@ -177,6 +186,109 @@ public static class MoveSightCapture
         shot.savedPath = Save(shot.png, stage, center, radius, maxMove);
         shot.ok = true;
         return shot;
+    }
+
+    /// <summary>
+    /// 在图上标出「球在哪、球身上写的数值是多少」。
+    ///
+    /// 为什么必须画进图片：这张图是给模型看的，模型看不到 Unity 的 UI 文字（渲染前那些 TMP 也会被临时关掉），
+    /// 所以数值只能我们自己在像素上写一遍。用的是 PixelDraw 那套 5×7 点阵字，字符集就是
+    /// HugeInt.ToShortString() 的取值集合（0-9 . - K M B T P）。
+    ///
+    /// 画的东西：
+    /// * 大球 / 穿甲弹：实心菱形标记 + 一条指向**速度方向**的短棒（穿甲弹的方向很关键）+ 上方数值
+    /// * 自己的炮塔本体：圆点 + 数值（**不画护盾**）
+    /// </summary>
+    private static void OverlayEntities(Color32[] px, int size, Vector2 center, float radius)
+    {
+        if (px == null) return;
+
+        Color32 labelBg = new Color32(12, 12, 16, 220);
+        Color32 labelColor = new Color32(255, 255, 255, 255);
+        Color32 enemyEdge = new Color32(255, 120, 120, 255);
+        Color32 mineEdge = new Color32(150, 240, 160, 255);
+
+        int scale = size >= 768 ? 3 : (size >= 384 ? 2 : 1);   // 512 图 -> 每格 2px，字高 14px
+        float perPixel = (radius * 2f) / size;
+
+        // 世界坐标 -> 网格像素（y 向上为正，和 GetPixels32 下标一致）
+        bool TryToPixel(Vector2 world, out int gx, out int gy)
+        {
+            gx = Mathf.RoundToInt((world.x - (center.x - radius)) / perPixel);
+            gy = Mathf.RoundToInt((world.y - (center.y - radius)) / perPixel);
+            return gx >= 0 && gy >= 0 && gx < size && gy < size;
+        }
+
+        void DrawValue(Vector2 world, string text, Color32 fill, int markerRadius, int lift)
+        {
+            text = PixelDraw.Filter(text);
+            if (text.Length == 0) return;
+            if (!TryToPixel(world, out int gx, out int gy)) return;
+
+            // 数值写在标记**上方**（留出 lift 像素的空档），并且夹在网格里，别被裁掉
+            int tw = PixelDraw.TextWidth(text, scale);
+            int tx = Mathf.Clamp(gx - tw / 2, 1, Mathf.Max(1, size - tw - 1));
+            int ty = Mathf.Clamp(gy + markerRadius + lift, 1, size - PixelDraw.TextHeight(scale) - 2 * scale - 1);
+            PixelDraw.DrawText(px, size, tx, ty, text, scale, fill, labelBg);
+        }
+
+        int maxEntities = 40;   // 视野里几十个弹体已经很多了，别把图糊满
+        int drawn = 0;
+
+        BallPainter[] balls = UnityEngine.Object.FindObjectsOfType<BallPainter>();
+        foreach (BallPainter bp in balls)
+        {
+            if (drawn >= maxEntities) break;
+            if (bp == null || bp.value <= 0) continue;      // 已经归零的就不标了
+
+            Vector2 pos = bp.transform.position;
+            if (!TryToPixel(pos, out int gx, out int gy)) continue;
+            if (Mathf.Abs(pos.x) > (MapConfig.Instance != null ? MapConfig.Instance.worldSize * 0.5f : 5f)) continue; // 图外的不标
+
+            bool shell = bp.game_item_name == "穿甲";
+            int markerR = shell ? 3 : Mathf.Clamp(Mathf.RoundToInt(bp.transform.lossyScale.x / perPixel * 0.5f), 3, 26);
+            Color32 edge = bp.stage == 0 ? labelColor : (bp.stage == 1 ? enemyEdge : mineEdge);
+
+            // 标记本体：大球按实际半径画圆环（一眼看出大小），穿甲弹画小方块
+            if (shell)
+            {
+                PixelDraw.DrawLine(px, size, gx - markerR, gy - markerR, gx + markerR, gy + markerR, 2, edge);
+                PixelDraw.DrawLine(px, size, gx - markerR, gy + markerR, gx + markerR, gy - markerR, 2, edge);
+            }
+            else
+            {
+                PixelDraw.DrawRing(px, size, gx, gy, markerR, Mathf.Max(1, scale), edge);
+            }
+
+            // 朝向短棒：从球心指向速度方向，长度按"这一帧能跑多远"放大到看得见
+            Vector2 v = bp.rb != null ? bp.rb.velocity : Vector2.zero;
+            if (v.sqrMagnitude > 0.0001f)
+            {
+                Vector2 dir = v.normalized;
+                int len = Mathf.Clamp(Mathf.RoundToInt(v.magnitude / perPixel * 0.25f), markerR + 4, size / 4);
+                int tipX = gx + Mathf.RoundToInt(dir.x * len);
+                int tipY = gy + Mathf.RoundToInt(dir.y * len);
+                PixelDraw.DrawLine(px, size, gx, gy, tipX, tipY, Mathf.Max(1, scale - 1), edge);
+            }
+
+            DrawValue(pos, bp.value.ToShortString(), labelColor, markerR, 3);
+            drawn++;
+        }
+
+        // 自己的炮塔：位置 + 数值（不画护盾圆环）
+        MapConfig cfg = MapConfig.Instance;
+        for (int i = 1; i < 5; i++)
+        {
+            if (!Towel.AllTowel.TryGetValue(i, out Towel t) || t == null || t.isDead) continue;
+
+            Vector2 pos = t.transform.position;
+            if (!TryToPixel(pos, out int gx, out int gy)) continue;
+
+            Color32 color = cfg != null ? (Color32)cfg.GetColor(i, MapConfig.ColorStage.Towel) : labelColor;
+            PixelDraw.DrawDisc(px, size, gx, gy, Mathf.Max(2, scale * 2), color);
+
+            DrawValue(pos, t.value.ToShortString(), labelColor, Mathf.Max(4, scale * 3), 3);
+        }
     }
 
     /// <summary>存盘（查 bug 用）。文件名带阵营/坐标/半径/时间，方便对照。</summary>

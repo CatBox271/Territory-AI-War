@@ -169,7 +169,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDrag: 0
   m_AngularDrag: 0.05
   m_GravityScale: 0.5
@@ -182,7 +182,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!114 &6962709622271410334
 MonoBehaviour:
@@ -212,8 +212,8 @@ MonoBehaviour:
       inWeight: 0
       outWeight: 0.14208515
     - serializedVersion: 3
-      time: 3.0138109
-      value: 0.23944943
+      time: 1.1314569
+      value: 0.20778695
       inSlope: 0.018367685
       outSlope: 0.018367685
       tangentMode: 0
@@ -221,40 +221,40 @@ MonoBehaviour:
       inWeight: 0.33333334
       outWeight: 0.17001508
     - serializedVersion: 3
-      time: 8.48058
-      value: 0.28546974
-      inSlope: 0.00668619
-      outSlope: 0.00668619
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    - serializedVersion: 3
       time: 10.069593
-      value: 0.29856634
-      inSlope: 0.01795201
-      outSlope: 0.01795201
+      value: 0.26210654
+      inSlope: 0.008922226
+      outSlope: 0.008922226
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.2253106
+    - serializedVersion: 3
+      time: 17.560759
+      value: 0.34709617
+      inSlope: 0.020458156
+      outSlope: 0.020458156
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.33333334
       outWeight: 0.33333334
     - serializedVersion: 3
-      time: 20
-      value: 0.4525604
-      inSlope: 0.0088166585
-      outSlope: 0.0088166585
+      time: 19.906748
+      value: 0.4537124
+      inSlope: 0.04273452
+      outSlope: 0.04273452
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.09438038
-      outWeight: 0.230996
+      inWeight: 0.2621967
+      outWeight: 0.13707775
     - serializedVersion: 3
-      time: 30
-      value: 0.56
-      inSlope: 0.01299267
-      outSlope: 0.01299267
+      time: 35.05627
+      value: 0.8878719
+      inSlope: 0.05281412
+      outSlope: 0.05281412
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.28417912
+      inWeight: 0.11035678
       outWeight: 0.33333334
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -267,8 +267,8 @@ MonoBehaviour:
   stuckBounceMinY: 3
   stuckBounceMaxY: 8
   shrinkThreshold: 15
-  shrinkRate: 0.01666667
-  minShrinkScale: 0.2
+  shrinkRate: 0.05000001
+  minShrinkScale: 0.075
 --- !u!114 &6891342313085790704
 MonoBehaviour:
   m_ObjectHideFlags: 0

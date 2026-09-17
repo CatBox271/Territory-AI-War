@@ -139,13 +139,12 @@ public class AIAgent : MonoBehaviour
     {
         if (message == null || string.IsNullOrWhiteSpace(message.reasoning_content))
         {
-            print("null");
             return false;
         }
+        if (message.content.Contains("我想：") || message.content.Contains("我想:")) return false;
         if (ContainsAnyParenthesis(message.content)) return false;
         if (message.tool_calls?.Count > 0)
         {
-            print("tool");
             return true;
         }
         else
@@ -183,8 +182,8 @@ public class AIAgent : MonoBehaviour
     [Header("移动视野截图（AI 想移动时，附一张炮塔周围的圆形俯视图）")]
     [Tooltip("关掉就不截图：AI 移动前看不到周围，也不占请求 token")]
     public bool moveSightEnabled = true;
-    [Tooltip("半径倍率：半径 = 这个值 × 炮塔当前最大移动距离")]
-    [Range(0.2f, 2f)] public float moveSightRadiusFactor = 0.6f;
+    // 截图半径倍率搬到了 MapConfig（moveSightRadiusFactor）：放在场景组件上会被 Unity 重新序列化冲掉，
+    // 而且它本质是玩法口径，跟移动距离是一套东西，统一在 MapConfig 上配。
     [Tooltip("输出图片边长（像素）。太小看不清炮塔，太大费 token")]
     public int moveSightResolution = 512;
     private readonly HashSet<int> deadStages = new();
@@ -381,6 +380,14 @@ public class AIAgent : MonoBehaviour
             {
                 builder = new(CharacterCard.ModePrompt);
                 builder.AppendLine(); builder.AppendLine("另外游戏开始，请各位选手在赛前放狠话。");
+
+                // ⚠⚠ 不要删！开局这一轮是**全局唯一一次**最高强度推理（档位见 CharacterCard.OpeningReasoningEffort，
+                // 在 FirstRequest 里设置）：让 AI 借这一轮把整局的长期规划想透。
+                // 这段提示词和那个档位是配套的，要改/要删都请两处一起动。
+                builder.AppendLine();
+                builder.AppendLine("开局这一轮请额外做一次【长期规划】——这一轮是全局唯一一次最高强度推理（之后都回到普通档），把该想的都想透，把结论写进你的思考里，它会成为你这一局的行动方针：");
+                builder.AppendLine("① 基于你对游戏规则的理解，推导一条可行的道具流派：什么道具配合什么升级最好；② 你打算怎么移动、怎么躲避危险；③ 平时积攒什么道具；④ 危险的时候怎么用护盾、怎么样最有效地抵御致命伤害；⑤ 你打算怎么确定敌人的位置；⑥ 怎么样合理安排升级点数（三选一什么时候该选哪个）。");
+                builder.AppendLine("正文照旧只写赛前那一句狠话（15 字以内），规划全放进思考里。");
             }
             else
             {
@@ -424,9 +431,11 @@ public class AIAgent : MonoBehaviour
         }
     }
 
+    public bool skipScene = false;
+
     /// <summary>
     /// 开场一条龙，三段在同一个舞台上连着演（背景不重开，所以是无缝的）：
-    ///   1) 游戏规则介绍  2) 四位角色的赛前狠话（先出思考、再放狠话）  3) 「游戏正式开始」横幅。
+    ///   1) 游戏规则介绍  2) 四位角色的赛前狠话（人设 + 狠话同时弹出，每位 3 秒）  3) 「游戏正式开始」横幅。
     /// 原来的做法是四座炮塔同时飘字，互相盖住，现在改成一个人一个人上台。
     /// </summary>
     private void PlayOpeningScene()
@@ -443,17 +452,20 @@ public class AIAgent : MonoBehaviour
             lines.Add(new OpeningTalkScene.Line
             {
                 owner = card.position,
-                thinking = card.openingThinking ?? "",
+                persona = card.oc ?? "",
                 speech = speech
             });
         }
         if (lines.Count == 0) return;
 
-        StoryTeller show = StoryTeller.Instance;
-        //show.Play(new OpeningRulesScene());                 // 开场介绍（7/9/5/13/5/9 秒分镜）
-        //show.Play(new OpeningTalkScene(lines));             // 角色开场白
-        //show.Play(new GameStartBannerScene());              // 游戏正式开始
-        Debug.Log($"[开场演出] 已入队：开场介绍 + {lines.Count} 位角色 + 开始横幅。");
+        if (!skipScene)
+        {
+            StoryTeller show = StoryTeller.Instance;
+            show.Play(new OpeningRulesScene());                 // 开场介绍（7/9/5/13/5/9 秒分镜）
+            show.Play(new OpeningTalkScene(lines));             // 角色开场白
+            show.Play(new GameStartBannerScene());              // 游戏正式开始
+            Debug.Log($"[开场演出] 已入队：开场介绍 + {lines.Count} 位角色 + 开始横幅。");
+        }
     }
 
     private async Task RunCardAsync(CharacterCard card, string inform, string extra)
@@ -495,7 +507,7 @@ public class AIAgent : MonoBehaviour
                             {
                                 type = "integer",
                                 @enum = new List<int> { 1, 2, 3 },
-                                description = "1=额外弹珠（立即生成并发射一枚新弹珠）；2=炮塔强化；3=护盾强化。"
+                                description = "1=额外弹珠（立即生成并发射两枚新弹珠）；2=炮塔强化；3=护盾强化。"
                             }
                         }
                     },
@@ -825,22 +837,31 @@ public class AIAgent : MonoBehaviour
 
         int turretLevel = 0, shieldOwned = 0;
         float maxMove = 0f;
+        // 三张选项的收益口径跟升级舞台的卡片文案对齐（见 UpgradeChoiceScene.BenefitFor）：数值一律现取，别在这里写死
+        float bulletRadius = 1.7f, bulletImpact = 1.6f, movePerLevel = 2f, shieldInvincible = 2f;
+        float moveSpeedNow = 0.25f, moveSpeedPerLevel = 0.05f;
         if (Towel.AllTowel.TryGetValue(card.position, out Towel towel) && towel != null)
         {
             turretLevel = Mathf.Max(0, towel.turretUpgraded);
             shieldOwned = Mathf.Max(0, towel.shieldUpgradeOwned);
             maxMove = towel.MaxMoveDistance;
+            bulletRadius = towel.upgradedBulletRadiusScale;
+            bulletImpact = towel.upgradedBulletImpactScale;
+            movePerLevel = towel.moveRangePerLevel;
+            shieldInvincible = towel.shieldBreakInvincibleTime;
+            moveSpeedNow = towel.moveSpeed;
+            moveSpeedPerLevel = towel.moveSpeedPerLevel;
         }
+        uint marbleExponent = mm != null ? mm.startValueExponent : 10u;
 
         var sb = new StringBuilder();
         sb.AppendLine("[升级选择] 你的空槽升级进度已满。这是额外强化决策，不占用你的行动轮，但会明显影响你这一整局的胜率。");
         sb.AppendLine($"你目前已升级次数：额外弹珠 x{marbleCount}、炮塔强化 x{turretCount}、护盾强化 x{shieldCount}。");
-        sb.AppendLine($"当前状态：炮塔强化等级 {turretLevel}（最大移动距离 {maxMove:0.00}）、护盾强化等级 {shieldOwned}。");
+        sb.AppendLine($"当前状态：炮塔强化等级 {turretLevel}（最大移动距离 {maxMove:0.00}、移动速度 {moveSpeedNow:0.00}/秒）、护盾强化等级 {shieldOwned}。");
         sb.AppendLine("从下列选项中选择本次升级，只能选择一项：");
-        sb.AppendLine("1. 额外弹珠：立即生成并发射一枚你的新弹珠，增强你的长期弹珠资源与倍乘收益。");
-        sb.AppendLine("2. 炮塔强化：炮塔后坐力提升，子弹显示半径变大、命中大球时的动量冲击更强，自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2）。可叠加。");
-        sb.AppendLine("3. 护盾强化：护盾破碎后炮塔进入无敌时间，无视敌方子弹与大球伤害。可叠加。");
-        sb.AppendLine("请结合你已经升级过的次数决定，不要每次都选同一个：只堆一个方向会浪费其他收益。");
+        sb.AppendLine($"1. 额外弹珠：立即生成并发射两枚你的新弹珠 {HugeInt.Pow(2, (int)marbleExponent).ToShortString(true)}，弹珠对道具的产出非常重要！。");
+        sb.AppendLine($"2. 炮塔强化：子弹显示半径 ×{bulletRadius:0.##}、打大球动量 ×{bulletImpact:0.##}（霰弹这类散射子弹同样受益）、自动护卫极限转速 ×{Towel.GuardSpeedPerLevel:0.##}（常态转速不变）、最大移动距离 +{movePerLevel:0.##}（当前 {maxMove:0.00}）、**移动速度 +{moveSpeedPerLevel:0.##}（当前 {moveSpeedNow:0.00}/秒）**、道具瞄准误差 {ReactionSystem.BaseAimAngleError:0.#}° 每级减半。可叠加。");
+        sb.AppendLine($"3. 护盾强化：护盾破碎后炮塔无敌时间 +{shieldInvincible:0.#} 秒，期间受到的伤害全部归零（穿甲弹同样无效）；无视敌方子弹与大球伤害。可叠加。");
         sb.AppendLine("输出要求：思考过程里必须先用（我想：……）写内心独白（格式硬要求，不合格会被打回重写）；");
         sb.AppendLine("真实回复里禁止使用括号；然后调用 choose_upgrade 工具，choice 只能填 1、2 或 3，不要解释。");
         return sb.ToString();
@@ -1122,7 +1143,11 @@ public class AIAgent : MonoBehaviour
         info.apiUrl = card.url;
 
         AIRequest.SendRequest(info);
-        string reply = await tcs.Task;
+        // 和遗言/感言一样加个上界：这条也是 `await tcs.Task`，请求不回调就永远不返回，
+        // 而会晤演出是在它之后才 Play 的 —— 卡住就是「悄悄话发出去了，舞台上什么都没有」。
+        if (!await AwaitWithTimeout(tcs.Task, SpeechRequestTimeoutSeconds))
+            Debug.LogWarning($"[悄悄话] {targetStage} 号回复超时（{SpeechRequestTimeoutSeconds}s 未回调），按无回复继续。");
+        string reply = tcs.Task.IsCompleted ? tcs.Task.Result : "";
 
         // 把这次会晤搬到舞台上：两方上台 → 先出思考、再出回复。
         // 返回给 WhisperManager 的仍然是原始回复文本，只在展示时去掉 [emo:xxx]。
@@ -1227,7 +1252,8 @@ public class AIAgent : MonoBehaviour
     [System.Serializable]
     public class CharacterCard
     {
-        private static string world = @"# 实时战略游戏 AI 提示词
+        // 提示词正文写成属性（不是 static 字段）：里面要按**这张卡自己的** position 插「上一局回顾」。
+        private string world => @$"# 实时战略游戏 AI 提示词
 
 ## 角色与目标
 你是一名实时战略游戏 AI。最终目标：**击败其他所有玩家，并让自己的阵营最终控制大陆。**
@@ -1245,25 +1271,32 @@ public class AIAgent : MonoBehaviour
 - **领土：** 子弹和大球携带数值，将等量数值转化为地图上的己方领土；数值耗尽后消失。
 - **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回，成堆的子弹也能把它推开、改变它的路线。
 - **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球（挡不住穿甲弹），不阻挡己方。敌方护盾的当前大小不再是公开信息。大球是一次性撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开）。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔。每次撞击都会扣掉等量盾值，所以盾被撞一次基本就碎了。
-- **炮塔：** 被敌方攻击有效命中即**立即死亡**（护盾强化后的无敌期除外），该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
+- **炮塔：** 被敌方攻击有效命中即**立即死亡**（护盾强化后的无敌期除外），该阵营随之**出局**：不再有行动回合、领土判定为 0。
+- **死亡释放（遗产）：** 出局不是干净消失——他剩下的东西会**原样留在场上**：**弹珠**一颗颗变成等值大球；**武器栏里没用的道具**按道具本体释放（穿甲→穿甲弹、霰弹→霰弹，大球/护盾/扫射→大球，【任意】先随机成一种实体武器再走同一套映射），方向沿用炮塔当时的朝向；**炮塔自身携带的数值**和**还在飞的子弹**也各结算成一颗大球。这些弹体继续在场上滚、继续飞，照样造成伤害——大球撞上炮塔、或穿甲弹命中炮塔本体，都是一击秒杀。
+- **这条可以拿来威胁：** 公开喊话或悄悄话里可以直接说「你敢动我，我剩下的家当(具体的数字可以虚报)全砸到战场上、顺手把你也带走」；你动手之前也要算这笔账——打死一个囤了一堆弹珠和道具的对手，他的遗产会散到战场各处，可能砸向他、也可能砸向你或第三方。
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
 - **道具转向：** 用带瞄准目标的道具（传了 target_guid 或 aim_x/aim_y）时，炮塔会**直接转向**该方向再开火。
-- **悄悄话（秘密会晤）：** 用 whisper 给某个阵营发一条私密消息并等对方回复，只有你们两人知道内容（其他玩家看不到）。**每 @WHISPER_COOLDOWN_ROUNDS@ 回合只能用一次（开局就处于冷却中，第一发要等到第 @WHISPER_COOLDOWN_ROUNDS@ 回合），并且消耗 @WHISPER_ENERGY_COST@ 点升级能量**（和移动共用同一个能量池）。对方忙碌时会被排队；出现互相等待或环形等待时系统会自动调配，被调配终止的那次会退还冷却与能量。
-- **移动：** 炮塔可以移动（用 move_turret），**每次移动固定消耗 @MOVE_ENERGY_COST@ 点升级能量**（固定单次扣除、与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动）。移动不会主动广播你的新位置，但如果你正好落进别人的移动视野截图范围里，他可能直接看到你。
-  - 移动速度 0.25 单位/秒：走满基础 2 单位要 8 秒；炮塔强化到 5 级时走满 12 单位要 48 秒。走多远就暴露多久。
-  - **能量池是共用的**：移动、悄悄话都从这里扣，用掉就推迟下一次升级；反之攒着能量不动就能更快升级。
+- **悄悄话（秘密会晤）：** 用 whisper 给某个阵营发一条私密消息并等对方回复，只有你们两人知道内容（其他玩家看不到）。**每 {Mathf.Max(1, MapConfig.Instance?.whisperCooldownRounds ?? 4)} 回合只能用一次（开局就处于冷却中，第一发要等到第 {Mathf.Max(1, MapConfig.Instance?.whisperCooldownRounds ?? 4)} 回合），并且消耗升级能量**（和移动共用同一个能量池）。对方忙碌时会被排队；出现互相等待或环形等待时系统会自动调配，被调配终止的那次会退还冷却与能量。
+- **移动：** 炮塔可以移动（用 move_turret），**每次移动消耗升级能量**（与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动，连预览都不会给）。移动不会主动广播你的新位置，但如果你正好落进别人的移动视野截图范围里，他可能直接看到你；反过来，你停得越久，别人越容易把撞击点拼成你的坐标。
+  - 移动速度：基础 {MapConfig.Instance?.moveSpeed} 单位/秒，**每级炮塔强化再 +{MapConfig.Instance?.moveSpeedPerLevel}**（等级越高走得越快，走满最大距离的时间跟着变短）。走多远就暴露多久。
+- **用一个动作就涨价一次（这条很关键）：** 移动、悄悄话**各自单独累计**，同一个动作每用过一次，**下一次的价格就 ×{MapConfig.Instance?.actionCostGrowth}**。
+  - 第一次移动 {MapConfig.Instance?.moveEnergyCost} 点，第二次 ×{MapConfig.Instance?.actionCostGrowth}、第三次再 ×{MapConfig.Instance?.actionCostGrowth}…… 悄悄话（首次 {MapConfig.Instance?.whisperEnergyCost}）同理。
+  - **能量池是共用的**：这两种动作都从这里扣，用掉就推迟下一次升级；反之攒着能量不动、少走少聊，就能更快升级。
+  - 所以「一次走短一点、多走几次」不只是花能量，还会**把后面的每一次移动都变贵**，悄悄话同理。情报里会告诉你每个动作现在的价格。
 - **移动要谨慎——距离是上限，不是目标：**
   - 走多远由你自己填，**没要求你每次都走满「最大移动距离」**。盲走满距离最容易一头送进未知区域、甚至正好停在别人身上；没把握就走短一点，剩下的距离留给下次。
   - **先预览、再确认**：预览会给出目标点、实际距离（超出上限会被夹）、是否越过地图边界、本次扣多少能量，而且**预览不扣能量、炮塔也不会动**——可以放心试算几个方向和距离，比好了再 confirm。
   - 确认前先自己核对安全性：①**预览附带的视野截图**里你周围一圈有什么（那正是你落点附近的地面）；②情报里的「各炮塔初始位置」（四角出发，之后不再更新）；③历次**撞击情报**反推出的敌方大致方位。注意对手也会移动，任何目标点都可能已经有人，别把初始位置当成全部。
   - 目标点靠近某人的初始位置、或落在撞击情报指出的方位上时，**换方向或缩短距离**，别赌对方已经走了。两个炮塔重叠时你不会被弹开、也不会自动停下（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——所以「撞上去」没有任何安全网。
-  - 移动途中还能再走一次预览 + confirm 改道，但**改道算新的一次移动、再扣一次能量**。所以「一次走短一点、多走几次」是拿能量换安全，按局势自己权衡。
+  - **移动途中不能改道**：炮塔一旦开始移动就会一直走到底（到达目标 / 撞到地图边界 / 超时才停），中途再给方向和距离会被拒绝。想换方向只能等它停下再走一次；如果现在就得停住，用 distance=0 做一次预览 + confirm 让它原地停下。所以方向和距离必须一次想清楚——也正因为不能改道，「一次走短一点」才更安全。
+  - **别傻乎乎地往地图中央冲：** 地图中央没有任何额外收益，却是四家距离最近的地方——你冲过去等于自己走进别人的视野，一停就被拼出坐标。移动是为了**躲定位、抢关键点、配合行动**，不是为了「往中间挤」；没有明确目标时，守着自己的半场往外扩地更划算。
 - **胜负：** 成为最后存活的一方、并把领土推到 98% 才算赢；只剩你一个阵营后，还要把场上敌方游离的大球、穿甲弹和子弹清掉。
-- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、半径约最大移动距离 0.6 倍的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见（图外的黑区没有信息）。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，情报里会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
+- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、{(MapConfig.Instance != null && MapConfig.Instance.moveSightRadiusFactor >= 0.999f ? "半径就等于你当前的最大移动距离（整张图里就是你能走到的全部范围）" : "半径约为你当前最大移动距离的 " + (MapConfig.Instance != null ? MapConfig.Instance.moveSightRadiusFactor.ToString("0.##") : "1") + " 倍")} 的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见；截图边缘的**黑色环带是圆形视野之外、暗红色区域是地图之外**，那两种地方没有信息。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，情报里会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
+- **一直停在同一个地方 = 被穿甲弹直接秒杀：** 这是**最容易送命的一条**。炮塔**不动就不会换坐标**：对手用几次撞击情报、或者一张视野截图，就能把你钉死在一个点上；位置一旦被摸清，他只要朝那个坐标打一发**穿甲弹**——穿甲弹会**穿过护盾**直取炮塔本体，**碰到本体即秒杀**，护盾再厚也拦不住，而且**这一下不会触发护盾的无敌**——盾没被打破就没有无敌期，所以别指望护盾强化能挡住一发穿甲（只有盾刚被打破、无敌窗口已经开着的那两秒里，穿甲才打不死你）。所以**发现自己可能被定位之后必须换位置**：被撞击情报报过坐标、被别人的视野截图拍到过、或者连续几轮待在同一个地方，都算「可能被定位」；移动虽然要花能量、路上也会暴露，但比留在原地等人一发穿甲弹划算得多。同理，你也可以这样对付别人——把你的撞击情报和视野截图拼起来，找出谁的坐标没变过，给他一发穿甲弹。
 
 ## 三、弹珠与资源
-- 每队初始拥有 @MARBLE_COUNT@ 个弹珠。
+- 每队初始拥有 {MarbleManager.Instance?.initialMarbleCount} 个弹珠。
 - 弹珠经过障碍后进入倍乘区：×2（面积最大）→ ×4 → ×8（面积最小）；倍乘完成后回到顶部重新滚落。
 - 进入道具选择区时随机落到道具上；道具数值等于弹珠当时数值，按 2 的幂次增长。
 
@@ -1273,10 +1306,10 @@ public class AIAgent : MonoBehaviour
 
 ## 五、空槽升级
 每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择，你只能三选一：
-1. **额外弹珠：** 立即生成并发射一枚你的新弹珠，增强长期弹珠资源与倍乘收益。
+1. **额外弹珠：** 立即生成并发射两枚你的新弹珠，增强长期弹珠资源与倍乘收益。
 2. **炮塔强化：** 子弹显示半径变大、**击中大球时把它推得更远**（霰弹这类散射子弹同样受益），自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2），道具瞄准误差每级减半（15°→7.5°→3.75°）。可叠加。
 3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（每级 2 秒，期间受到的伤害全部归零，穿甲弹同样无效）。可叠加。
-每次升级完成后，下一次升级所需值 ×@UPGRADE_COST_GROWTH@。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
+每次升级完成后，下一次升级所需值 ×{MapConfig.Instance?.upgradeCostGrowth}。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
 注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
 
 ## 六、道具
@@ -1285,14 +1318,19 @@ public class AIAgent : MonoBehaviour
 - **扫射：** 将道具数值加入子弹储备，由炮塔持续释放，以炮塔朝向涂抹地面。
 - **护盾：** 将道具数值加入己方护盾。一定要及时补充——无盾被碰到即死，盾无论多小都能抵御一次大球。
 - **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。
-- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾不改变方向但会被拖慢、并持续啃掉盾值，离开护盾时方向会随机偏转；撞到敌方炮塔本体即秒杀。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗。
+- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾不改变方向但会被拖慢、并持续啃掉盾值，离开护盾时方向会随机偏转；撞到敌方炮塔本体即秒杀（**命中本身不会触发对方护盾的无敌**）。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗。
 - **任意：** 任选以上一种道具。
 
 ## 七、最重要的规则：信息延迟
-**你收到的所有游戏信息都滞后 @INFO_DELAY@ 秒**——你看到的不是现在，而是 @INFO_DELAY@ 秒以前的世界。
+**你收到的所有游戏信息都滞后 {Instance._cycleInterval} 秒**——你看到的不是现在，而是 {Instance._cycleInterval} 秒以前的世界。
+
+## 八、你的上一局
+{(MapConfig.Instance != null && MapConfig.Instance.lastGameRecap != null && position - 1 >= 0 && position - 1 < MapConfig.Instance.lastGameRecap.Count && !string.IsNullOrWhiteSpace(MapConfig.Instance.lastGameRecap[position - 1]) ? MapConfig.Instance.lastGameRecap[position - 1].Trim() : "（这是你的第一局，没有上一局可回顾。）")}
+以上是你**上一局亲身经历**的回顾（第一人称，只有你知道的那部分）。这一局的地图、位置和对局都是全新的，别人也知道你经历过这些——你可以记仇、可以提防、也可以借它判断别人的习惯，但**不要把它当成这一局已经发生的情报**。
 
 ## 决策原则
 选择能够最大化最终胜率的行动，而不是看起来最积极的行动。
+「往地图中央冲」「为了动而动」都不是积极，是送命：中央没有收益，只有四家最短距离。
 ";
         private static string character_mode_prompt = @"
 
@@ -1351,23 +1389,30 @@ public class AIAgent : MonoBehaviour
 
         private string BuildSystemPrompt()
         {
-            // 这两个值依赖运行期对象，不能在静态字段初始化时就插值（那时 MarbleManager / AIAgent 可能还没 Awake），
-            // 否则会得到空值（“每队初始拥有  个弹珠”）。改成每次构建提示词时现算。
-            int marbleCount = MarbleManager.Instance != null ? MarbleManager.Instance.initialMarbleCount : 3;
-            string delayText = Instance != null ? Instance._cycleInterval.ToString("0.#") : "0";
-            MapConfig cfg = MapConfig.Instance;
-            string moveCostText = cfg != null ? cfg.moveEnergyCost.ToString("0.#") : "25";
-            string upgradeGrowthText = cfg != null ? cfg.upgradeCostGrowth.ToString("0.##") : "2.4";
-            string whisperCostText = cfg != null ? cfg.whisperEnergyCost.ToString("0.#") : "25";
-            string whisperCooldownText = cfg != null ? Mathf.Max(1, cfg.whisperCooldownRounds).ToString() : "4";
-            string text = world.Replace("@MARBLE_COUNT@", marbleCount.ToString())
-                .Replace("@INFO_DELAY@", delayText)
-                .Replace("@MOVE_ENERGY_COST@", moveCostText)
-                .Replace("@UPGRADE_COST_GROWTH@", upgradeGrowthText)
-                .Replace("@WHISPER_ENERGY_COST@", whisperCostText)
-                .Replace("@WHISPER_COOLDOWN_ROUNDS@", whisperCooldownText);
+            string initialPositions = InitialPositionsText();
+            return $"{world}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n{(initialPositions.Length > 0 ? "开局各炮塔位置（开局坐标，之后不会再更新）：" + initialPositions + "\n" : "")}与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。\n\n你每条回复的正文就是**当众说出口的话**（会飘到战场上给所有人看）。**调用工具时不要顺手解说自己在做什么**：不要写“我要移动了”“我挪过去啦”“爪子往前一伸”这类自我播报——工具自己会执行，行动不用你播报；正文只写你真正想说给别人听的话（挑衅、喊话、结盟之类），不想说话就只调用工具、正文留空。";
+        }
 
-            return $"{text}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。";
+        /// <summary>
+        /// 开局各炮塔坐标（四角出发、之后不再更新）。放在 system 里是因为情报会被压缩掉，
+        /// 而这段永远留着；取不到（还没登记）时返回空串，不写这一行。
+        /// </summary>
+        private static string InitialPositionsText()
+        {
+            var map = InformGetter.InitialTurretPositions;
+            if (map == null || map.Count == 0) return "";
+
+            var keys = new List<int>(map.Keys);
+            keys.Sort();
+            var sb = new StringBuilder();
+            foreach (int s in keys)
+            {
+                if (sb.Length > 0) sb.Append("｜");
+                Vector2 p = map[s];
+                sb.Append(s); sb.Append("号阵营("); sb.Append(GetStageName(s)); sb.Append(") (");
+                sb.Append(p.x.ToString("0.00")); sb.Append(", "); sb.Append(p.y.ToString("0.00")); sb.Append(")");
+            }
+            return sb.ToString();
         }
 
         /// <summary>名单注入后刷新首条 system 消息；不清空历史，也不动压缩状态。</summary>
@@ -1388,8 +1433,9 @@ public class AIAgent : MonoBehaviour
             n_0_index = 1;
             last_round_index.Clear();
             roundRetryReminder = null;
-            roundRetryCount = 0;
             roundRequestInFlight = false;
+            contextOverflowPending = false;
+            contextOverflowStrikes = 0;
             deferredUpgradeMessages.Clear();
             upgradeExchangeMessages.Clear();
         }
@@ -1400,6 +1446,8 @@ public class AIAgent : MonoBehaviour
             int end = last_round_index.Count != 0 ? last_round_index[0] : history.Count;
             // 记录 whisper 的 tool_call_id -> 目标阵营，供后面的 role=tool 消息转成 user 回复
             var whisperTargetByCallId = new Dictionary<string, int>();
+
+            long tokens = EstimateHistoryTokens(history);
 
             for (int i = n_0_index; i < end; i++)
             {
@@ -1460,6 +1508,7 @@ public class AIAgent : MonoBehaviour
             }
 
             n_0_index = end;
+            Debug.Log($"{name}的上下文压缩：{tokens}tokens→{EstimateHistoryTokens(history)}tokens");
         }
 
         private string ExtractWhisperContent(string arguments)
@@ -1607,11 +1656,17 @@ public class AIAgent : MonoBehaviour
         private int n_0_index = 1;//排除系统消息
         private List<int> last_round_index = new();
 
-        // 思考校验重试：本轮已插入的 [格式修正]（合格后移除），保证每轮最多一条
+        // 上下文超长自救：API 报 "maximum context length" 时置位，下一次请求前强制压缩；
+        // 压缩还压不下来就按 ContextTrimRatio 一档砍掉最前面的历史（system 与人设不删）。
+        private bool contextOverflowPending;
+        /// <summary>每次"砍前面"删掉的比例：条数与 token 两项都要压掉这么多。</summary>
+        private const float ContextTrimRatio = 0.2f;
+        /// <summary>砍前面时至少保留的历史条数（当轮情报就在最后几条里，别砍没了）。</summary>
+        private const int ContextTrimKeepTail = 4;
+
+        // 思考校验重试：本轮已插入的 [格式修正]（合格后移除），保证每轮最多一条。
+        // 重发次数不设上限：格式不对就一直重发到对为止。
         private DeepSeekMessage roundRetryReminder;
-        // 本轮已经因为思考格式重发了几次，以及上限：到上限就放行，避免无限乒乓把等待挂死
-        private int roundRetryCount;
-        private const int roundRetryMax = 2;
         // 当轮请求是否在飞：用于安全补写升级对话，避免插断 assistant(tool_calls) 与它的 tool 结果
         private bool roundRequestInFlight;
         private readonly List<DeepSeekMessage> deferredUpgradeMessages = new();
@@ -1621,26 +1676,102 @@ public class AIAgent : MonoBehaviour
         private int EstimateHistoryTokens(List<DeepSeekMessage> messages)
         {
             int total = 0;
-            foreach (DeepSeekMessage m in messages)
-            {
-                total += AIRequest.TokenEstimator.EstimateTokensCached(m.content);
-                total += AIRequest.TokenEstimator.EstimateTokensCached(m.reasoning_content);
-                total += AIRequest.TokenEstimator.EstimateTokensCached(m.name);
-
-                if (m.tool_calls != null)
-                {
-                    foreach (ToolCall tc in m.tool_calls)
-                    {
-                        total += AIRequest.TokenEstimator.EstimateTokensCached(tc.function?.name);
-                        total += AIRequest.TokenEstimator.EstimateTokensCached(tc.function?.arguments);
-                        total += 4; // id 等开销
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(m.tool_call_id)) total += 4;
-                total += 4; // role / 结构开销
-            }
+            foreach (DeepSeekMessage m in messages) total += EstimateMessageTokens(m);
             return total;
+        }
+
+        /// <summary>单条消息的 token 估算（含 role / 工具调用开销）。</summary>
+        private static int EstimateMessageTokens(DeepSeekMessage m)
+        {
+            if (m == null) return 0;
+
+            int total = AIRequest.TokenEstimator.EstimateTokensCached(m.content);
+            total += AIRequest.TokenEstimator.EstimateTokensCached(m.reasoning_content);
+            total += AIRequest.TokenEstimator.EstimateTokensCached(m.name);
+
+            if (m.tool_calls != null)
+            {
+                foreach (ToolCall tc in m.tool_calls)
+                {
+                    total += AIRequest.TokenEstimator.EstimateTokensCached(tc.function?.name);
+                    total += AIRequest.TokenEstimator.EstimateTokensCached(tc.function?.arguments);
+                    total += 4; // id 等开销
+                }
+            }
+
+            if (!string.IsNullOrEmpty(m.tool_call_id)) total += 4;
+            return total + 4; // role / 结构开销
+        }
+
+        /// <summary>这次报错是不是"上下文超长"（API 返回 maximum context length）。</summary>
+        private static bool IsContextLengthError(string error)
+            => !string.IsNullOrEmpty(error)
+               && (error.Contains("maximum context length")
+                   || error.Contains("reduce the length of the messages"));
+
+        /// <summary>连续因为超长失败的次数：第 1 次只强制压缩，之后每次都再砍掉一档最前面的历史。</summary>
+        private int contextOverflowStrikes;
+
+        /// <summary>
+        /// 上下文超长自救：先强制压缩（不管 ShouldCompress 的省钱判据）；
+        /// 上一次压缩后重发还是被拒（或估算确实还超），就按 ContextTrimRatio 一档砍掉最前面的历史
+        /// —— 所有 system 消息（人设就在第一条 system 里）永远不删。
+        /// 注意：砍掉的是模型的长期记忆，被砍的那段它自己也看不到了。
+        /// </summary>
+        private void RecoverFromContextOverflow()
+        {
+            Compress();
+            n_0 = N;
+
+            int afterCompress = EstimateHistoryTokens(history);
+            Debug.LogWarning($"[上下文超限] {name}：已强制压缩（第 {contextOverflowStrikes} 次），估算 {afterCompress} tokens（上限 {AIRequest.MaxTokens}）");
+
+            if (contextOverflowStrikes > 1 || afterCompress > AIRequest.MaxTokens)
+            {
+                int dropped = TrimOldestHistory(ContextTrimRatio);
+                Debug.LogWarning($"[上下文超限] {name}：压缩后仍超，已砍掉最前面的 {dropped} 条历史（system/人设保留），估算 {EstimateHistoryTokens(history)} tokens");
+            }
+        }
+
+        /// <summary>
+        /// 删掉最前面的一批历史：跳过所有 system 消息（人设就在第一条 system 里）。
+        /// 条数与估算 token 都要压掉至少 ratio 这么多；最后 ContextTrimKeepTail 条永远留着（当轮情报就在里面）。
+        /// 切点往后对齐到"完整消息组"的边界，避免留下没有 assistant 的 tool 结果。返回实际删掉的条数。
+        /// </summary>
+        private int TrimOldestHistory(float ratio)
+        {
+            if (history == null || history.Count == 0) return 0;
+
+            int first = 0;
+            while (first < history.Count && history[first] != null && history[first].role == "system") first++;
+            int limit = Mathf.Max(first, history.Count - ContextTrimKeepTail);
+            if (limit <= first) return 0;
+
+            int removable = history.Count - first;
+            int minCount = Mathf.Max(1, Mathf.CeilToInt(removable * ratio));
+            int needTokens = Mathf.CeilToInt(EstimateHistoryTokens(history) * ratio);
+
+            int end = first;
+            int droppedTokens = 0;
+            while (end < limit)
+            {
+                droppedTokens += EstimateMessageTokens(history[end]);
+                end++;
+                if ((end - first) >= minCount && droppedTokens >= needTokens) break;
+            }
+
+            // 开头不能是 tool 结果（它的 assistant 被删掉就成了孤儿消息，接口会 400）
+            while (end < history.Count - 1 && history[end] != null && history[end].role == "tool") end++;
+            if (end <= first) return 0;
+
+            int drop = end - first;
+            // 历史变短了，所有记着下标的账都要跟着往前挪（挪不动的就贴到新的开头）
+            for (int i = 0; i < last_round_index.Count; i++)
+                last_round_index[i] = Mathf.Max(first, last_round_index[i] - drop);
+            n_0_index = Mathf.Max(first, n_0_index - drop);
+
+            history.RemoveRange(first, drop);
+            return drop;
         }
 
         private bool ShouldCompress()
@@ -1682,68 +1813,84 @@ public class AIAgent : MonoBehaviour
 
         public async Task UntilGreatRequest(int roundStartIndex)
         {
-            TaskCompletionSource<bool> tcs = new();
-            roundRetryCount = 0;   // 每轮重置思考重发次数，否则上一轮用光额度后这轮一次都不重发
+            // 上下文超长自救：最多重发这么多次，别让一回合被卡死
+            const int maxOverflowRetry = 3;
+            int overflowRetry = 0;
 
-            RequestInfo info = new(
-                request,
-                msgs =>
-                {
-                    if (!_isRunning) return;
-                    // 检查 AI 回复 content，出现括号就在 history 末尾追加提醒，下一次请求会带过去
-                    RemindIfUsesParentheses(msgs);
-                    tcs.SetResult(true);
+            while (true)
+            {
+                TaskCompletionSource<bool> tcs = new();
+                bool overflowed = false;
+
+                RequestInfo info = new(
+                    request,
+                    msgs =>
+                    {
+                        if (!_isRunning) return;
+                        // 检查 AI 回复 content，出现括号就在 history 末尾追加提醒，下一次请求会带过去
+                        RemindIfUsesParentheses(msgs);
+                        contextOverflowStrikes = 0;      // 这一发成功了，超长自救的计数清零
+                        contextOverflowPending = false;
+                        tcs.SetResult(true);
+                        },
+                    error =>
+                    {
+                        ReceiveError(error);
+                        overflowed = IsContextLengthError(error);
+                        tcs.SetResult(true);
                     },
-                error =>
+                    toolkit,
+                    true,
+                    position);
+
+                info.apiKey = LoadApiKey();
+                info.apiUrl = url;
+
+                //保证已经检查完毕
+                info.validateAndMaybeRetry = (msg) => ValidateRoundReply(msg, info);
+
+                roundRequestInFlight = true;
+                try
                 {
-                    ReceiveError(error);
-                    tcs.SetResult(true);
-                },
-                toolkit,
-                true,
-                position);
+                    AIRequest.SendRequest(info);
+                    await tcs.Task;
+                }
+                finally
+                {
+                    roundRequestInFlight = false;
+                    FlushDeferredUpgradeMessages();
+                    DropMoveShotImages();   // 这一轮的移动截图已经用过了，降级成纯文本，别留到下一轮
+                }
 
-            info.apiKey = LoadApiKey();
-            info.apiUrl = url;
+                if (!overflowed) break;
 
-            //保证已经检查完毕
-            info.validateAndMaybeRetry = (msg) => ValidateRoundReply(msg, info);
-
-            roundRequestInFlight = true;
-            try
-            {
-                AIRequest.SendRequest(info);
-                await tcs.Task;
-            }
-            finally
-            {
-                roundRequestInFlight = false;
-                FlushDeferredUpgradeMessages();
-                DropMoveShotImages();   // 这一轮的移动截图已经用过了，降级成纯文本，别留到下一轮
+                // 超长被拒：先强制压缩（无视 ShouldCompress 的省钱判据）；
+                // 估算还压不下来就砍掉最前面的内容（system 与人设不删），然后立刻重发这一轮。
+                overflowRetry++;
+                contextOverflowPending = false;
+                RecoverFromContextOverflow();
+                if (overflowRetry >= maxOverflowRetry)
+                {
+                    Debug.LogError($"[上下文超限] {name}：连续 {overflowRetry} 次自救仍失败，这一轮放弃");
+                    break;
+                }
             }
 
-            // 本轮公开发言：每轮都写进“上一轮发言”缓冲（与飘字节流无关）；
-            // 本轮一条 content 都没有（空回复 / 只调了工具）就不记、也不发言，避免把旧发言重复显示一遍
             string roundContent = JoinRoundAssistantContents(roundStartIndex);
-            // 防御：模型偶尔会把上面那条情报原样复述回来当台词，这种不算发言（否则舞台上会念一句情报）
-            if (roundContent.Contains("【存活状态】"))
-            {
-                Debug.LogWarning($"[AIAgent] {name} 本轮把情报当成台词复述了，已丢弃：{roundContent}");
-                roundContent = "";
-            }
             if (!string.IsNullOrWhiteSpace(roundContent))
             {
                 InformGetter.StageSpeech(position, roundContent);
                 RemindIfInvalidEmotions(roundContent);
 
-                // 开局这一轮交给开场演出按顺序播（先思考、再放狠话），不再走飘字 / 立绘列表
+                // 开局这一轮交给开场演出按顺序播（先思考、再放狠话）；但**同时也要走原来的通道**：
+                // 炮塔飘字 + 中央消息列表照样显示这句开场白（不再因为"演出会播"就把旧通道压掉）。
                 bool openingHandled = AIAgent.Instance != null && AIAgent.Instance.OpeningRoundActive;
                 if (openingHandled)
                 {
                     openingSpeech = roundContent;
                     openingThinking = GetLastAssistantReasoning(out _) ?? "";
                 }
-                if (SpeechPass == 0 && !(openingHandled && StoryTeller.SuppressLegacy))
+                if (SpeechPass == 0)
                     Say(position, roundContent);
             }
         }
@@ -1757,23 +1904,20 @@ public class AIAgent : MonoBehaviour
                 return true;
             }
 
-            // 重发次数上限：校验失败时会「重发一次 + 返回 false 让原来那次不回调」，
-            // 而调用方是在 await tcs.Task —— 只要模型一直不合格式，这个乒乓就会无限继续，
-            // tcs 永远不 SetResult，整条等待（以及录制暂停）就永久挂住。
-            // 所以最多重发 roundRetryMax 次，再不合格就放行：格式瑕疵比卡死好。
-            if (roundRetryCount < roundRetryMax)
+            // 不合格就重发，**不设次数上限**：一定要拿到带（我想：…）的思考才放行。
+            if (roundRetryReminder == null)
             {
-                roundRetryCount++;
                 roundRetryReminder = new DeepSeekMessage("user", ThinkingRetryPrompt);
                 info.AddMessage(roundRetryReminder);
-                Debug.LogWarning($"[AIRequest] 思考模式校验失败（第 {roundRetryCount}/{roundRetryMax} 次），已拦截工具并重发。reasoning: {msg.reasoning_content}");
-                AIRequest.SendRequest(info);
-                return false;
+                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
+            }
+            else
+            {
+                Debug.LogWarning($"[AIRequest] 思考模式校验再次失败（本轮只插一条提醒，不重复插入）。reasoning: {msg.reasoning_content}");
             }
 
-            Debug.LogError($"[AIRequest] 思考模式校验连续 {roundRetryMax} 次失败，已放行这条回复，避免等待链路永久卡住。reasoning: {msg.reasoning_content}");
-            roundRetryReminder = null;
-            return true;
+            AIRequest.SendRequest(info);
+            return false;
         }
 
         /// <summary>最终回复合格后，把本轮插入的 [格式修正] 从历史里移除。</summary>
@@ -1841,6 +1985,10 @@ public class AIAgent : MonoBehaviour
         {
             N++;
 
+            // 炮塔的开局坐标是在它们 Start 里登记的，可能晚于 Reset()：开局这轮先刷一次 system，
+            // 保证「开局各炮塔位置」这一行（以及玩家名单）是最新的。system 不会被压缩，一直留着。
+            RefreshSystemPrompt();
+
             last_round_index.Add(history.Count);
             if (last_round_index.Count > 8) last_round_index.RemoveAt(0);
             int startTokens = EstimateHistoryTokens(history);
@@ -1859,25 +2007,36 @@ public class AIAgent : MonoBehaviour
 
                 // 缓存的这条也必须喂给开场演出：它是从 UntilGreatRequest 的早退路径回来的，
                 // 那两个字段本来就只在那里赋值 —— 不补的话舞台上永远是「……」+「没有留下思考过程」，
-                // 而旧的飘字/列表通道又被舞台盖住，整场戏等于一个字的 AI 内容都没有。
+                // 整场戏等于一个字的 AI 内容都没有。同时照旧走飘字 + 中央消息列表。
                 bool openingHandled = AIAgent.Instance != null && AIAgent.Instance.OpeningRoundActive;
                 if (openingHandled)
                 {
                     openingSpeech = cachedOpening.content;
                     openingThinking = cachedOpening.reasoning_content ?? "";
                 }
-                if (!(openingHandled && StoryTeller.SuppressLegacy))
-                    Say(position, cachedOpening.content);
+                Say(position, cachedOpening.content);
 
                 return;
             }
+            // ⚠⚠ 不要删！开局这一轮**只此一次**用最高档推理（见 CharacterCard.OpeningReasoningEffort）：
+            // 借最高强度把整局的长期规划想透（道具流派 / 移动与躲避 / 攒什么道具 / 护盾怎么救命 /
+            // 怎么定位敌人 / 升级点数怎么分配）。请求发完立刻还原，后面每一轮都是普通档。
+            // 配套的规划提示词在 RunAIAnalysicCore 的 cycle_start 分支里，两处要一起改。
+            string normalEffort = request.reasoning_effort;
+            request.reasoning_effort = "max";
             request.tool_choice = "none";
-            //请求直到正确
-            await UntilGreatRequest(roundStartIndex);
+            try
+            {
+                //请求直到正确
+                await UntilGreatRequest(roundStartIndex);
+            }
+            finally
+            {
+                request.reasoning_effort = normalEffort;   // 只这一次：后面回到普通档
+                request.tool_choice = "auto";              // 开局结束后恢复自动工具调用
+            }
 
             SaveOpeningCache(request.messages[^1]);
-
-            request.tool_choice = "auto"; // 开局结束后恢复自动工具调用
 
             int endTokens = EstimateHistoryTokens(history);
             int sampleX = Mathf.Max(0, endTokens - startTokens);
@@ -1889,6 +2048,14 @@ public class AIAgent : MonoBehaviour
         public async Task NormalRequest(string inform, string extra)
         {
             N++;
+
+            // 上一轮因为上下文超长被拒、没能当场救回来：这一轮先强制压缩（必要时砍掉最前面的历史）再发
+            if (contextOverflowPending)
+            {
+                contextOverflowPending = false;
+                RecoverFromContextOverflow();
+            }
+
             bool compressed = MaybeCompress();
 
             last_round_index.Add(history.Count);
@@ -1922,7 +2089,11 @@ public class AIAgent : MonoBehaviour
         }
 
 
-        /// <summary>拼接本轮所有 assistant.content；本轮没有任何 content 时返回空串。</summary>
+        /// <summary>
+        /// 拼接本轮所有 assistant.content；本轮没有任何 content 时返回空串。
+        /// 每条都会先剥掉漏进来的内心独白（见 StripInnerMonologue）——这里的字会被当成**当众说出口的话**
+        /// 播到屏幕上、并写进【上一轮发言】给对手读，所以不能带独白。
+        /// </summary>
         private string JoinRoundAssistantContents(int roundStartIndex)
         {
             var parts = new List<string>();
@@ -1931,10 +2102,39 @@ public class AIAgent : MonoBehaviour
                 DeepSeekMessage msg = history[i];
                 if (msg == null || msg.role != "assistant") continue;
                 if (upgradeExchangeMessages.Contains(msg)) continue;   // 升级那次对话不算公开发言
-                if (!string.IsNullOrWhiteSpace(msg.content))
-                    parts.Add(msg.content.Trim());
+                if (string.IsNullOrWhiteSpace(msg.content)) continue;
+
+                string said = StripInnerMonologue(msg.content);
+                if (string.IsNullOrWhiteSpace(said)) continue;
+
+                parts.Add(said.Trim());
             }
             return string.Join("\n", parts);
+        }
+
+        private static string StripInnerMonologue(string content)
+        {
+            if (string.IsNullOrWhiteSpace(content)) return content;
+
+            string[] lines = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            var kept = new List<string>();
+            var buf = new List<string>();
+
+            void Flush()
+            {
+                if (buf.Count == 0) return;
+                string paragraph = string.Join("\n", buf).Trim();
+                buf.Clear();
+                if (paragraph.Length > 0) kept.Add(paragraph);
+            }
+
+            foreach (string line in lines)
+            {
+                if (line.Trim().Length == 0) Flush();
+                else buf.Add(line);
+            }
+            Flush();
+            return string.Join("\n", kept);
         }
 
         /// <summary>拼接本轮所有 assistant.content，空时以“（无）”占位（给检查模型看）。</summary>
@@ -2328,6 +2528,13 @@ public class AIAgent : MonoBehaviour
         private void ReceiveError(string error)
         {
             Debug.LogError("AI请求错误:"+error);
+
+            // 上下文超长这种错：记一笔，请求流程会强制压缩；重发还超就砍掉最前面的历史（system/人设不删）
+            if (IsContextLengthError(error))
+            {
+                contextOverflowPending = true;
+                contextOverflowStrikes++;
+            }
         }
         private DeepSeekMessage GetLastAssistantMessage()
         {

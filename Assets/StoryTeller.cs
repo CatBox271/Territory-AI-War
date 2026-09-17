@@ -110,7 +110,6 @@ public class StoryTeller : MonoBehaviour
     public void CaptureUpdate()
     {
         frame++;
-        print("scene_clock");
     }
     public IEnumerator WaitForCaptureUpdate()
     {

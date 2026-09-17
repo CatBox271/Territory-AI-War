@@ -335,16 +335,98 @@ public abstract class StoryScene
     /// 三场演出都用它，保证「先出思考、再开口」的观感一致。
     /// 字号必须走 StageStyle.SizeTag（参数是世界单位高度）——TMP 的绝对 &lt;size&gt; 是点数，1 点 = 0.1 世界单位。
     ///
-    /// max 是**兜底**上限，不是常规裁切：思考条的框在升级那场是 13 × 3.8 世界单位、字号 0.3（≈33px，行高约 1.2 倍），
-    /// 去掉内边距后大约能放 10 行 × 30 字，所以 320 字以内基本都装得下。
+    /// max 是**兜底**上限，不是常规裁切：思考条的框在升级那场是 13 × 3.76 世界单位、字号 0.27（≈27px，行高约 1.2 倍），
+    /// 去掉行距后大约能放 11 行 × 40 字，所以 320 字以内基本都装得下。
     /// 原来这里是 140，正常两段思考都会被平白砍掉一截（就是「平白无故多个省略号」的来源）。
+    ///
+    /// bodyH 是正文的世界单位高度，不传就按通用正文（BodyH）。升级那场想比通用正文再小一点，
+    /// 就传自己的值 —— 别再另抄一份 ThinkBody 出来。
     /// </summary>
-    protected static string ThinkBody(string thinking, string owner = null, int max = 320)
+    protected static string ThinkBody(string thinking, string owner = null, int max = 320, float bodyH = -1f)
     {
+        if (bodyH <= 0f) bodyH = BodyH;
         string head = ThinkHead(owner);
         if (string.IsNullOrWhiteSpace(thinking))
-            return head + StageStyle.SizeTag(BodyH) + "<color=" + CaptionColor + ">（这一轮没有留下思考过程）</color></size>";
-        return head + StageStyle.SizeTag(BodyH) + "<color=#9EABBF>" + Colorize(StageStyle.Clamp(thinking, max)) + "</color></size>";
+            return head + StageStyle.SizeTag(bodyH) + "<color=" + CaptionColor + ">（这一轮没有留下思考过程）</color></size>";
+        return head + StageStyle.SizeTag(bodyH) + "<color=#9EABBF>" + Colorize(StageStyle.Clamp(StageThinkingText(thinking), max)) + "</color></size>";
+    }
+
+    /// <summary>
+    /// 舞台显示用的思考文本：剥掉模型爱写的「（我想：……）」外壳（开头左括号 + 「我想：」这类标签 +
+    /// 收尾右括号），并把**连续换行压成单个换行**。
+    ///
+    /// 只改舞台上展示的这一份：history / 情报里的原文不动，模型下一轮看到的还是它自己写过的样子。
+    /// </summary>
+    protected static string StageThinkingText(string thinking)
+    {
+        if (string.IsNullOrWhiteSpace(thinking)) return thinking;
+
+        string text = thinking.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = new List<string>();
+        foreach (string raw in text.Split('\n')) lines.Add(StripThinkingShell(raw.Trim()));
+
+        text = string.Join("\n", lines);
+        while (text.Contains("\n\n")) text = text.Replace("\n\n", "\n");   // 两行换行 → 一行换行
+        return text.Trim();
+    }
+
+    /// <summary>去掉一行思考外面的壳：开头的左括号与「我想：」这类标签、结尾的右括号。</summary>
+    private static string StripThinkingShell(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return line;
+
+        int i = 0;
+        SkipThinkingNoise(line, ref i, true);      // 开头：左括号 / 空白 / 冒号
+
+        int afterLabel = TrySkipThinkingLabel(line, i);
+        if (afterLabel > i)
+        {
+            i = afterLabel;
+            SkipThinkingNoise(line, ref i, true);
+        }
+
+        int end = line.Length;
+        while (end > i && (line[end - 1] == '）' || line[end - 1] == ')')) end--;   // 收尾右括号
+
+        return line.Substring(i, end - i).Trim();
+    }
+
+    /// <summary>跳过空白（含全角空格）、冒号，以及在允许时跳过一个左括号。</summary>
+    private static void SkipThinkingNoise(string line, ref int i, bool allowOpenBracket)
+    {
+        while (i < line.Length)
+        {
+            char c = line[i];
+            bool noise = c == ' ' || c == '\t' || c == '　' || c == ':' || c == '：'
+                         || (allowOpenBracket && (c == '（' || c == '('));
+            if (!noise) break;
+            i++;
+            allowOpenBracket = false;   // 左括号只跳一个
+        }
+    }
+
+    /// <summary>
+    /// 试着吃掉开头的思考标签，返回吃掉后的下标（没吃返回 -1）。
+    /// 「我暗自」「内心独白」直接算标签；「我想 / 我心想」必须后面（跳过空格）跟一个冒号才算，
+    /// 免得把「我想他会往中间走」这种正常句子也削掉。
+    /// </summary>
+    private static int TrySkipThinkingLabel(string line, int i)
+    {
+        string[] bare = { "我暗自", "内心独白" };
+        foreach (string b in bare)
+            if (i + b.Length <= line.Length && string.CompareOrdinal(line, i, b, 0, b.Length) == 0)
+                return i + b.Length;
+
+        string[] needColon = { "我心想", "我想" };
+        foreach (string h in needColon)
+        {
+            if (i + h.Length > line.Length || string.CompareOrdinal(line, i, h, 0, h.Length) != 0) continue;
+
+            int j = i + h.Length;
+            while (j < line.Length && (line[j] == ' ' || line[j] == '\t' || line[j] == '　')) j++;
+            if (j < line.Length && (line[j] == ':' || line[j] == '：')) return j + 1;
+        }
+        return -1;
     }
 
     /// <summary>思考条的小标题那一行（名字走阵营色，跟在后面的「的思考」保持冷蓝）。</summary>

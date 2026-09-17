@@ -273,6 +273,8 @@ MonoBehaviour:
   charDisplayTime: 0.1
   minDisplayTime: 3
   speedMultiplier: 1
+  useUnscaledTime: 0
+  useStageClock: 0
   playOnEnable: 0
 --- !u!114 &4766171913883360039
 MonoBehaviour:
@@ -292,7 +294,7 @@ MonoBehaviour:
   focus: 0
   YRange: {x: -3.93, y: 3.96}
   BackgroundAlpha: {x: 0.5, y: 0.5}
-  TextAlpha: {x: 1, y: 0.5}
+  TextAlpha: {x: 1, y: 2}
   FadeMin: 0.02
   FadeMax: 0.2
   speed: 1

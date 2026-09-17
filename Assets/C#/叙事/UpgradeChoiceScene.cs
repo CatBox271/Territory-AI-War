@@ -25,9 +25,9 @@ public class UpgradeChoiceScene : StoryScene
 {
     // —— 版面（舞台可见范围约 17.8 × 10，中心为原点）——
     private const float CardW = 3.5f;
-    private const float CardH = 4.3f;
+    private const float CardH = 3.8f;
     private const float Spacing = 4f;
-    private const float RowY = -0.35f;
+    private const float RowY = 1.05f;         // = 卡顶 2.95 固定：卡变矮时把整排往上顶，空出来的都让给下方思考条
     private const float CardsX = 1.9f;        // 三张卡整体中心（左半边留给立绘）
 
     private const float FaceX = -6.7f;
@@ -36,14 +36,37 @@ public class UpgradeChoiceScene : StoryScene
     private const float FaceZoom = 1.15f;
     private const float FaceFadeBottom = 0.45f;    // 下沿渐隐比例
 
-    // 选项名与收益（文案口径与 AIAgent.BuildUpgradeChoicePrompt 保持一致）
-    // benefit 是卡片正中间那块内容：先一句「立刻给什么」，空一行再说长期收益
-    private static readonly (int choice, string title, string benefit)[] Defs =
+    // 选项名（文案口径与 AIAgent.BuildUpgradeChoicePrompt 保持一致）
+    // 卡面的收益文案不写死在这里：里面所有具体数值都由 BenefitFor() 从玩法代码现取
+    private static readonly (int choice, string title)[] Defs =
     {
-        (1, "额外弹珠", "立即生成并发射\n<color=#FFFFFF>一枚你的新弹珠</color>\n\n长期弹珠资源与\n倍乘收益更厚"),
-        (2, "炮塔强化", "后坐力提升，<color=#FFFFFF>子弹\n显示半径变大</color>\n\n命中大球动量冲击更强\n护卫极限转速翻倍\n炮塔更精准"),
-        (3, "护盾强化", "护盾破碎后炮塔\n<color=#FFFFFF>进入无敌时间</color>\n\n无视敌方子弹\n与大球伤害"),
+        (1, "额外弹珠"),
+        (2, "炮塔强化"),
+        (3, "护盾强化"),
     };
+
+    /// <summary>卡片正文的字号（世界单位高度）：加了具体数值之后比原来收一档。</summary>
+    private const float CardTextH = 0.26f;
+    /// <summary>正文里"数值"那一档再小一点，跟描述文字分得开。</summary>
+    private const float CardNumH = 0.23f;
+    /// <summary>卡片正文的 TMP 排版框高度（世界单位）。</summary>
+    private const float CardTextBoxH = 2.6f;
+
+    /// <summary>思考条正文的字号（世界单位高度）。通用求思考正文是 0.36，这里单独收小一档。</summary>
+    private const float ThinkTextH = 0.28f;
+    /// <summary>思考条的排版字号（世界单位）。正文走 &lt;size&gt; 标签，这个只决定框的基础字号，两者要分开写。</summary>
+    private const float ThinkBoxH = 0.27f;
+
+    /// <summary>
+    /// 思考的弹字速度倍率（1 = 原速）。Text.prefab 的逐字间隔被夹在 0.02~0.1 秒之间，
+    /// 长思考算出来的间隔早就低于下限，靠 typeMaxSeconds 压不短，所以直接加快整段动画：这里 4 = 四倍速。
+    /// </summary>
+    private const float ThinkTypeSpeed = 4f;
+
+    /// <summary>选好之后等卡片弹完的停顿。原来 0.8 秒里大半是空等，收紧到刚好盖住那几下弹动（0.3 / 0.35 秒）。</summary>
+    private const float PickWaitSeconds = 0.35f;
+    /// <summary>结论的停留：就一行短文案，原来 2.4 秒太长，压到 1.4 秒。</summary>
+    private const float ConclusionHoldSeconds = 1.4f;
 
     private class Option
     {
@@ -98,10 +121,13 @@ public class UpgradeChoiceScene : StoryScene
         string who = AIAgent.GetStageName(owner);
 
         // ---------- 建卡 ----------
-        StoryTeller.Item title = Title("升 级 选 择");
+        StoryTeller.Item title = Title("触 发 升 级");
         StoryTeller.Item face = Portrait(owner, SpriteEmotion.origin, new Vector2(FaceX, FaceY), FaceSize, FaceZoom, FaceFadeBottom);
         StoryTeller.Item plate = Nameplate(who, new Vector2(FaceX, -4.2f), new Vector2(3.4f, 0.9f), accent);
-        StoryTeller.Item think = Think(ThinkWaitingFor(who), new Vector2(CardsX, -3.7f), new Vector2(13f, 2.6f), StageStyle.FontSize(0.3f));
+        StoryTeller.Item think = Think(ThinkWaitingFor(who), new Vector2(CardsX, -2.82f), new Vector2(13f, 3.76f), StageStyle.FontSize(ThinkBoxH));
+        // 思考弹字加快一倍：这一幕的时长基本由「等思考打完」决定，打字快了整场跟着短
+        if (think != null && think.textDisplay != null && think.textDisplay.Anim != null)
+            think.textDisplay.Anim.speedMultiplier = ThinkTypeSpeed;
 
         BuildOptions(accent);
         SetupEnter(new[] { title }, StoryTeller.Direction.Top, StageStyle.Distance, StageStyle.In);
@@ -139,7 +165,7 @@ public class UpgradeChoiceScene : StoryScene
 
         // ---------- 先出思考 ----------
         bool hasThinking = !string.IsNullOrWhiteSpace(thinking);
-        SetText(think, ThinkBody(thinking, who), hasThinking);
+        SetText(think, ThinkBody(thinking, who, 320, ThinkTextH), hasThinking);
         if (hasThinking) yield return WaitTextIn(s, think);            // 思考打完立刻出选择结果
         else yield return s.WaitStage(StageStyle.Hold);
 
@@ -169,11 +195,11 @@ public class UpgradeChoiceScene : StoryScene
             if (picked.title != null) s.StartCoroutine(s.Pop(picked.title, small, Vector2.one, 0.3f));
             if (picked.icon != null) s.StartCoroutine(s.Pop(picked.icon, new Vector2(0.7f, 0.7f), Vector2.one, 0.35f));
         }
-        yield return s.WaitStage(0.8f);
+        yield return s.WaitStage(PickWaitSeconds);
 
         // ---------- 结论 ----------
         StoryTeller.Item conclusion = Label(who + " 选择了「" + TitleOf(choice) + "」",
-            new Vector2(CardsX, 3.15f), new Vector2(12f, 0.7f), accent, StageStyle.FontSize(0.46f));
+            new Vector2(CardsX, 3.45f), new Vector2(12f, 0.7f), accent, StageStyle.FontSize(0.46f));
         StoryTeller.Item badge = null;
         if (picked != null)
         {
@@ -185,7 +211,7 @@ public class UpgradeChoiceScene : StoryScene
             s.StartCoroutine(s.SlideIn(conclusion, StoryTeller.Direction.Top, StageStyle.Distance * 0.4f, 0.3f));
         if (badge != null)
             yield return s.SlideIn(badge, StoryTeller.Direction.Botton, StageStyle.Distance * 0.3f, 0.35f, 0f, new Vector2(0.8f, 0.8f));
-        yield return s.WaitStage(2.4f);
+        yield return s.WaitStage(ConclusionHoldSeconds);
 
         // ---------- 出场 ----------
         var all = new List<StoryTeller.Item> { title, face, plate, think, conclusion, badge };
@@ -232,9 +258,9 @@ public class UpgradeChoiceScene : StoryScene
             }
 
             // 卡片正中：这一项到底给什么（容器透明，正好压在底板中央）
-            o.label = Card(StageStyle.SizeTag(0.28f) + "<color=#C7CEDD>" + def.benefit + "</color></size>",
-                new Vector2(cx, RowY - 0.2f), new Vector2(CardW - 0.6f, 2.6f),
-                StageStyle.PanelBg, StageStyle.PanelWall, StageStyle.TextMain, false, StageStyle.Corner, StageStyle.FontSize(0.28f));
+            o.label = Card(StageStyle.SizeTag(CardTextH) + "<color=#C7CEDD>" + BenefitFor(def.choice) + "</color></size>",
+                new Vector2(cx, RowY - 0.2f), new Vector2(CardW - 0.6f, CardTextBoxH),
+                StageStyle.PanelBg, StageStyle.PanelWall, StageStyle.TextMain, false, StageStyle.Corner, StageStyle.FontSize(CardTextH));
             if (o.label != null)
             {
                 o.label.sortingOrder = 3;
@@ -266,6 +292,48 @@ public class UpgradeChoiceScene : StoryScene
             if (o.icon != null) all.Add(o.icon);
         }
         SetupEnter(all, StoryTeller.Direction.Botton, StageStyle.Distance, StageStyle.In);
+    }
+
+    /// <summary>正文里的一个数值：小一档 + 暖金色，跟描述文字分得开。</summary>
+    private static string Num(string s)
+        => StageStyle.SizeTag(CardNumH) + "<color=#FFE7A3>" + s + "</color></size>";
+
+    /// <summary>
+    /// 卡片正中的收益文案。**里面每一个数值都是从玩法代码现取的**（Towel 的每级倍率 / MarbleManager 的弹珠起手值 /
+    /// ReactionSystem 的瞄准误差基准），不在这份文案里写死 —— 以后调平衡，卡片上的数字跟着变，不用两头改。
+    /// 拿不到实例时退回各自的默认值。
+    /// </summary>
+    private string BenefitFor(int choice)
+    {
+        Towel t = Towel.AllTowel.TryGetValue(owner, out Towel tw) ? tw : null;
+
+        switch (choice)
+        {
+            case 1:
+            {
+                uint exp = MarbleManager.Instance != null ? MarbleManager.Instance.startValueExponent : 10u;
+                string val = HugeInt.Pow(2, (int)exp).ToShortString(true);
+                return "立即生成\n<color=#FFFFFF>两枚新弹珠</color> " + Num(val)
+                     + "\n\n长期弹珠资源与\n倍乘收益更厚";
+            }
+            case 2:
+            {
+                float radius = t != null ? t.upgradedBulletRadiusScale : 1.7f;
+                float impact = t != null ? t.upgradedBulletImpactScale : 1.6f;
+                float move = t != null ? t.moveRangePerLevel : 2f;
+                return "子弹显示半径 " + Num("×" + radius.ToString("0.##")) + "\n"
+                     + "打大球动量 " + Num("×" + impact.ToString("0.##")) + "\n"
+                     + "护卫极限转速 " + Num("×" + Towel.GuardSpeedPerLevel.ToString("0.##")) + "\n"
+                     + "最大移动距离 " + Num("+" + move.ToString("0.##")) + "\n"
+                     + "瞄准误差 " + Num(ReactionSystem.BaseAimAngleError.ToString("0.#") + "°") + " 每级减半";
+            }
+            default:
+            {
+                float sec = t != null ? t.shieldBreakInvincibleTime : 2f;
+                return "护盾破碎后炮塔\n<color=#FFFFFF>无敌时间+ " + Num(sec.ToString("0.#") + " 秒") + "</color>"
+                     + "\n\n无视敌方子弹\n与大球伤害";
+            }
+        }
     }
 
     private static string TitleOf(int choice)

@@ -14,6 +14,11 @@ public class ReactionSystem : MonoBehaviour, Itool
     [Tooltip("当前调用工具的角色阵营（由 AIAgent 在请求前写入 CharacterCard.position）")]
     public int stage = -1;
 
+    /// <summary>AI 调用道具的初始瞄准误差基准（度）：0 级时是 ±这么多。</summary>
+    public const float BaseAimAngleError = 15f;
+    /// <summary>每级炮塔强化把道具瞄准误差缩小到 1/该值（升级选择卡片上的数值也读它，别只改一边）。</summary>
+    public const float AimErrorShrinkPerLevel = 2f;
+
     [System.NonSerialized] // 工具表以代码内联定义为准，不进场景序列化（object 参数无法被 Unity 序列化）
     public List<Tool> tools = new List<Tool>
     {
@@ -134,7 +139,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = MoveTurretToolName,
-                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动固定消耗升级能量（固定单次扣除、与距离无关，具体数值见预览返回），能量不足则无法移动。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。移动中可以再走一次预览+确认改道；改道算新的一次移动、再扣一次能量。移动本身不会主动广播你的新位置（对方要么靠大球/子弹撞上你护盾或炮塔本体时的撞击情报反推，要么你正好落进他 move_turret 预览附带的视野截图里被看到）。距离由你自己定：最大移动距离是上限、不是必须走满；确认前先核对目标点是否靠近各炮塔初始位置或撞击情报推测出的敌方方位，炮塔重叠不会被弹开、也不会自动停下，停到别人身上等于把命送出去。预览时还会附一张以你炮塔为圆心、半径约最大移动距离 0.6 倍的圆形俯视截图（黑色环带 = 圆形视野之外，暗红色 = 地图之外），先看图再决定方向和距离。",
+                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动消耗升级能量（与距离无关，具体数值见预览返回；同一个动作每用一次价格 ×涨价倍率，越移越贵），能量不足则**连预览都不给**，也就不会附带视野截图。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。**移动途中不能改道**：一旦开始走就会走到底，想换方向只能等它停下再走一次（途中想立刻停住，可以用 distance=0 做一次预览+确认）。移动本身不会主动广播你的新位置（对方要么靠大球/子弹撞上你护盾或炮塔本体时的撞击情报反推，要么你正好落进他 move_turret 预览附带的视野截图里被看到）。距离由你自己定：最大移动距离是上限、不是必须走满；确认前先核对目标点是否靠近各炮塔初始位置或撞击情报推测出的敌方方位，炮塔重叠不会被弹开、也不会自动停下，停到别人身上等于把命送出去。预览时还会附一张以你炮塔为圆心、半径等于你最大移动距离的圆形俯视截图（整个可移动范围都在图里，黑色环带 = 圆形视野之外，暗红色 = 地图之外），图上会直接标出周围每个球的位置、朝向和数值；先看图再决定方向和距离。",
                 parameters = new
                 {
                     type = "object",
@@ -196,6 +201,11 @@ public class ReactionSystem : MonoBehaviour, Itool
     private static readonly Dictionary<int, MovePreview> pendingMoves = new();
     /// <summary>预览有效期（秒）：过期后 confirm 会被拒绝，要求重新预览。</summary>
     private const float MovePreviewValidSeconds = 60f;
+
+    /// <summary>移动途中不许改道（这条机制已经去掉）时统一返回的说明。</summary>
+    private const string MovingNoRedirectText =
+        "移动炮塔失败：炮塔正在移动中，不能改道——移动一旦开始就会一直走到底（到达目标 / 撞到地图边界 / 超时才停）。"
+        + "想换方向请等它停下再走一次；如果现在就想让它停住，可以用 distance=0 做一次预览 + confirm 让它原地停下。";
 
     private class MovePreview
     {
@@ -387,27 +397,28 @@ public class ReactionSystem : MonoBehaviour, Itool
         // 先取出并移除，再走原有执行逻辑（和 AddProp 里溢出执行的是同一套逻辑）。
         props.RemoveAt(args.index - 1);
 
-        // AI 调用道具的初始瞄准误差：基础 15，每级炮塔升级减半，可叠加。
+        // AI 调用道具的初始瞄准误差：基础 BaseAimAngleError，每级炮塔升级缩小到 1/AimErrorShrinkPerLevel，可叠加。
         float aimAngleError = 0f;
         if (aim != null && aim.item != null)
         {
             int upgradeLevel = 0;
             if (Towel.AllTowel.TryGetValue(callStage, out Towel aimTowel) && aimTowel != null)
                 upgradeLevel = Mathf.Max(0, aimTowel.turretUpgraded);
-            aimAngleError = 15f / Mathf.Pow(2f, upgradeLevel);
+            aimAngleError = BaseAimAngleError / Mathf.Pow(AimErrorShrinkPerLevel, upgradeLevel);
         }
 
 
-        config.ExecutePropEffect(prop.stage, prop.item, prop.value, aim, anyChoice, aimAngleError);
+        WeaponKind executed = config.ExecutePropEffect(prop.stage, prop.item, prop.value, aim, anyChoice, aimAngleError);
 
-        string choiceText = anyChoice.HasValue ? $"，任意触发为：{anyChoice.Value}" : "";
+        string choiceText = anyChoice.HasValue ? $"，任意选择为：{anyChoice.Value}" : "";
         string aimText = aim != null ? $"，已朝向 {aim.pos}" : "";
         string result = $"已使用第 {args.index} 格道具：{prop.item}，数值 {prop.value.ToShortString()}{choiceText}{aimText}。";
 
-        // 玩家侧的具体行动描述：什么道具、多少数值、指定还是随机武器、瞄准谁。
-        string actionChoice = anyChoice.HasValue
-            ? $"\n触发 {anyChoice.Value}"
-            : (prop.item == WeaponKind.任意 ? "\n随机武器" : "");
+        // 玩家侧的具体行动描述：什么道具、多少数值、**实际打出去的武器**、瞄准谁。
+        // 【任意】没指定武器时也要把随机到的那个写出来 —— 只写一句「随机武器」观众看不出来它干了什么。
+        string actionChoice = prop.item == WeaponKind.任意
+            ? $"\n{(anyChoice.HasValue ? "选择 " : "")}{executed}"
+            : "";
         string actionAim = aim != null ? $"\n瞄准 {DescribeAimTarget(aim)}" : "";
         string action = $"【{prop.item}】{prop.value.ToShortString()}{actionChoice}{actionAim}";
 
@@ -564,6 +575,22 @@ public class ReactionSystem : MonoBehaviour, Itool
         if (towel.isDead)
             return new ToolOutcome("移动炮塔失败：炮塔已阵亡。");
 
+        // 能量检查放在**所有分支的最前面**：这一步决定要不要产出预览，
+        // 而预览会附带一张视野截图（渲染 + 读回 + 编码，是最贵的一步）。
+        // 放在最后查的话，参数解析、目标点计算都白做，而且一旦以后有人在前面
+        // 把 previewCreated 置起来，就会变成"没能量也一直截图"。
+        MarbleManager mm = MarbleManager.Instance;
+        float cost = mm != null
+            ? mm.GetActionEnergyCost(callStage, MarbleManager.EnergyAction.Move)
+            : (MapConfig.Instance != null ? MapConfig.Instance.moveEnergyCost : 0f);
+        int moveUsed = mm != null ? mm.GetActionUseCount(callStage, MarbleManager.EnergyAction.Move) : 0;
+        float energyNow = mm != null ? mm.GetUpgradeEnergy(callStage) : 0f;
+        bool affordable = mm == null || energyNow >= cost;
+        string noEnergyText = "移动炮塔失败：升级能量不足（本次移动需要 " + cost.ToString("0.#")
+            + (moveUsed > 0 ? "（已经移过 " + moveUsed + " 次，每用一次涨价）" : "")
+            + "，当前 " + energyNow.ToString("0.#") + "），所以这次连预览都不给（预览会附带一张视野截图，很贵）。"
+            + "能量来自空槽升级进度、会随时间积累；攒够之前不要反复调 move_turret，先做别的（开火/升级/外交），过几轮再试。";
+
         // 第二步：确认执行（不再需要方向与距离）
         if (args.confirm == true)
         {
@@ -574,12 +601,19 @@ public class ReactionSystem : MonoBehaviour, Itool
                 return new ToolOutcome("移动炮塔失败：没有待确认的移动预览（或者已超过 60 秒过期）。请先给方向和距离做一次预览，再传 confirm=true。");
             }
 
-            // 先检查能量、再扣除，最后才开始移动
-            MarbleManager mm = MarbleManager.Instance;
-            float cost = MapConfig.Instance != null ? MapConfig.Instance.moveEnergyCost : 0f;
-            if (mm != null && !mm.TrySpendUpgradeEnergy(callStage, cost))
-                return new ToolOutcome("移动炮塔失败：升级能量不足（本次移动需要 " + cost.ToString("0.#")
-                    + "，当前 " + mm.GetUpgradeEnergy(callStage).ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。");
+            // 移动途中不许改道（这条机制已经去掉）：正在移动时只接受「原地停下」（distance=0）那一种确认
+            if (towel.IsMoving && preview.distance > 0f)
+            {
+                pendingMoves.Remove(callStage);
+                return new ToolOutcome(MovingNoRedirectText);
+            }
+
+            // 扣除能量（按现价），然后才开始移动
+            if (mm != null && !mm.TrySpendActionEnergy(callStage, MarbleManager.EnergyAction.Move, out cost))
+            {
+                pendingMoves.Remove(callStage);
+                return new ToolOutcome(noEnergyText);
+            }
 
             pendingMoves.Remove(callStage);
             Vector2 from = towel.transform.position;
@@ -599,7 +633,11 @@ public class ReactionSystem : MonoBehaviour, Itool
                 $"【移动炮塔】朝 {dirText} 移动 {preview.distance.ToString("0.00")}");
         }
 
-        // 第一步：只预览，绝不移动
+        // 第一步：只预览，绝不移动。
+        // 没能量就别给预览：预览本身会附带一张视野截图，是最贵的一步，白跑一次纯浪费。
+        if (!affordable)
+            return new ToolOutcome(noEnergyText);
+
         Vector2 dir;
         if (args.dir_x.HasValue || args.dir_y.HasValue)
         {
@@ -620,18 +658,19 @@ public class ReactionSystem : MonoBehaviour, Itool
         if (!args.distance.HasValue)
             return new ToolOutcome("移动炮塔失败：请给出 distance（移动距离，世界单位）。");
 
+        // 移动途中不许改道（这条机制已经去掉）：正在移动时只给「原地停下」（distance=0）的预览
+        if (towel.IsMoving && args.distance.Value > 0f)
+            return new ToolOutcome(MovingNoRedirectText);
+
         Vector2 selfPos = towel.transform.position;
         if (!ResolveMovePreview(selfPos, dir, (float)args.distance.Value, towel.MaxMoveDistance, towel.MoveBound,
                 out Vector2 target, out float travel, out string warning, out string error))
             return new ToolOutcome(error);
 
-        // 能量：预览阶段先查一遗（不足就不给预览，避免白确认一次）
-        MarbleManager mmPreview = MarbleManager.Instance;
-        float moveCost = MapConfig.Instance != null ? MapConfig.Instance.moveEnergyCost : 0f;
-        float moveEnergy = mmPreview != null ? mmPreview.GetUpgradeEnergy(callStage) : 0f;
-        if (mmPreview != null && moveEnergy < moveCost)
-            return new ToolOutcome("移动炮塔失败：升级能量不足（本次移动需要 " + moveCost.ToString("0.#")
-                + "，当前 " + moveEnergy.ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。");
+        // 能量已经在函数开头查过（affordable），这里直接复用，别再查一遍
+        MarbleManager mmPreview = mm;
+        float moveCost = cost;
+        float moveEnergy = energyNow;
 
         pendingMoves[callStage] = new MovePreview { dir = dir.normalized, distance = travel, time = Time.time };
         previewCreated = true;
@@ -650,8 +689,9 @@ public class ReactionSystem : MonoBehaviour, Itool
         sb.AppendLine("  你的最大移动距离 " + towel.MaxMoveDistance.ToString("0.00") + "，可移动范围 x,y ∈ [-"
             + towel.MoveBound.ToString("0.00") + ", " + towel.MoveBound.ToString("0.00") + "]");
         if (mmPreview != null)
-            sb.AppendLine("  本次移动消耗 " + moveCost.ToString("0.#") + " 能量（固定单次扣除，与距离无关；当前 "
-                + moveEnergy.ToString("0.#") + " → 移动后剩余 " + (moveEnergy - moveCost).ToString("0.#") + "）");
+            sb.AppendLine("  本次移动消耗 " + moveCost.ToString("0.#") + " 能量（每用一次涨价，这是第 "
+                + (moveUsed + 1) + " 次；当前 " + moveEnergy.ToString("0.#") + " → 移动后剩余 "
+                + (moveEnergy - moveCost).ToString("0.#") + "）");
         if (!string.IsNullOrEmpty(warning)) sb.AppendLine("  ⚠ " + warning);
         sb.Append("如需执行，请再调用一次 move_turret 并传 confirm=true（不要再传方向与距离）。");
 

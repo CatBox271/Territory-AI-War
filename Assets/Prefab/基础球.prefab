@@ -271,6 +271,7 @@ MonoBehaviour:
   col: {fileID: 6864175156454396675}
   <stage>k__BackingField: 2
   guid: 
+  game_item_name: "\u5927\u7403"
   baseWorldRadius: 0.5
   attackPower: 1
   ScaleSmoothSpeed: 3
@@ -325,24 +326,24 @@ MonoBehaviour:
       - serializedVersion: 3
         time: 0
         value: 2
-        inSlope: 0
-        outSlope: 0
-        tangentMode: 136
+        inSlope: -0.11738598
+        outSlope: -0.11738598
+        tangentMode: 0
         weightedMode: 0
         inWeight: 0.33333334
-        outWeight: 0.33333334
+        outWeight: 0.12361144
       - serializedVersion: 3
         time: 20.095497
         value: 0.5
-        inSlope: -0.024999999
-        outSlope: -0.024999999
+        inSlope: -0.04500001
+        outSlope: -0.04500001
         tangentMode: 136
         weightedMode: 0
         inWeight: 0.33333334
         outWeight: 0.33333334
       - serializedVersion: 3
         time: 40
-        value: 0.25
+        value: 0.05
         inSlope: 0
         outSlope: 0
         tangentMode: 136
@@ -354,8 +355,8 @@ MonoBehaviour:
       m_RotationOrder: 4
   SpeedTimes: 1
   TR: {fileID: 622875075528979609}
-  fastA: 0.5
-  slowA: 2
+  fastA: 2
+  slowA: 4
   hurt_fast_pause: 0.3
 --- !u!114 &2128266677755943854
 MonoBehaviour:

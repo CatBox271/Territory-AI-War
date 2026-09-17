@@ -249,26 +249,8 @@ MonoBehaviour:
         inWeight: 0.33333334
         outWeight: 0.33333334
       - serializedVersion: 3
-        time: 10
-        value: 0.75
-        inSlope: 0.022322977
-        outSlope: 0.022322977
-        tangentMode: 136
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 16.52084
-        value: 0.8687943
-        inSlope: 0.047517728
-        outSlope: 0.047517728
-        tangentMode: 136
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 20
-        value: 1.6
+        time: 40
+        value: 2
         inSlope: 0
         outSlope: 0
         tangentMode: 136
@@ -310,9 +292,9 @@ MonoBehaviour:
   aimController: {fileID: 7866295218095374167}
   turretUpgraded: 0
   shieldUpgradeOwned: 0
-  shieldBreakInvincibleTime: 2
+  shieldBreakInvincibleTime: 7
   upgradedBulletRadiusScale: 1.5
-  upgradedBulletImpactScale: 1.6
+  upgradedBulletImpactScale: 1.5
   invincibleBlink: 1
   invincibleBlinkSpeed: 3
   invincibleBlinkPeak: 1
@@ -320,13 +302,10 @@ MonoBehaviour:
   invincibleBlinkSoftness: 0.15
   invincibleBlinkPhase: 0
   invincibleBlinkRandomPhase: 0
-  moveSpeed: 0.25
-  moveRangeBase: 2
-  moveRangePerLevel: 2
   tipStackGap: 0.25
   tipFallbackHeight: 0.6
   isDead: 0
-  BulletPosRandom: 0
+  BulletPosRandom: 0.02
 --- !u!58 &525751960054713117
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -397,7 +376,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   auto: {fileID: 618785998335546845}
   towel: {fileID: 6080560076359578667}
-  MaxDis: 4
+  MaxDis: 5
 --- !u!1 &2721065759024970260
 GameObject:
   m_ObjectHideFlags: 0

@@ -341,7 +341,6 @@ public class AutoRotater : MonoBehaviour
     {
         if (guardGpuLogged) return;
         guardGpuLogged = true;
-        Debug.Log($"AutoRotater({name}) 护卫最近点扫描已走 GPU（TerritoryNearest.compute，{mode}）。", this);
     }
 
     void OnGuardReadbackDone(AsyncGPUReadbackRequest req)

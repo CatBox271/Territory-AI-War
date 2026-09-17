@@ -135,6 +135,17 @@ public class UIMarbleUpgrade : MonoBehaviour
             yield break;
         }
 
+        // 舞台还在演（开场演出 / 升级三选一 / 秘密会晤 / 结束横幅…）时不画这条线：
+        // 它是 Screen Space Overlay 的 Canvas UI，画在所有相机之上，舞台期间会直接压在演出的画面上。
+        // 跳过画线不影响升级本身 —— onArrived 立刻回调，调用方马上继续走应用升级。
+        // MarbleManager 本来就是等舞台收工（IsPerforming=false）才调这里，走到这个分支说明舞台又被别的场次占住了。
+        StoryTeller show = StoryTeller.Instance;
+        if (show != null && show.IsPerforming)
+        {
+            onArrived?.Invoke();
+            yield break;
+        }
+
         Canvas canvas = GetComponentInParent<Canvas>();
         if (canvas == null) canvas = FindObjectOfType<Canvas>();
         if (canvas == null)

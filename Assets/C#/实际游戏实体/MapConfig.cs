@@ -143,12 +143,33 @@ public class MapConfig : MonoBehaviour
     public float upgradeCost = 2f;
     [Tooltip("每次升级后，下一次升级所需值乘以这个倍率")]
     public float upgradeCostGrowth = 2.4f;
-    [Tooltip("炮塔移动一次消耗的升级能量（固定单次扣除，与移动距离无关）")]
+    [Tooltip("炮塔移动一次消耗的升级能量（这是**第一次**移动的价格）")]
     public float moveEnergyCost = 25f;
-    [Tooltip("发一次悄悄话（秘密会晤）消耗的升级能量")]
+    [Tooltip("发一次悄悄话（秘密会晤）消耗的升级能量（这是**第一次**的价格）")]
     public float whisperEnergyCost = 25f;
+    [Tooltip("涨价倍率：同一个动作每用过一次，下一次的价格 ×这个值（1 = 不涨价）。\n" +
+             "移动、悄悄话各自单独累计，互不影响。\n" +
+             "公开发言**不**花点数（每回合都要说的话，扣了就只能跳过，视频里就没台词了）")]
+    public float actionCostGrowth = 1.5f;
     [Tooltip("悄悄话的冷却轮数：每隔这么多回合才能再发一次")]
     public int whisperCooldownRounds = 4;
+
+    [Header("炮塔移动（原来是 Towel 上的字段，现在全队共用这一份配置）")]
+    [Tooltip("移动速度（世界单位/秒）。走满最大移动距离的时间 = 最大距离 / 这个值")]
+    public float moveSpeed = 0.25f;
+    [Tooltip("每级炮塔强化叠加的移动速度（世界单位/秒）：等级越高走得越快，走满最大距离的时间跟着变短")]
+    public float moveSpeedPerLevel = 0.05f;
+    [Tooltip("0 级炮塔的最大移动距离（世界单位）")]
+    public float moveRangeBase = 2f;
+    [Tooltip("每级炮塔强化叠加的最大移动距离")]
+    public float moveRangePerLevel = 0.5f;
+    [Tooltip("移动预览的视野截图半径倍率：半径 = 这个值 × 当前最大移动距离。1 = 整个最大移动范围都在图里")]
+    [Range(0.2f, 2f)] public float moveSightRadiusFactor = 1f;
+
+    [Header("上一局回顾（写进各 AI 的系统提示词，让它记得上一局自己经历了什么）")]
+    [Tooltip("下标 0~3 依次对应 1~4 号阵营，每个元素是该角色**第一人称视角**的上一局回顾；留空=这个阵营没参加上一局")]
+    [TextArea(4, 12)]
+    public List<string> lastGameRecap = new List<string>();
 
     [Header("Props")]
     public int propLimit = 0;
@@ -213,9 +234,14 @@ public class MapConfig : MonoBehaviour
         return names;
     }
 
-    public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null, WeaponKind? anyChoice = null, float aimAngleError = 0f)//anyChoice 只对【任意】生效；null=原来的随机
+    /// <summary>
+    /// 执行一个道具。anyChoice 只对【任意】生效（null = 随机一种实体武器）。
+    /// 返回**实际执行的那个武器**：【任意】就是在这一步定下来的，调用方可以拿它去写文案
+    /// （不然观众只看到一句「随机武器」，不知道它到底打了什么）。
+    /// </summary>
+    public WeaponKind ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null, WeaponKind? anyChoice = null, float aimAngleError = 0f)//anyChoice 只对【任意】生效；null=原来的随机
     {
-        if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
+        if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return itemName;
 
         if (aim_pos != null && aim_pos.item != null)
         {
@@ -238,6 +264,7 @@ public class MapConfig : MonoBehaviour
         }
 
         ExecuteWeaponEffect(effectKind, towel, val);
+        return effectKind;
     }
 
     private static void ExecuteWeaponEffect(WeaponKind kind, Towel towel, HugeInt val)

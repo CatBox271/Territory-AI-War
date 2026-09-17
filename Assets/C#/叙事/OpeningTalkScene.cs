@@ -8,8 +8,8 @@ using UnityEngine;
 /// 开局第一轮各阵营的赛前宣言。原来的做法是四座炮塔同时飘字，互相盖住；
 /// 这里改成一个人一个人上台，版面按前端的思路排：
 ///   正中一行大标题 → 左侧一张大立绘（下沿压一块阵营色名牌）
-///   → 右栏两张卡：上面是「AI 的思考」，下面是「狠话」（左对齐、带内边距的正文卡）
-///   → 每个人先出思考、再出狠话，读完停一拍再一起滑下去，换下一位。
+///   → 右栏两张卡：上面是「AI 的人设」（读角色卡的 oc），下面是「狠话」（左对齐、带内边距的正文卡）
+///   → 两张卡同时弹出，整段在台上停满 3 秒（滑入 + 停留 + 滑出）再一起滑下去，换下一位。
 /// </summary>
 public class OpeningTalkScene : StoryScene
 {
@@ -17,7 +17,8 @@ public class OpeningTalkScene : StoryScene
     public class Line
     {
         public int owner;
-        public string thinking = "";
+        /// <summary>这个人的人设（角色卡的 oc）。原来这里放的是「思考」，开场介绍改成亮人设。</summary>
+        public string persona = "";
         public string speech = "";
     }
 
@@ -33,6 +34,11 @@ public class OpeningTalkScene : StoryScene
     private const float ThinkY = 0.55f;
     private const float SayY = -3.5f;
 
+    /// <summary>每位角色在台上的整段时长（秒）：滑入 + 停留 + 滑出。</summary>
+    private const float PerSpeakerSeconds = 3f;
+    /// <summary>从整段时长里扣掉滑入滑出，剩下的才是停在台上的时间（3 − 0.2 − 0.2 = 2.6）。</summary>
+    private const float LingerSeconds = PerSpeakerSeconds - StageStyle.In - StageStyle.Out;
+
     private readonly List<Line> lines;
 
     public OpeningTalkScene(List<Line> lines)
@@ -45,7 +51,7 @@ public class OpeningTalkScene : StoryScene
         StoryTeller s = stage;
         if (s == null || lines == null || lines.Count == 0) yield break;
 
-        StoryTeller.Item title = Title("出 厂 角 色", 4.05f, 0.95f);
+        StoryTeller.Item title = Title("角 色 介 绍", 4.05f, 0.95f);
         yield return s.SlideIn(title, StoryTeller.Direction.Top, StageStyle.Distance, StageStyle.In);
         yield return s.WaitStage(StageStyle.Short);
 
@@ -79,36 +85,40 @@ public class OpeningTalkScene : StoryScene
         StoryTeller.Item face = Portrait(line.owner, SpriteEmotion.origin, new Vector2(FaceX * side, FaceY), FaceSize, FaceZoom, FaceFadeBottom);
         StoryTeller.Item plate = Nameplate(who, new Vector2(FaceX * side, -4.5f), new Vector2(3.6f, 0.9f), accent);
 
-        // 文字那一侧：思考（上）+ 对话（下）
-        StoryTeller.Item think = Think(ThinkWaitingFor(who), new Vector2(TextX * side, ThinkY), new Vector2(TextW, 5f), StageStyle.FontSize(BodyH));
+        // 文字那一侧：人设（上）+ 对话（下）。两张卡同时弹出，内容在弹出前就整段写好（不逐字打）
+        StoryTeller.Item persona = Think("", new Vector2(TextX * side, ThinkY), new Vector2(TextW, 5f), StageStyle.FontSize(BodyH));
         StoryTeller.Item say = Panel("", new Vector2(TextX * side, SayY), new Vector2(TextW, 2.6f), StageStyle.FontSize(0.4f));
+        SetTextHard(persona, PersonaBody(line.persona, who));
+        SetTextHard(say, Titled("对 话", line.speech, 0.4f));
 
-        // ---------- 入场：全部并行，各自方向，不再一个一个等 ----------
+        // ---------- 入场：四块一起弹出，人设和对话同一批进来，不再先出人设、再出对话 ----------
         SetupEnter(new[] { counter }, StoryTeller.Direction.Top, StageStyle.Distance, StageStyle.In);
         SetupEnter(new[] { plate }, faceFrom, StageStyle.Distance, StageStyle.In);
-        SetupEnter(new[] { think }, textFrom, StageStyle.Distance, StageStyle.In);
+        SetupEnter(new[] { persona }, textFrom, StageStyle.Distance, StageStyle.In);
         SetupEnter(new[] { say }, StoryTeller.Direction.Botton, StageStyle.Distance, StageStyle.In);
 
         s.StartCoroutine(s.SlideIn(face, faceFrom, StageStyle.Distance, StageStyle.In, 0f, new Vector2(0.9f, 0.9f)));
-        yield return SlideInAll(s, new[] { counter, plate, think });   // 内容框不在这批里：它不能提前出现
+        yield return SlideInAll(s, new[] { counter, plate, persona, say });
         s.Float(face, 0.09f, 3.6f);
+
+        // ---------- 台上整段 3 秒：滑入 0.2 + 停留 2.6 + 滑出 0.2，不再按字数干等 ----------
+        yield return s.WaitStage(LingerSeconds);
+
+        yield return SlideOutAll(s, new[] { counter, face, plate, persona, say }, StoryTeller.Direction.Botton, StageStyle.Distance);
         yield return s.WaitStage(StageStyle.Short);
+    }
 
-        // ---------- 只有这两步是顺序的：先出思考，再出对话 ----------
-        bool hasThinking = !string.IsNullOrWhiteSpace(line.thinking);
-        SetText(think, ThinkBody(line.thinking, who), hasThinking);
-        if (hasThinking) yield return WaitTextIn(s, think);            // 思考真的打完字就走，不再按字数干等
-        else yield return s.WaitStage(StageStyle.Hold);
-
-        // 思考一播完立刻开内容：框子滑入和打字同时开始，中间不再停
-        s.StartCoroutine(s.SlideIn(say, StoryTeller.Direction.Botton, StageStyle.Distance, StageStyle.In, 0.2f));
-        SetText(say, Titled("对 话", line.speech, 0.4f), true);
-        yield return s.WaitStage(ReadTime(line.speech, 0.5f, 3.5f));   // 狠话停留短一档：别让每句话都吊着
-
-        // 说完停一下再走：一句话刚出来就滑下去，观众读不完
-        yield return s.WaitStage(0.25f);
-        yield return SlideOutAll(s, new[] { counter, face, plate, think, say }, StoryTeller.Direction.Botton, StageStyle.Distance);
-        yield return s.WaitStage(StageStyle.Short);
+    /// <summary>
+    /// 人设卡的正文：一行小标题（谁的人设，配色沿用原来那张思考卡）+ 角色卡里的 oc 人设文本。
+    /// 太长时按 320 字兜底裁切（和思考卡同一口径），免得撑出卡片。
+    /// </summary>
+    private static string PersonaBody(string persona, string owner)
+    {
+        string who = string.IsNullOrWhiteSpace(owner) ? "AI" : owner.Trim();
+        string head = StageStyle.SizeTag(CaptionH) + "<color=" + ThinkCaptionColor + ">" + Colorize(who + " 的人设") + "</color></size>\n";
+        if (string.IsNullOrWhiteSpace(persona))
+            return head + StageStyle.SizeTag(BodyH) + "<color=" + CaptionColor + ">（这张角色卡没有填人设）</color></size>";
+        return head + StageStyle.SizeTag(BodyH) + "<color=#9EABBF>" + Colorize(StageStyle.Clamp(persona, 320)) + "</color></size>";
     }
 
     /// <summary>

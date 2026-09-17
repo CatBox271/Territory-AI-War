@@ -711,7 +711,7 @@ public static class AIRequest
     /// <summary>
     /// 上下文容量
     /// </summary>
-    private static int MaxTokens = 1048576;
+    public static int MaxTokens = 1048576;
     private static readonly JsonSerializerSettings json_serializer_settings = new JsonSerializerSettings
     {
         NullValueHandling = NullValueHandling.Ignore,

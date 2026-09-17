@@ -109,18 +109,26 @@ public class Towel : MonoBehaviour, IStageValue
     public float CurrentBulletRadiusScale => 1f + (upgradedBulletRadiusScale - 1f) * Mathf.Max(0, turretUpgraded);
     /// <summary>每级炮塔升级叠加上去的子弹动量倍率：1 + (倍率-1)  等级。</summary>
     public float CurrentBulletImpactScale => 1f + (upgradedBulletImpactScale - 1f) * Mathf.Max(0, turretUpgraded);
+    /// <summary>每级炮塔强化让极限转速翻的倍数（升级选择卡片上的数值也读它，别只改一边）。</summary>
+    public const float GuardSpeedPerLevel = 2f;
     /// <summary>每级炮塔升级让极限转速再翻一倍。</summary>
-    public float CurrentGuardSpeedScale => Mathf.Pow(2f, Mathf.Max(0, turretUpgraded));
+    public float CurrentGuardSpeedScale => Mathf.Pow(GuardSpeedPerLevel, Mathf.Max(0, turretUpgraded));
 
     #region 炮塔移动
 
-    [Header("炮塔移动")]
-    /// <summary>移动速度（世界单位/秒）。</summary>
-    public float moveSpeed = 1f;
+    // 炮塔移动：参数统一放 MapConfig（全队共用一份，见 MapConfig「炮塔移动」那段），这里只做只读转发。
+    // 名字故意保持不变：ReactionSystem / InformGetter / 升级卡片都在读 `towel.moveSpeed` 这类写法。
+    // config 拿不到时（编辑器里单独打开预制体、或还没 Awake）回退到各自默认值，别出现除零。
+    /// <summary>移动速度（世界单位/秒）：基础速度 + 每级炮塔强化叠加，等级越高走得越快。</summary>
+    public float moveSpeed => config != null
+        ? config.moveSpeed + config.moveSpeedPerLevel * Mathf.Max(0, turretUpgraded)
+        : 0.25f;
     /// <summary>0 级时的最大移动距离（世界单位）；每级炮塔强化再叠加 moveRangePerLevel。</summary>
-    public float moveRangeBase = 2f;
+    public float moveRangeBase => config != null ? config.moveRangeBase : 2f;
     /// <summary>每级炮塔强化增加的最大移动距离。</summary>
-    public float moveRangePerLevel = 2f;
+    public float moveRangePerLevel => config != null ? config.moveRangePerLevel : 0.5f;
+    /// <summary>每级炮塔强化增加的移动速度。</summary>
+    public float moveSpeedPerLevel => config != null ? config.moveSpeedPerLevel : 0.05f;
 
     /// <summary>当前最大移动距离：基础值 + 每级炮塔强化叠加。</summary>
     public float MaxMoveDistance => moveRangeBase + moveRangePerLevel * Mathf.Max(0, turretUpgraded);
@@ -256,7 +264,11 @@ public class Towel : MonoBehaviour, IStageValue
         UpdateMove();
     }
 
-    public bool Say(string content, bool force = false) => messageDisplayer.Say(content, force);
+    /// <summary>
+    /// 炮塔上的逐字飘字。【暂时关闭】要恢复显示，把下面这行改回 `messageDisplayer.Say(content, force)` 即可。
+    /// 只关这一条显示通道：工具操作、中央发言列表、ShowTip（升级提示走 tipPrefab）都不经过这里，不受影响。
+    /// </summary>
+    public bool Say(string content, bool force = false) => false;   // 暂时取消炮塔上的 Say 显示
 
     private Transform _tipPool;
     private Transform tipPool
@@ -694,9 +706,9 @@ public class Towel : MonoBehaviour, IStageValue
         var rb = ob.GetComponent<Rigidbody2D>();
         if (rb != null)
         {
-            // 出膛速度（原来是 bigBallSpeed，跟穿甲的配置口径不一致）。
-            // 注意 BallPainter 的持续速度 = SpeedCurve(value) × SpeedTimes，所以这个值只决定出膛瞬间，
-            // 之后会被曲线接管；要让配置真正决定飞行速度，得把 SpeedTimes 反算成 配置速度 / 曲线值。
+            // 穿甲速度口径：MapConfig 里的 PierceShellSpeed **直接写进弹体的 SpeedTimes**
+            // （弹体的持续速度 = SpeedCurve × SpeedTimes，这里不碰曲线）。
+            if (bp != null) bp.SpeedTimes = config.PierceShellSpeed;
             rb.velocity = transform.up * config.PierceShellSpeed;
         }
 

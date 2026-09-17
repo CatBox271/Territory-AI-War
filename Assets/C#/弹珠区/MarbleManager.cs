@@ -14,6 +14,12 @@ public class MarbleManager : MonoBehaviour
     public Transform Shooter;
     public Transform spawnArea;
 
+    [Header("开局出生点（随机一次后固定）")]
+    [Tooltip("勾一下：立刻按 spawnArea 重新随机一整组开局出生点，写进下面那张表，并把勾自动去掉。结果要留下来记得保存场景。")]
+    public bool randomizeOpeningSpawns = false;
+    [Tooltip("开局出生点表：按出生顺序取用（每轮每队一个）。为空或不够用时，剩下的退回原来的随机。")]
+    public List<Vector3> openingSpawnPositions = new();
+
     [Header("Settings")]
     public int initialMarbleCount = 3;
     public float initialSpawnDelay = 0.3f;
@@ -75,13 +81,23 @@ public class MarbleManager : MonoBehaviour
     bool first = true;
     IEnumerator SpawnInitial()
     {
+        int spawnIndex = 0;
         for (int i = 0; i < initialMarbleCount; i++)
         {
             for (int stage = 1; stage <= teamCount; stage++)
-                SpawnAndLaunch(stage);
+                SpawnAndLaunchAt(stage, NextOpeningSpawn(ref spawnIndex));
             yield return new WaitForSeconds(initialSpawnDelay);
         }
         first = false;
+    }
+
+    /// <summary>开局出生点：优先用表里存好的固定点（勾一次随机后就不再变），表用完才退回随机。</summary>
+    Vector3 NextOpeningSpawn(ref int index)
+    {
+        if (openingSpawnPositions != null && index < openingSpawnPositions.Count)
+            return openingSpawnPositions[index++];
+        index++;
+        return GetSpawnPosition();
     }
 
     void Update()
@@ -228,7 +244,7 @@ public class MarbleManager : MonoBehaviour
         {
             case 2: return "炮塔升级";
             case 3: return "护盾升级";
-            default: return "弹珠+1";
+            default: return "弹珠+2";
         }
     }
 
@@ -315,7 +331,10 @@ public class MarbleManager : MonoBehaviour
                 yield return null;
             }
         }
+        // 额外弹珠升级：一次给**两颗** —— 第一颗落在连线指的那个点（演出指着它），
+        // 第二颗另取一个出生点，免得两颗叠在一起抖。
         SpawnAndLaunchAt(stage, target);
+        SpawnAndLaunchAt(stage, GetSpawnPosition());
     }
 
 
@@ -351,6 +370,59 @@ public class MarbleManager : MonoBehaviour
         upgradeProgress[stage] = progress - amount;
         return true;
     }
+
+    /// <summary>
+    /// 需要花升级点数的动作：移动 / 悄悄话（**公开发言不花点数**：它是每回合必然要说的话，扣了就只能咽回去，视频里就没台词了）。
+    /// 每种动作各自记"用了几次"，价格 = 基础价 × 涨价倍率^次数（倍率在 MapConfig.actionCostGrowth）。
+    /// </summary>
+    public enum EnergyAction { Move, Whisper }
+
+    private readonly Dictionary<int, int>[] actionUseCount =
+    {
+        new Dictionary<int, int>(),   // Move
+        new Dictionary<int, int>(),   // Whisper
+    };
+
+    /// <summary>这个阵营这个动作**这一次**的价格（已含涨价）。</summary>
+    public float GetActionEnergyCost(int stage, EnergyAction action)
+    {
+        MapConfig cfg = MapConfig.Instance;
+        float baseCost = action switch
+        {
+            EnergyAction.Move => cfg != null ? cfg.moveEnergyCost : 25f,
+            _ => cfg != null ? cfg.whisperEnergyCost : 25f,
+        };
+        float growth = cfg != null ? cfg.actionCostGrowth : 1f;
+        int used = actionUseCount[(int)action].TryGetValue(stage, out int c) ? c : 0;
+        // growth <= 1 就是不涨价；used 很大时 Pow 可能溢出，用 double 再夹一下
+        double factor = growth > 1f ? System.Math.Pow(growth, used) : 1d;
+        if (double.IsInfinity(factor) || factor > 1e9) factor = 1e9;
+        return baseCost * (float)factor;
+    }
+
+    /// <summary>这个阵营这个动作已经用过几次（用于情报/提示词展示下次价格）。</summary>
+    public int GetActionUseCount(int stage, EnergyAction action)
+        => actionUseCount[(int)action].TryGetValue(stage, out int c) ? c : 0;
+
+    /// <summary>
+    /// 花一次这个动作的能量：够则扣除、累计次数、返回 true；不够返回 false 且什么都不改。
+    /// 价格由 GetActionEnergyCost 现算，所以调用方不要自己算价格，直接用这里的返回值。
+    /// </summary>
+    public bool TrySpendActionEnergy(int stage, EnergyAction action, out float paid)
+    {
+        paid = GetActionEnergyCost(stage, action);
+        if (!TrySpendUpgradeEnergy(stage, paid)) return false;
+        actionUseCount[(int)action][stage] = GetActionUseCount(stage, action) + 1;
+        return true;
+    }
+
+    /// <summary>退还一次这个动作的能量（悄悄话被系统调配终止时用），并把次数退回去，价格回到用之前。</summary>
+    public void RefundActionEnergy(int stage, EnergyAction action, float amount)
+    {
+        AddUpgradeEnergy(stage, amount);
+        Dictionary<int, int> table = actionUseCount[(int)action];
+        if (table.TryGetValue(stage, out int c) && c > 0) table[stage] = c - 1;
+    }
     /// <summary>供空槽升级等系统外部调用，给指定阵营额外生成并发射一个弹珠。</summary>
     public void SpawnMarbleForStage(int stage)
     {
@@ -378,12 +450,6 @@ public class MarbleManager : MonoBehaviour
             InformGetter.AddMarble(stage, m);
         }
 
-        if (shooterComp != null)
-        {
-            Rigidbody2D rb = ob.GetComponent<Rigidbody2D>();
-            if (rb != null) shooterComp.Launch(rb);
-        }
-
         var col = ob.GetComponent<Collider2D>();
         foreach (var teamob in teamMarbleObs[stage])
         {
@@ -405,6 +471,42 @@ public class MarbleManager : MonoBehaviour
             return new Vector3(x, y, center.z);
         }
         return Shooter != null ? Shooter.position : transform.position;
+    }
+
+#if UNITY_EDITOR
+    /// <summary>
+    /// 编辑器里勾上 randomizeOpeningSpawns：当场按 spawnArea 随机一整组开局出生点写进表里，然后把这个勾去掉。
+    /// 表是世界坐标，之后每次开局都照它出生（不再每次随机）；要换一批就再勾一次。
+    /// </summary>
+    private void OnValidate()
+    {
+        if (!randomizeOpeningSpawns) return;
+        randomizeOpeningSpawns = false;
+        RandomizeOpeningSpawns();
+        UnityEditor.EditorUtility.SetDirty(this);
+    }
+#endif
+
+    /// <summary>随机一整组开局出生点（每轮每队一个），整表覆盖 openingSpawnPositions。</summary>
+    private void RandomizeOpeningSpawns()
+    {
+        int teams = ResolveTeamCount();
+        if (openingSpawnPositions == null) openingSpawnPositions = new List<Vector3>();
+        openingSpawnPositions.Clear();
+        for (int i = 0; i < Mathf.Max(1, initialMarbleCount) * teams; i++)
+            openingSpawnPositions.Add(GetSpawnPosition());
+    }
+
+    /// <summary>队伍数（0 号阵营是无主，要减掉）。编辑器里 MapConfig.Instance 还没赋值，就回场景里找它。</summary>
+    private int ResolveTeamCount()
+    {
+        MapConfig config = MapConfig.Instance;
+#if UNITY_EDITOR
+        if (config == null && !Application.isPlaying) config = FindObjectOfType<MapConfig>();
+#endif
+        if (config != null && config.teamColors != null && config.teamColors.Count > 1)
+            return config.teamColors.Count - 1;
+        return 4;
     }
 
     public void OnTeamDeath(int stage)

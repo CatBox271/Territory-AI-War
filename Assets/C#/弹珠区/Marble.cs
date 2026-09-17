@@ -139,7 +139,7 @@ public class Marble : MonoBehaviour
     {
         if (rb != null)
         {
-            rb.mass = valueExponent + 1;
+            rb.mass = Mathf.Pow(2, valueExponent) / 2000f;
             if (MarbleManager.Instance != null)
                 rb.gravityScale = MarbleManager.Instance.gravity;
         }

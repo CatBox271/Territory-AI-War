@@ -27,6 +27,12 @@ public class WhisperMeetingScene : StoryScene
     private const float ThinkY = -1.05f;
     private const float ReplyY = -3.35f;
 
+    /// <summary>
+    /// 「全部显示完之后」在台上停留的时长倍率：读完时长和出场前那一拍都乘它。
+    /// 原来 = 1（ReadTime 1.8~7 秒 + StageStyle.Short），现在砍一半。
+    /// </summary>
+    private const float TailHoldScale = 0.5f;
+
     private readonly int sender;
     private readonly int target;
     private readonly string whisper;
@@ -61,12 +67,12 @@ public class WhisperMeetingScene : StoryScene
         StoryTeller.Item rightFace = Portrait(target, SpriteEmotion.origin, new Vector2(FaceX, FaceY), FaceSize, FaceZoom, FaceFadeBottom);
         StoryTeller.Item rightPlate = Nameplate(targetName, new Vector2(FaceX, -4.35f), new Vector2(3.4f, 0.9f), targetColor);
 
-        // 消息分左右（像聊天记录的两端）：发话人的悄悄话贴在左边立绘这一侧、文字左对齐，
-        // 对方的回答贴右边立绘那一侧、文字右对齐；中间的「AI 的思考」是旁白，仍然居中。
+        // 消息分左右（像聊天记录的两端）：发话人的悄悄话贴在左边立绘这一侧，
+        // 对方的回答贴右边立绘那一侧；两张框的文字**都左对齐**（右对齐时短句会被推到右边、
+        // 换行后的首行也不齐，读起来别扭），中间的「AI 的思考」是旁白，仍然居中。
         StoryTeller.Item whisperBox = Panel("", new Vector2(-MsgX, WhisperY), new Vector2(MsgW, 2.4f), StageStyle.FontSize(0.34f));
         StoryTeller.Item think = Think(ThinkWaitingFor(targetName), new Vector2(0f, ThinkY), new Vector2(BoxW, 3.2f), StageStyle.FontSize(BodyH));
-        StoryTeller.Item replyBox = Panel("", new Vector2(MsgX, ReplyY), new Vector2(MsgW, 2.4f), StageStyle.FontSize(0.34f),
-            TextAlignmentOptions.TopRight);
+        StoryTeller.Item replyBox = Panel("", new Vector2(MsgX, ReplyY), new Vector2(MsgW, 2.4f), StageStyle.FontSize(0.34f));
 
         SetupEnter(new[] { title }, StoryTeller.Direction.Top, StageStyle.Distance, StageStyle.In);
         SetupEnter(new[] { leftPlate, whisperBox }, StoryTeller.Direction.Left, StageStyle.Distance, StageStyle.In);
@@ -98,10 +104,12 @@ public class WhisperMeetingScene : StoryScene
         // 思考一播完立刻开内容：框子滑入和打字同时开始，中间不再停（回答从右边立绘那一侧进来）
         s.StartCoroutine(s.SlideIn(replyBox, StoryTeller.Direction.Right, StageStyle.Distance, StageStyle.In, 0.2f));
         SetText(replyBox, Titled(targetName + " 回答", reply, 0.34f), true);
-        yield return s.WaitStage(ReadTime(reply));
+
+        // 全部显示完之后在台上停的时长：读完时长 × 这个倍率，原来 1，现在砍一半
+        yield return s.WaitStage(ReadTime(reply) * TailHoldScale);
 
         // ---------- 出场 ----------
-        yield return s.WaitStage(StageStyle.Short);
+        yield return s.WaitStage(StageStyle.Short * TailHoldScale);
         yield return SlideOutAll(s,
             new[] { title, leftFace, leftPlate, rightFace, rightPlate, whisperBox, think, replyBox },
             StoryTeller.Direction.Botton, StageStyle.Distance);

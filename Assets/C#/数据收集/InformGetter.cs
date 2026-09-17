@@ -313,7 +313,22 @@ public class InformGetter : MonoBehaviour
     /// <summary>注册炮塔初始位置（开局调用一次；此后再不更新，AI 只知道开局坐标）。</summary>
     public static void RegisterInitialPosition(int stage, Vector2 pos) => InitialTurretPositions[stage] = pos;
 
-    /// <summary>记录一次撞击情报，只发给造成撞击的一方（攻击方）。targetKind 用 ImpactKindShield / ImpactKindTurret。</summary>
+    /// <summary>
+    /// 撞击点的合并粒度：落在同一个 0.1×0.1 方格（也就是每个点代表 ±0.05 的方形范围）内、
+    /// 同一目标同一来源的撞击会合并成一条。扫射一轮能打出上千颗子弹，不合并单轮情报能到 17 万字符。
+    /// </summary>
+    public const float ImpactMergeCell = 0.1f;
+
+    /// <summary>把撞击点吸到 0.1 网格上：返回的点代表以它为中心、±0.05 的方形。</summary>
+    private static Vector2 SnapImpactPoint(Vector2 point)
+        => new Vector2(Mathf.Round(point.x / ImpactMergeCell) * ImpactMergeCell,
+                       Mathf.Round(point.y / ImpactMergeCell) * ImpactMergeCell);
+
+    /// <summary>
+    /// 记录一次撞击情报，只发给造成撞击的一方（攻击方）。targetKind 用 ImpactKindShield / ImpactKindTurret。
+    /// 同一目标 + 同一来源类型 + 落在同一格（±0.05）的撞击并进同一条：次数累加，
+    /// 护盾记「第一次撞击前」和「最后一次撞击后」。
+    /// </summary>
     public static void AddImpact(int attackerStage, int targetStage, string targetKind, Vector2 point,
         HugeInt shieldBefore, HugeInt shieldAfter, string sourceKind)
     {
@@ -323,14 +338,28 @@ public class InformGetter : MonoBehaviour
             list = new List<ImpactInfo>();
             ImpactStats[attackerStage] = list;
         }
+
+        Vector2 cell = SnapImpactPoint(point);
+        ImpactInfo same = list.Find(e =>
+            e.targetStage == targetStage && e.targetKind == targetKind && e.sourceKind == sourceKind &&
+            Mathf.Abs(e.point.x - cell.x) < 0.0001f && Mathf.Abs(e.point.y - cell.y) < 0.0001f);
+
+        if (same != null)
+        {
+            same.count++;
+            same.shieldAfter = shieldAfter;   // 留"最后一次"之后的盾值
+            return;
+        }
+
         list.Add(new ImpactInfo
         {
             targetStage = targetStage,
             targetKind = targetKind,
-            point = point,
+            point = cell,
             shieldBefore = shieldBefore,
             shieldAfter = shieldAfter,
-            sourceKind = sourceKind
+            sourceKind = sourceKind,
+            count = 1
         });
     }
 
@@ -349,7 +378,7 @@ public class InformGetter : MonoBehaviour
         builder.AppendLine(); builder.AppendLine($"炮塔移动已结束：{reason}。");
     }
 
-    /// <summary>炮塔位置情报：全体炮塔的初始位置（固定不变）+ 自己炮塔的当前位置/移动状态/最大移动距离。</summary>
+    /// <summary>炮塔位置情报：全体炮塔的初始位置（固定不变）+ 自己炮塔的当前位置/子弹量/护盾/移动状态/最大移动距离。</summary>
     private static void AppendTurretPositions(StringBuilder builder, int stage)
     {
         if (InitialTurretPositions.Count == 0) return;
@@ -368,17 +397,29 @@ public class InformGetter : MonoBehaviour
             Vector2 p = self.transform.position;
             builder.Append("你的炮塔: 当前位置 (");
             builder.Append(p.x.ToString("0.00")); builder.Append(", "); builder.Append(p.y.ToString("0.00"));
-            builder.Append(")，最大移动距离 "); builder.Append(self.MaxMoveDistance.ToString("0.00"));
+            // 子弹量与护盾：1.0.1 里这两个是随「场上信息」公开的，现在只报给自己（私有情报）。
+            // 护盾碎时写「已破碎」而不是 0，跟 Situation/1.0.1 的口径一致。
+            builder.Append(")，当前子弹量 "); builder.Append(self.value.ToShortString());
+            builder.Append("，护盾 ");
+            builder.Append(self.shield_value > 0 ? self.shield_value.ToShortString() : "已破碎");
+            builder.Append("，最大移动距离 "); builder.Append(self.MaxMoveDistance.ToString("0.00"));
             MarbleManager mm = MarbleManager.Instance;
             MapConfig cfg = MapConfig.Instance;
             if (mm != null)
             {
-                builder.Append("，移动一次消耗 "); builder.Append(cfg != null ? cfg.moveEnergyCost.ToString("0.#") : "?");
-                builder.Append(" 能量(当前可用 "); builder.Append(mm.GetUpgradeEnergy(stage).ToString("0.#")); builder.Append(")");
+                // 移动 / 悄悄话都涨价：报"这一次"的价格，而不是 MapConfig 上的基础价，
+                // 否则 AI 会按第一次的价格做规划，实际扣费比它以为的多。（公开发言不花点数，不用报）
+                builder.Append("，升级能量 ");
+                builder.Append(mm.GetUpgradeEnergy(stage).ToString("0.#"));
+                builder.Append("（移动和悄悄话共用这一个池子，同一个动作每用一次价格 ×");
+                builder.Append(cfg != null ? cfg.actionCostGrowth.ToString("0.##") : "1.5");
+                builder.Append("）");
+                builder.Append("：移动这次要 "); builder.Append(mm.GetActionEnergyCost(stage, MarbleManager.EnergyAction.Move).ToString("0.#"));
+                builder.Append("（已移 "); builder.Append(mm.GetActionUseCount(stage, MarbleManager.EnergyAction.Move)); builder.Append(" 次）");
                 if (cfg != null && cfg.whisperEnergyCost > 0f)
                 {
-                    builder.Append("，发一次悄悄话消耗 "); builder.Append(cfg.whisperEnergyCost.ToString("0.#"));
-                    builder.Append(" 能量(每 "); builder.Append(Mathf.Max(1, cfg.whisperCooldownRounds)); builder.Append(" 回合一次，开局就在冷却中)");
+                    builder.Append("，悄悄话这次要 "); builder.Append(mm.GetActionEnergyCost(stage, MarbleManager.EnergyAction.Whisper).ToString("0.#"));
+                    builder.Append("（每 "); builder.Append(Mathf.Max(1, cfg.whisperCooldownRounds)); builder.Append(" 回合一次，开局就在冷却中）");
                 }
             }
             builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
@@ -400,7 +441,7 @@ public class InformGetter : MonoBehaviour
     {
         if (!ImpactStats.TryGetValue(stage, out List<ImpactInfo> list) || list.Count == 0) return;
 
-        builder.AppendLine(); builder.AppendLine("撞击情报(你自己打出去的撞击，只有你能看到这些):");
+        builder.AppendLine(); builder.AppendLine("撞击情报(你自己打出去的撞击，只有你能看到这些；撞击点带 ±0.05 的方格误差，同一格里的多次撞击已合并并标了次数):");
         foreach (ImpactInfo e in list)
         {
             builder.AppendLine();
@@ -410,6 +451,8 @@ public class InformGetter : MonoBehaviour
             builder.Append(") 的"); builder.Append(e.targetKind);
             builder.Append("：撞击点 ("); builder.Append(e.point.x.ToString("0.00"));
             builder.Append(", "); builder.Append(e.point.y.ToString("0.00")); builder.Append(")");
+            builder.Append("±").Append((ImpactMergeCell * 0.5f).ToString("0.00"));   // 同一个方格里的撞击已经合并
+            if (e.count > 1) { builder.Append("，同类 "); builder.Append(e.count); builder.Append(" 次"); }
             if (e.targetKind == ImpactKindShield)
             {
                 builder.Append("，护盾 撞击前 "); builder.Append(e.shieldBefore.ToShortString());
@@ -806,7 +849,8 @@ public class DamageSourceInfo
     public HugeInt damage = 0;
 }
 
-/// <summary>一次撞击情报：谁撞了谁、撞击点坐标、护盾撞击前后大小。只发给撞击方。</summary>
+/// <summary>一次撞击情报：谁撞了谁、撞击点坐标、护盾撞击前后大小。只发给撞击方。
+/// 同一目标同一来源、撞击点落在同一个 0.1×0.1 方格（±0.05）内的多次撞击已经合并成一条，count 是合并进这条的次数。</summary>
 public class ImpactInfo
 {
     public int targetStage;
@@ -815,6 +859,8 @@ public class ImpactInfo
     public HugeInt shieldBefore = 0;
     public HugeInt shieldAfter = 0;
     public string sourceKind = "";
+    /// <summary>合并进来的撞击次数（1 = 只有一次）。</summary>
+    public int count = 1;
 }
 
 //接下来实际的获取逻辑在InformGeter里，ItemPos不需要任何计算。

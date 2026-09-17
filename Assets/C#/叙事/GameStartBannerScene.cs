@@ -10,7 +10,7 @@ public class GameStartBannerScene : StoryScene
     private static readonly Color HeadColor = StageStyle.Mark;
 
     /// <summary>大字停留的秒数。</summary>
-    private const float Hold = 4.2f;
+    private const float Hold = 1f;
 
     public override IEnumerator Play()
     {
