@@ -492,24 +492,37 @@ public class Towel : MonoBehaviour, IStageValue
     }
 
     /// <summary>
-    /// 阵亡时把一个道具"放出去"：**按道具本体释放** —— 大球放球、穿甲放穿甲弹、霰弹放霰弹。
-    /// 护盾与扫射本身是给自己的增益，放不出去，统一变成大球；【任意】没有具体形态，也按大球放。
+    /// 阵亡时把一个道具"放出去"：**按道具本体释放** —— 大球放球、穿甲放穿甲弹、霰弹放霰弹；
+    /// 护盾与扫射本身是给自己的增益、放不出去，统一变成大球。
+    /// 【任意】先按正常使用那样随机开一种武器，再走同一套释放映射。
     /// 方向沿用炮塔当时的朝向。
     /// </summary>
     void ReleasePropAsWeapon(PropEntry prop)
     {
         if (prop == null) return;
 
-        switch (prop.item)
+        WeaponKind kind = prop.item;
+        if (kind == WeaponKind.任意)
+        {
+            // 随机池与 MapConfig.ExecutePropEffect 里【任意】的随机口径一致（0~3：霰弹/扫射/护盾/大球）
+            kind = (WeaponKind)Random.Range(0, 4);
+        }
+        ReleaseWeaponOnDeath(kind, prop.value);
+    }
+
+    /// <summary>死亡释放的映射：穿甲放穿甲弹、霰弹放霰弹，其余（大球/护盾/扫射）一律放大球。</summary>
+    void ReleaseWeaponOnDeath(WeaponKind kind, HugeInt value)
+    {
+        switch (kind)
         {
             case WeaponKind.穿甲:
-                SpawnShell(prop.value);
+                SpawnShell(value);
                 break;
             case WeaponKind.霰弹:
-                ShotGun(prop.value);
+                ShotGun(value);
                 break;
-            default:   // 大球 / 护盾 / 扫射 / 任意
-                SpawnBigBall(prop.value);
+            default:   // 大球 / 护盾 / 扫射
+                SpawnBigBall(value);
                 break;
         }
     }
