@@ -777,6 +777,14 @@ public static class AIRequest
         return $"API Error: {request.error} / HTTP {(int)request.responseCode} / body: {body}";
     }
 
+    /// <summary>
+    /// 单次请求的超时（秒，0 = 不超时）。UnityWebRequest 默认 0 = 永不超时：
+    /// 连接卡住时 request.isDone 永远是 false，`while (!request.isDone) await Task.Yield();`
+    /// 就一直转，onResponse / onError 都不会触发 —— 等它的那一轮 AI 与录制暂停就永久卡死。
+    /// 给个上界，超时就当请求失败走 onError，至少能把这一轮放过去。
+    /// </summary>
+    public static int RequestTimeoutSeconds = 120;
+
     //非流式
     private static async Task SendAsync(string jsonData, RequestInfo requestInfo)
     {
@@ -784,6 +792,7 @@ public static class AIRequest
         var url = requestInfo.apiUrl;
         var key = requestInfo.apiKey;
         UnityWebRequest request = new UnityWebRequest(url, "POST");
+        if (RequestTimeoutSeconds > 0) request.timeout = RequestTimeoutSeconds;
         byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonData);
 
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);

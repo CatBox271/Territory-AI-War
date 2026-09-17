@@ -249,6 +249,8 @@ public class AIAgent : MonoBehaviour
 
     private void Update()
     {
+        // 录制暂停的兜底看门狗：真正卡住时至少不会一直冻着（详见 CapturePause.Tick）
+        CapturePause.Tick();
         StartCycle();
     }
 
@@ -322,6 +324,28 @@ public class AIAgent : MonoBehaviour
 
     private async Task RunAIAnalysic(Action complete)
     {
+        // 这整个方法必须保证 complete 一定被调用：RunCycleLoop 是
+        // `CapturePause.Pause(); await tcs.Task; CapturePause.Resume();`，
+        // 而 tcs 只由 complete 触发。这里如果抛出异常（例如 RunBehaviorCheckAsync /
+        // ForceToolCallAsync 出错），complete 就永远不会被调用 —— 录制会一直停在暂停态、
+        // _isWaiting 也一直是 true，后面每一轮都在 "Previous round still waiting" 里空转。
+        // 所以整段包在 try/catch/finally 里，无论怎么退出都把 complete 交出去。
+        try
+        {
+            await RunAIAnalysicCore(complete);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[AIAgent] 本轮 AI 流程异常，已结束本轮并恢复录制：{e}");
+        }
+        finally
+        {
+            complete?.Invoke();
+        }
+    }
+
+    private async Task RunAIAnalysicCore(Action complete)
+    {
         if (ShouldStopSoloSpeech())
         {
             complete?.Invoke();
@@ -380,10 +404,24 @@ public class AIAgent : MonoBehaviour
 
         if (openingRound)
         {
-            ExitOpeningRetryPause();
-            PlayOpeningScene();
+            // 用 try/finally 保证计数一定退回去：PlayOpeningScene 里任何异常都会让
+            // ExitOpeningRetryPause 被跳过，capturePauseCount 停在 1，后面所有 Enter 都会变成
+            // 「计数 +1 但不再 Pause」，而 Exit 永远退不到 0 —— 录制就再也不会恢复。
+            try
+            {
+                ExitOpeningRetryPause();
+                PlayOpeningScene();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[AIAgent] 开场演出异常：{e}");
+            }
+            finally
+            {
+                // 计数归零兜底：万一上面的流程漏掉一次 Exit，也不会让之后的暂停整体偏移
+                capturePauseCount = 0;
+            }
         }
-        complete?.Invoke();
     }
 
     /// <summary>
@@ -953,7 +991,9 @@ public class AIAgent : MonoBehaviour
             info.apiUrl = card.url;
 
             AIRequest.SendRequest(info);
-            string answer = await tcs.Task;
+            if (!await AwaitWithTimeout(tcs.Task, SpeechRequestTimeoutSeconds))
+                Debug.LogWarning($"[获奖感言] stage {stage} 请求超时（{SpeechRequestTimeoutSeconds}s 未回调），先用兜底文案继续，并恢复录制。");
+            string answer = tcs.Task.IsCompleted ? tcs.Task.Result : "";
             if (!string.IsNullOrWhiteSpace(answer)) words = answer.Trim();
         }
         catch (Exception e)
@@ -1017,7 +1057,9 @@ public class AIAgent : MonoBehaviour
 
             AIRequest.SendRequest(info);
             Debug.Log($"[遗言] stage {stage} 请求已发送");
-            words = await tcs.Task;
+            if (!await AwaitWithTimeout(tcs.Task, SpeechRequestTimeoutSeconds))
+                Debug.LogWarning($"[遗言] stage {stage} 请求超时（{SpeechRequestTimeoutSeconds}s 未回调），直接跳过遗言并恢复录制。");
+            words = tcs.Task.IsCompleted ? tcs.Task.Result : "";
             words = ExtractEmotion(words, out _, out _).Trim();   // 展示用文字里不保留 [emo:xxx]
             if (!string.IsNullOrWhiteSpace(words)) InformGetter.StageSpeech(stage, words);
         }
@@ -1113,6 +1155,25 @@ public class AIAgent : MonoBehaviour
     {
         yield return new WaitForSeconds(seconds);
         end?.Invoke();
+    }
+
+    /// <summary>
+    /// 等一个 Task，但最多等 timeoutSeconds 现实秒。返回 false 表示超时（任务可能还在飞）。
+    ///
+    /// 遗言 / 获奖感言这两条写的是 `await tcs.Task`，而 tcs 只在 AIRequest 的回调里 SetResult：
+    /// 请求如果因为网络、校验拦截或别的意外一直不回调，await 就永远不返回，
+    /// 那里正好是 Pause 之后 —— 录制就此一直停着。所以这两处必须带超时。
+    /// </summary>
+    private const float SpeechRequestTimeoutSeconds = 60f;
+
+    private static async Task<bool> AwaitWithTimeout(Task task, float timeoutSeconds)
+    {
+        if (task == null) return true;
+        if (task.IsCompleted) return true;
+
+        Task delay = Task.Delay(System.TimeSpan.FromSeconds(timeoutSeconds));
+        Task finished = await Task.WhenAny(task, delay);
+        return finished == task;
     }
 
     private void OnDestroy()
@@ -1327,6 +1388,7 @@ public class AIAgent : MonoBehaviour
             n_0_index = 1;
             last_round_index.Clear();
             roundRetryReminder = null;
+            roundRetryCount = 0;
             roundRequestInFlight = false;
             deferredUpgradeMessages.Clear();
             upgradeExchangeMessages.Clear();
@@ -1547,6 +1609,9 @@ public class AIAgent : MonoBehaviour
 
         // 思考校验重试：本轮已插入的 [格式修正]（合格后移除），保证每轮最多一条
         private DeepSeekMessage roundRetryReminder;
+        // 本轮已经因为思考格式重发了几次，以及上限：到上限就放行，避免无限乒乓把等待挂死
+        private int roundRetryCount;
+        private const int roundRetryMax = 2;
         // 当轮请求是否在飞：用于安全补写升级对话，避免插断 assistant(tool_calls) 与它的 tool 结果
         private bool roundRequestInFlight;
         private readonly List<DeepSeekMessage> deferredUpgradeMessages = new();
@@ -1618,6 +1683,7 @@ public class AIAgent : MonoBehaviour
         public async Task UntilGreatRequest(int roundStartIndex)
         {
             TaskCompletionSource<bool> tcs = new();
+            roundRetryCount = 0;   // 每轮重置思考重发次数，否则上一轮用光额度后这轮一次都不重发
 
             RequestInfo info = new(
                 request,
@@ -1691,19 +1757,23 @@ public class AIAgent : MonoBehaviour
                 return true;
             }
 
-            if (roundRetryReminder == null)
+            // 重发次数上限：校验失败时会「重发一次 + 返回 false 让原来那次不回调」，
+            // 而调用方是在 await tcs.Task —— 只要模型一直不合格式，这个乒乓就会无限继续，
+            // tcs 永远不 SetResult，整条等待（以及录制暂停）就永久挂住。
+            // 所以最多重发 roundRetryMax 次，再不合格就放行：格式瑕疵比卡死好。
+            if (roundRetryCount < roundRetryMax)
             {
+                roundRetryCount++;
                 roundRetryReminder = new DeepSeekMessage("user", ThinkingRetryPrompt);
                 info.AddMessage(roundRetryReminder);
-                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
-            }
-            else
-            {
-                Debug.LogWarning($"[AIRequest] 思考模式校验再次失败（本轮只插一条提醒，不重复插入）。reasoning: {msg.reasoning_content}");
+                Debug.LogWarning($"[AIRequest] 思考模式校验失败（第 {roundRetryCount}/{roundRetryMax} 次），已拦截工具并重发。reasoning: {msg.reasoning_content}");
+                AIRequest.SendRequest(info);
+                return false;
             }
 
-            AIRequest.SendRequest(info);
-            return false;
+            Debug.LogError($"[AIRequest] 思考模式校验连续 {roundRetryMax} 次失败，已放行这条回复，避免等待链路永久卡住。reasoning: {msg.reasoning_content}");
+            roundRetryReminder = null;
+            return true;
         }
 
         /// <summary>最终回复合格后，把本轮插入的 [格式修正] 从历史里移除。</summary>
