@@ -104,50 +104,6 @@ public class StoryTeller : MonoBehaviour
     {
         if (IsBackground && Time.timeScale != 0f) Time.timeScale = 0f;
     }
-
-    /// <summary>
-    /// 舞台上被静音的战场拖尾（开舞台时记下，关舞台时还原）。
-    /// 为什么需要：舞台上那层毛玻璃是 SimpleGrabPassBlur——它抓的是**当前屏幕**（也就是战场），
-    /// 模糊后只留 alpha 那一份（默认 0.9 → 战场还有 10% 透出来）。球是个实心圆，糊完就是一坨软光，
-    /// 看着像氛围；可拖尾是一条细长的亮线，糊完仍然是一条长亮痕，压在卡片后面非常扎眼，所以单独静音掉。
-    /// 想让整个战场都别透出来（连球那坨软光也不要），把面板上的 BackgroundTransparent 调到 1 即可。
-    /// </summary>
-    private struct TrailState
-    {
-        public TrailRenderer tr;
-        public bool enabled;
-        public bool emitting;
-    }
-    private readonly List<TrailState> mutedTrails = new();
-
-    private void MuteBattlefieldTrails()
-    {
-        RestoreBattlefieldTrails();   // 先还原上一轮的，避免重复记录（连续换场时会连着开两次）
-        TrailRenderer[] all = FindObjectsOfType<TrailRenderer>(true);
-        for (int i = 0; i < all.Length; i++)
-        {
-            TrailRenderer tr = all[i];
-            if (tr == null) continue;
-
-            mutedTrails.Add(new TrailState { tr = tr, enabled = tr.enabled, emitting = tr.emitting });
-            tr.emitting = false;
-            tr.Clear();          // 先清掉已有轨迹，免得残留的那截还留在抓屏里
-            tr.enabled = false;  // 再关掉渲染，双保险
-        }
-    }
-
-    private void RestoreBattlefieldTrails()
-    {
-        for (int i = 0; i < mutedTrails.Count; i++)
-        {
-            TrailState s = mutedTrails[i];
-            if (s.tr == null) continue;   // 舞台期间被销毁的弹珠
-            s.tr.enabled = s.enabled;
-            s.tr.Clear();                 // 静音期间它可能被传送过，先清掉再开始记录，免得拉出一条长线
-            s.tr.emitting = s.emitting;
-        }
-        mutedTrails.Clear();
-    }
     #endregion
 
     #region 时钟
@@ -868,7 +824,6 @@ public class StoryTeller : MonoBehaviour
     public void OpenScene(bool immediately = false)
     {
         Time.timeScale = 0;
-        MuteBattlefieldTrails();   // 战场拖尾不进毛玻璃抓屏（见 mutedTrails 的说明）
         if (IsBackground)
         {
             ClearScene(true);
@@ -896,7 +851,6 @@ public class StoryTeller : MonoBehaviour
         if (scene_camera != null) scene_camera.enabled = false;
 
         Time.timeScale = 1;
-        RestoreBattlefieldTrails();
     }
 
     /// <summary>清掉本次演出生成的图片与文本。</summary>

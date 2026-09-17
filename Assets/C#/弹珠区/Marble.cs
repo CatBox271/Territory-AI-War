@@ -177,11 +177,6 @@ public class Marble : MonoBehaviour
 
     public void Home(Shooter shooter)
     {
-        // 传送前必须清拖尾：TrailRenderer 会把「旧位置 → 新位置」直接连成一条亮线。
-        // ×倍率触发器把飞在场上的弹珠拉回发射台时，这两点能差 30 个世界单位，拉出来就是横贯全屏的一长条。
-        if (tr == null) tr = GetComponentInChildren<TrailRenderer>();
-        if (tr != null) tr.Clear();
-
         transform.position = shooter.transform.position;
         if (rb != null)
         {
