@@ -136,6 +136,20 @@ public class MapConfig : MonoBehaviour
 
 
 
+    [Header("升级 / 能量（空槽升级与移动、悄悄话共用同一个池子）")]
+    [Tooltip("每个空着的已解锁道具槽，每秒积累的升级值")]
+    public float upgradePerEmptySlotPerSecond = 1f;
+    [Tooltip("升级值达到该数值后触发一次升级三选一")]
+    public float upgradeCost = 2f;
+    [Tooltip("每次升级后，下一次升级所需值乘以这个倍率")]
+    public float upgradeCostGrowth = 2.4f;
+    [Tooltip("炮塔移动一次消耗的升级能量（固定单次扣除，与移动距离无关）")]
+    public float moveEnergyCost = 25f;
+    [Tooltip("发一次悄悄话（秘密会晤）消耗的升级能量")]
+    public float whisperEnergyCost = 25f;
+    [Tooltip("悄悄话的冷却轮数：每隔这么多回合才能再发一次")]
+    public int whisperCooldownRounds = 4;
+
     [Header("Props")]
     public int propLimit = 0;
     public List<PropEntry>[] teamProps;

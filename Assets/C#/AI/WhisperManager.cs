@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using UnityEngine;
 
 /// <summary>
 /// AI 之间悄悄话的调度中心。
@@ -23,6 +24,8 @@ public static class WhisperManager
         public TaskCompletionSource<string> Tcs = new();
         public int? PreviousCooldownRound;
         public int Round;
+        /// <summary>这次悄悄话扣掉的升级能量（被系统调配终止时按这个数退还）。</summary>
+        public float EnergyCost;
     }
 
     /// <summary>由 AIAgent 注册：target 收到 sender 的悄悄话后，单独发起一次请求并返回回复文本。</summary>
@@ -86,9 +89,21 @@ public static class WhisperManager
             return "悄悄话失败：你已被击杀，无法使用工具。";
         if (IsDead(target))
             return $"悄悄话失败：{AIAgent.GetStageName(target)}已被击杀，无法接收悄悄话。";
+        // 冷却轮数与能量消耗都取 MapConfig：冷却不再写死 4 回合，能量与移动共用同一个池子
+        MapConfig cfg = MapConfig.Instance;
+        int cooldownRounds = cfg != null ? Mathf.Max(1, cfg.whisperCooldownRounds) : 4;
+        float energyCost = cfg != null ? cfg.whisperEnergyCost : 0f;
+        MarbleManager mm = MarbleManager.Instance;
+        if (mm != null && energyCost > 0f && mm.GetUpgradeEnergy(sender) < energyCost)
+            return "悄悄话失败：升级能量不足（本次需要 " + energyCost.ToString("0.#")
+                + "，当前 " + mm.GetUpgradeEnergy(sender).ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。";
+
         int? previousCooldownRound = lastWhisperRound.TryGetValue(sender, out int prev) ? prev : null;
-        if (!TryAcquireCooldown(sender, currentRound, out string cooldownError))
+        if (!TryAcquireCooldown(sender, currentRound, cooldownRounds, out string cooldownError))
             return cooldownError;
+
+        // 冷却拿到手了才扣能量（冷却没拿到就直接返回，不会白扣）
+        if (mm != null && energyCost > 0f) mm.TrySpendUpgradeEnergy(sender, energyCost);
 
         var req = new WhisperRequest
         {
@@ -96,7 +111,8 @@ public static class WhisperManager
             Target = target,
             Message = message,
             PreviousCooldownRound = previousCooldownRound,
-            Round = currentRound
+            Round = currentRound,
+            EnergyCost = energyCost
         };
         // 演出开着的时候这次会晤会整段演在舞台上，横幅别再剧透一遍
         if (!StoryTeller.SuppressLegacy)
@@ -239,7 +255,7 @@ public static class WhisperManager
             }
 
             WhisperRequest newestInCycle = cycleEdges[0];
-            CompleteRequest(oldest, "繁忙中请等待通话调配：你发送的悄悄话已被系统调配转达，本次未消耗使用机会，下一回合可继续使用。", refundCooldown: true);
+            CompleteRequest(oldest, "繁忙中请等待通话调配：你发送的悄悄话已被系统调配转达，本次未消耗使用机会与升级能量，下一回合可继续使用。", refundCooldown: true);
 
             // 转投：把最早那条悄悄话改为 A→C 的一次单向传达（不占用新的等待边），
             // 排在 C 已有的 B→C 等待之后，实现 C→A、B→C、A→C 的顺序。
@@ -261,13 +277,16 @@ public static class WhisperManager
         if (waitingOn.TryGetValue(req.Sender, out var cur) && cur == req) waitingOn.Remove(req.Sender);
         waitOrder.Remove(req);
 
-        // 被系统终止（繁忙）的悄悄话退还这次冷却机会，下一回合可继续使用。
+        // 被系统终止（繁忙 / 环形调配）的悄悄话退还这次冷却机会**和升级能量**，下一回合可继续使用。
         if (refundCooldown)
         {
             if (req.PreviousCooldownRound.HasValue)
                 lastWhisperRound[req.Sender] = req.PreviousCooldownRound.Value;
             else
                 lastWhisperRound.Remove(req.Sender);
+
+            if (req.EnergyCost > 0f && MarbleManager.Instance != null)
+                MarbleManager.Instance.AddUpgradeEnergy(req.Sender, req.EnergyCost);
         }
 
         req.Tcs.TrySetResult(result);
@@ -282,12 +301,17 @@ public static class WhisperManager
 
     private static readonly Dictionary<int, int> lastWhisperRound = new();
 
-    private static bool TryAcquireCooldown(int sender, int currentRound, out string error)
+    private static bool TryAcquireCooldown(int sender, int currentRound, int cooldownRounds, out string error)
     {
         error = null;
-        if (lastWhisperRound.TryGetValue(sender, out int last) && currentRound - last < 4)
+        if (cooldownRounds <= 0)
         {
-            error = $"悄悄话失败：冷却中，每4回合只能使用一次，还需等待 {4 - (currentRound - last)} 回合。";
+            lastWhisperRound[sender] = currentRound;
+            return true;
+        }
+        if (lastWhisperRound.TryGetValue(sender, out int last) && currentRound - last < cooldownRounds)
+        {
+            error = $"悄悄话失败：冷却中，每{cooldownRounds}回合只能使用一次，还需等待 {cooldownRounds - (currentRound - last)} 回合。";
             return false;
         }
         lastWhisperRound[sender] = currentRound;

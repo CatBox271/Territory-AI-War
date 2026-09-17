@@ -157,7 +157,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = WhisperToolName,
-                  description = "给另一个AI发送悄悄话并等待对方回复。to=对方阵营编号(1-4，不能是自己)；content=悄悄话内容，请用对方的名字称呼对方（玩家名单见系统提示）。对方空闲时立即回复；对方忙碌时会等对方忙完再单独回复。每4回合只能使用一次。如果出现互相等待或环形等待，系统会自动调配，返回结果里会说明。",
+                  description = "给另一个AI发送悄悄话并等待对方回复。to=对方阵营编号(1-4，不能是自己)；content=悄悄话内容，请用对方的名字称呼对方（玩家名单见系统提示）。对方空闲时立即回复；对方忙碌时会等对方忙完再单独回复。**要消耗升级能量、并且有回合冷却（具体数值见每轮情报），能量与移动共用同一个池子**。如果出现互相等待或环形等待，系统会自动调配，返回结果里会说明；被系统调配终止的会退还这次冷却与能量。",
                 parameters = new
                 {
                     type = "object",
@@ -576,7 +576,7 @@ public class ReactionSystem : MonoBehaviour, Itool
 
             // 先检查能量、再扣除，最后才开始移动
             MarbleManager mm = MarbleManager.Instance;
-            float cost = mm != null ? mm.moveEnergyCost : 0f;
+            float cost = MapConfig.Instance != null ? MapConfig.Instance.moveEnergyCost : 0f;
             if (mm != null && !mm.TrySpendUpgradeEnergy(callStage, cost))
                 return new ToolOutcome("移动炮塔失败：升级能量不足（本次移动需要 " + cost.ToString("0.#")
                     + "，当前 " + mm.GetUpgradeEnergy(callStage).ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。");
@@ -627,7 +627,7 @@ public class ReactionSystem : MonoBehaviour, Itool
 
         // 能量：预览阶段先查一遗（不足就不给预览，避免白确认一次）
         MarbleManager mmPreview = MarbleManager.Instance;
-        float moveCost = mmPreview != null ? mmPreview.moveEnergyCost : 0f;
+        float moveCost = MapConfig.Instance != null ? MapConfig.Instance.moveEnergyCost : 0f;
         float moveEnergy = mmPreview != null ? mmPreview.GetUpgradeEnergy(callStage) : 0f;
         if (mmPreview != null && moveEnergy < moveCost)
             return new ToolOutcome("移动炮塔失败：升级能量不足（本次移动需要 " + moveCost.ToString("0.#")

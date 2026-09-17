@@ -370,10 +370,16 @@ public class InformGetter : MonoBehaviour
             builder.Append(p.x.ToString("0.00")); builder.Append(", "); builder.Append(p.y.ToString("0.00"));
             builder.Append(")，最大移动距离 "); builder.Append(self.MaxMoveDistance.ToString("0.00"));
             MarbleManager mm = MarbleManager.Instance;
+            MapConfig cfg = MapConfig.Instance;
             if (mm != null)
             {
-                builder.Append("，移动一次消耗 "); builder.Append(mm.moveEnergyCost.ToString("0.#"));
+                builder.Append("，移动一次消耗 "); builder.Append(cfg != null ? cfg.moveEnergyCost.ToString("0.#") : "?");
                 builder.Append(" 能量(当前可用 "); builder.Append(mm.GetUpgradeEnergy(stage).ToString("0.#")); builder.Append(")");
+                if (cfg != null && cfg.whisperEnergyCost > 0f)
+                {
+                    builder.Append("，发一次悄悄话消耗 "); builder.Append(cfg.whisperEnergyCost.ToString("0.#"));
+                    builder.Append(" 能量(每 "); builder.Append(Mathf.Max(1, cfg.whisperCooldownRounds)); builder.Append(" 回合一次)");
+                }
             }
             builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append(", "); builder.Append(self.MoveBound.ToString("0.00"));

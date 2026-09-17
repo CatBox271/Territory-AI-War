@@ -1188,9 +1188,10 @@ public class AIAgent : MonoBehaviour
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
 - **道具转向：** 用带瞄准目标的道具（传了 target_guid 或 aim_x/aim_y）时，炮塔会**直接转向**该方向再开火。
+- **悄悄话（秘密会晤）：** 用 whisper 给某个阵营发一条私密消息并等对方回复，只有你们两人知道内容（其他玩家看不到）。**每 @WHISPER_COOLDOWN_ROUNDS@ 回合只能用一次，并且消耗 @WHISPER_ENERGY_COST@ 点升级能量**（和移动共用同一个能量池）。对方忙碌时会被排队；出现互相等待或环形等待时系统会自动调配，被调配终止的那次会退还冷却与能量。
 - **移动：** 炮塔可以移动（用 move_turret），**每次移动固定消耗 @MOVE_ENERGY_COST@ 点升级能量**（固定单次扣除、与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动）。移动不会主动广播你的新位置，但如果你正好落进别人的移动视野截图范围里，他可能直接看到你。
   - 移动速度 0.25 单位/秒：走满基础 2 单位要 8 秒；炮塔强化到 5 级时走满 12 单位要 48 秒。走多远就暴露多久。
-  - **移动消耗的能量与空槽升级共用同一个池子**：走一次就推迟下一次升级，反之攒着能量不动就能更快升级。
+  - **能量池是共用的**：移动、悄悄话都从这里扣，用掉就推迟下一次升级；反之攒着能量不动就能更快升级。
 - **移动要谨慎——距离是上限，不是目标：**
   - 走多远由你自己填，**没要求你每次都走满「最大移动距离」**。盲走满距离最容易一头送进未知区域、甚至正好停在别人身上；没把握就走短一点，剩下的距离留给下次。
   - **先预览、再确认**：预览会给出目标点、实际距离（超出上限会被夹）、是否越过地图边界、本次扣多少能量，而且**预览不扣能量、炮塔也不会动**——可以放心试算几个方向和距离，比好了再 confirm。
@@ -1293,12 +1294,17 @@ public class AIAgent : MonoBehaviour
             // 否则会得到空值（“每队初始拥有  个弹珠”）。改成每次构建提示词时现算。
             int marbleCount = MarbleManager.Instance != null ? MarbleManager.Instance.initialMarbleCount : 3;
             string delayText = Instance != null ? Instance._cycleInterval.ToString("0.#") : "0";
-            string moveCostText = MarbleManager.Instance != null ? MarbleManager.Instance.moveEnergyCost.ToString("0.#") : "50";
-            string upgradeGrowthText = MarbleManager.Instance != null ? MarbleManager.Instance.upgradeCostGrowth.ToString("0.##") : "2";
+            MapConfig cfg = MapConfig.Instance;
+            string moveCostText = cfg != null ? cfg.moveEnergyCost.ToString("0.#") : "25";
+            string upgradeGrowthText = cfg != null ? cfg.upgradeCostGrowth.ToString("0.##") : "2.4";
+            string whisperCostText = cfg != null ? cfg.whisperEnergyCost.ToString("0.#") : "25";
+            string whisperCooldownText = cfg != null ? Mathf.Max(1, cfg.whisperCooldownRounds).ToString() : "4";
             string text = world.Replace("@MARBLE_COUNT@", marbleCount.ToString())
                 .Replace("@INFO_DELAY@", delayText)
                 .Replace("@MOVE_ENERGY_COST@", moveCostText)
-                .Replace("@UPGRADE_COST_GROWTH@", upgradeGrowthText);
+                .Replace("@UPGRADE_COST_GROWTH@", upgradeGrowthText)
+                .Replace("@WHISPER_ENERGY_COST@", whisperCostText)
+                .Replace("@WHISPER_COOLDOWN_ROUNDS@", whisperCooldownText);
 
             return $"{text}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。";
         }

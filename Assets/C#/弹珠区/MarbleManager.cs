@@ -28,13 +28,9 @@ public class MarbleManager : MonoBehaviour
 
     private Shooter shooterComp;
 
-    [Header("空槽升级机制")]
-    [Tooltip("每个空着的已解锁道具槽，每秒积累的升级值")]
-    public float upgradePerEmptySlotPerSecond = 1f;
-    [Tooltip("升级值达到该数值后，给对应 AI 阵营额外生成一个弹珠")]
-    public float upgradeCost = 100f;
-    [Tooltip("炮塔移动一次消耗的升级能量（固定单次扣除，与移动距离无关）")]
-    public float moveEnergyCost = 50f;
+    // 升级与能量的**数值**统一放在 MapConfig 上
+    // （upgradeCost / upgradeCostGrowth / upgradePerEmptySlotPerSecond / moveEnergyCost / whisperEnergyCost），
+    // 这里只保留运行期进度。
 
     // 参与空槽升级的 AI 阵营，以及各自的升级进度。
     private readonly HashSet<int> aiStages = new();
@@ -45,9 +41,6 @@ public class MarbleManager : MonoBehaviour
     private readonly Dictionary<int, int> marbleUpgradeCount = new();
     private readonly Dictionary<int, int> turretUpgradeCount = new();
     private readonly Dictionary<int, int> shieldUpgradeCount = new();
-
-    [Tooltip("每生成一个弹珠后，该阵营下一次升级所需值乘以这个倍率")]
-    public float upgradeCostGrowth = 1.5f;
 
     private void Awake()
     {
@@ -62,7 +55,7 @@ public class MarbleManager : MonoBehaviour
         if (!upgradeProgress.ContainsKey(aiStage))
         {
             upgradeProgress[aiStage] = 0f;
-            upgradeCosts[aiStage] = upgradeCost;
+            upgradeCosts[aiStage] = MapConfig.Instance != null ? MapConfig.Instance.upgradeCost : 2f;
         }
     }
     void Start()
@@ -99,10 +92,10 @@ public class MarbleManager : MonoBehaviour
     /// <summary>空槽升级进度：AI 模式按空槽数累计；非 AI 模式每个弹珠固定每秒 +1。</summary>
     private void UpdateEmptySlotUpgrade()
     {
-        if (MapConfig.Instance == null || MapConfig.Instance.teamProps == null) return;
-        if (upgradePerEmptySlotPerSecond <= 0f || upgradeCost <= 0f) return;
-
         MapConfig config = MapConfig.Instance;
+        if (config == null || config.teamProps == null) return;
+        if (config.upgradePerEmptySlotPerSecond <= 0f || config.upgradeCost <= 0f) return;
+
         if (config.useAIDecision)
         {
             foreach (int aiStage in aiStages)
@@ -114,7 +107,7 @@ public class MarbleManager : MonoBehaviour
                 int emptySlots = Mathf.Max(0, config.propLimit - props.Count);
                 if (emptySlots <= 0) continue;
 
-                AdvanceUpgrade(aiStage, emptySlots * upgradePerEmptySlotPerSecond * Time.deltaTime);
+                AdvanceUpgrade(aiStage, emptySlots * config.upgradePerEmptySlotPerSecond * Time.deltaTime);
             }
         }
         else
@@ -132,17 +125,18 @@ public class MarbleManager : MonoBehaviour
         if (!upgradeProgress.ContainsKey(stage))
         {
             upgradeProgress[stage] = 0f;
-            upgradeCosts[stage] = upgradeCost;
+            upgradeCosts[stage] = MapConfig.Instance != null ? MapConfig.Instance.upgradeCost : 2f;
         }
 
         float progress = upgradeProgress[stage];
         progress += gain;
-        float cost = upgradeCosts.TryGetValue(stage, out float c) ? c : upgradeCost;
+        float fallbackCost = MapConfig.Instance != null ? MapConfig.Instance.upgradeCost : 2f;
+        float cost = upgradeCosts.TryGetValue(stage, out float c) ? c : fallbackCost;
 
         while (progress >= cost)
         {
             progress -= cost;
-            cost *= upgradeCostGrowth;
+            cost *= MapConfig.Instance != null ? MapConfig.Instance.upgradeCostGrowth : 2.4f;
 
             UIMarbleUpgrade.Instance.ShowUpgrade(stage);
             if (MapConfig.Instance.useAIDecision && AIAgent.Instance != null)
@@ -329,7 +323,9 @@ public class MarbleManager : MonoBehaviour
     public bool TryGetUpgradeInfo(int stage, out float progress, out float cost)
     {
         progress = upgradeProgress.TryGetValue(stage, out float p) ? p : 0f;
-        cost = upgradeCosts.TryGetValue(stage, out float c) ? c : upgradeCost;
+        cost = upgradeCosts.TryGetValue(stage, out float c)
+            ? c
+            : (MapConfig.Instance != null ? MapConfig.Instance.upgradeCost : 2f);
         return aiStages.Contains(stage) || upgradeProgress.ContainsKey(stage);
     }
 
@@ -337,6 +333,13 @@ public class MarbleManager : MonoBehaviour
     public float GetUpgradeEnergy(int stage)
     {
         return upgradeProgress.TryGetValue(stage, out float p) ? p : 0f;
+    }
+
+    /// <summary>退还升级能量（悄悄话被系统调配/终止时用）。</summary>
+    public void AddUpgradeEnergy(int stage, float amount)
+    {
+        if (amount <= 0f) return;
+        upgradeProgress[stage] = GetUpgradeEnergy(stage) + amount;
     }
 
     /// <summary>尝试扣除升级能量：足够则扣掉并返回 true；不够则返回 false 且不扣。</summary>

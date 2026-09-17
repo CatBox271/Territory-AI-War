@@ -590,8 +590,7 @@ public class OpeningRulesScene : StoryScene
         }
 
         float cost = 50f;
-        MarbleManager mm = MarbleManager.Instance;
-        if (mm != null) cost = mm.moveEnergyCost;
+        if (MapConfig.Instance != null) cost = MapConfig.Instance.moveEnergyCost;
         StoryTeller.Item badge = Label(StageStyle.SizeTag(0.6f) + "<b>" + Em("消耗" + cost.ToString("0.#")) + "</b></size>", new Vector2(0f, 0.3f), new Vector2(5f, 0.8f), Accent, StageStyle.FontSize(0.6f));
         if (badge != null)
         {
