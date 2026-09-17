@@ -621,7 +621,6 @@ public class Towel : MonoBehaviour, IStageValue
         {
             bp.stage = stage;
             bp.value = val;
-            bp.game_item_name = "穿甲弹";   // 伤害/撞击情报里的名字（和"大球"共用 BallPainter，靠它区分）
         }
 
         // 穿盾口径：MapConfig → 弹体上的 ShieldSlow
@@ -647,7 +646,8 @@ public class Towel : MonoBehaviour, IStageValue
         }
 
         //InformGeter
-        var ballItem = new ItemType(ob.transform, bp != null ? bp.game_item_name : "穿甲弹", bp, rb);
+        // 名字用弹体自己声明的 game_item_name（穿甲.prefab 上写的是"穿甲"），别再硬编码"大球"
+        var ballItem = new ItemType(ob.transform, bp != null ? bp.game_item_name : "穿甲", bp, rb);
         if (bp != null) bp.guid = ballItem.guid;
         InformGetter.AddItem(stage, ballItem);
     }

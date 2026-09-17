@@ -272,6 +272,7 @@ MonoBehaviour:
   col: {fileID: 6864175156454396675}
   <stage>k__BackingField: 2
   guid: 
+  game_item_name: "\u7A7F\u7532"
   baseWorldRadius: 0.2
   attackPower: 1
   ScaleSmoothSpeed: 3
@@ -362,7 +363,7 @@ MonoBehaviour:
   CostSpeed: 0.25
   EffectIntensity: 0
   OutRandom: 0
-  RandomSpeed: 3
+  RandomAngle: 30
   rb: {fileID: 3767908013893368130}
 --- !u!114 &660627040639354114
 MonoBehaviour:
