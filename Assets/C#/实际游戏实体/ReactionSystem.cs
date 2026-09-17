@@ -86,6 +86,40 @@ public class ReactionSystem : MonoBehaviour, Itool
             type = "function",
             function = new Function
             {
+                name = MergePropToolName,
+                description = "把自己武器栏里的两个**同种**道具合并成一个：数值相加、占一个槽位、腾出另一个槽位。免费，不消耗能量，也不改变总数值。注意：**无脑合并不一定是好事**——有些道具你根本用不了那么多，有些分开用收益最大（两颗大球朝两个方向、两发霰弹打两个目标、两次护盾分两轮顶伤害）。槽位不紧张、或者确实需要一次性堆出大数值时再合。",
+                parameters = new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    properties = new Dictionary<string, object>
+                    {
+                        {
+                            "index_a",
+                            new
+                            {
+                                type = "integer",
+                                description = "第一个道具的格子序号，从 1 开始。"
+                            }
+                        },
+                        {
+                            "index_b",
+                            new
+                            {
+                                type = "integer",
+                                description = "第二个道具的格子序号，从 1 开始；必须与 index_a 是**同一种**武器，否则合并会被拒绝。"
+                            }
+                        }
+                    },
+                    required = new List<string> { "index_a", "index_b" }
+                }
+            }
+        },
+        new Tool
+        {
+            type = "function",
+            function = new Function
+            {
                 name = ControlTurretToolName,
                 description = "控制自己炮塔的持续瞄准。action=start 开始控制并让炮塔持续转向目标；必须传 target_guid（场上信息里的 guid），或 aim_x+aim_y（世界坐标）。action=stop 停止控制，炮塔立即恢复自动旋转。这个工具不消耗道具、不发射子弹，只控制炮塔朝向；开始控制后最多持续12秒，目标距离超过4也会自动断开；需要继续保持时再次调用 start。",
                 parameters = new
@@ -193,6 +227,8 @@ public class ReactionSystem : MonoBehaviour, Itool
     };
 
     private const string UsePropToolName = "use_prop";
+    /// <summary>合并道具：把两个同种道具并成一个（数值相加）。</summary>
+    private const string MergePropToolName = "merge_prop";
     private const string ControlTurretToolName = "control_turret";
     private const string MoveTurretToolName = "move_turret";
     private const string WhisperToolName = "whisper";
@@ -260,6 +296,10 @@ public class ReactionSystem : MonoBehaviour, Itool
         else if (call.function.name == UsePropToolName)
         {
             outcome = UseProp(call.function.arguments, callStage);
+        }
+        else if (call.function.name == MergePropToolName)
+        {
+            outcome = MergeProp(call.function.arguments, callStage);
         }
         else if (call.function.name == ControlTurretToolName)
         {
@@ -350,6 +390,52 @@ public class ReactionSystem : MonoBehaviour, Itool
 
 
     /// <summary>使用道具：消耗指定槽位，并连同瞄准目标交给既有游戏逻辑 ExecutePropEffect 执行。</summary>
+    /// <summary>
+    /// 合并道具：把自己武器栏里的两个**同种**道具并成一个（数值相加、占住靠前的那个槽位、腾出另一个）。
+    /// 免费：不消耗能量、不改变总数值。合并后这一格用一个**新 id**，武器栏 UI 会把它当新道具重新显示数值。
+    /// </summary>
+    private ToolOutcome MergeProp(string argumentsJson, int callStage)
+    {
+        MapConfig config = MapConfig.Instance;
+        if (config == null)
+            return new ToolOutcome("合并道具失败：游戏配置(MapConfig)不存在。");
+        if (callStage < 0 || callStage >= config.teamProps.Length)
+            return new ToolOutcome($"合并道具失败：当前角色阵营 {callStage} 无效。");
+
+        List<PropEntry> props = config.teamProps[callStage];
+        if (props == null)
+            return new ToolOutcome($"合并道具失败：{callStage} 号阵营没有道具栏。");
+
+        MergePropArguments args = null;
+        try { args = JsonConvert.DeserializeObject<MergePropArguments>(argumentsJson); } catch { }
+        if (args == null)
+            return new ToolOutcome("合并道具失败：参数无法解析，需要 index_a 与 index_b（两个格子序号，从 1 开始）。");
+
+        if (args.index_a == args.index_b)
+            return new ToolOutcome("合并道具失败：index_a 和 index_b 不能是同一格。");
+        if (args.index_a < 1 || args.index_a > props.Count || args.index_b < 1 || args.index_b > props.Count)
+            return new ToolOutcome($"合并道具失败：格子序号超出范围（当前共 {props.Count} 格道具）。");
+
+        PropEntry a = props[args.index_a - 1];
+        PropEntry b = props[args.index_b - 1];
+        if (a == null || b == null)
+            return new ToolOutcome("合并道具失败：那一格是空的。");
+        if (a.item != b.item)
+            return new ToolOutcome($"合并道具失败：只能合并**同种**道具（第 {args.index_a} 格是 {a.item}，第 {args.index_b} 格是 {b.item}）。");
+
+        HugeInt sum = a.value + b.value;
+        int keep = Mathf.Min(args.index_a, args.index_b);                 // 留在靠前的槽位，顺序不乱
+        int drop = Mathf.Max(args.index_a, args.index_b);
+        props.RemoveAt(drop - 1);
+        props.RemoveAt(keep - 1);
+        props.Insert(keep - 1, new PropEntry { item = a.item, value = sum, stage = callStage });
+
+        return new ToolOutcome(
+            $"已合并：第 {args.index_a} 格 + 第 {args.index_b} 格 → {a.item} {sum.ToShortString()}（现在共 {props.Count} 格道具）。"
+            + "合并免费、总数值不变；但分开用有时更划算（两个不同目标、两轮不同时间），需要分着用就别合。",
+            $"【合并道具】{a.item} {sum.ToShortString()}");
+    }
+
     private ToolOutcome UseProp(string argumentsJson, int callStage)
     {
         MapConfig config = MapConfig.Instance;
@@ -827,6 +913,13 @@ public class ReactionSystem : MonoBehaviour, Itool
             this.result = result;
             this.action = action;
         }
+    }
+
+    [System.Serializable]
+    private class MergePropArguments
+    {
+        public int index_a = 0;
+        public int index_b = 0;
     }
 
     [System.Serializable]

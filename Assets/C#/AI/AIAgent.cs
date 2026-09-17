@@ -155,6 +155,14 @@ public class AIAgent : MonoBehaviour
         return true;
     }
 
+    /// <summary>「只想不说」的回复：思考里有内心独白标记、正文为空、也没调工具。
+    /// 开局的长期规划那一句就是这样（正文留空、规划全写思考里），校验要放它过。</summary>
+    private static bool IsThinkingOnlyReply(DeepSeekMessage message)
+        => message != null
+           && string.IsNullOrWhiteSpace(message.content)
+           && (message.tool_calls == null || message.tool_calls.Count == 0)
+           && HasRoleplayThinkingMark(message.reasoning_content);
+
     private static bool HasRoleplayThinkingMark(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
@@ -379,15 +387,9 @@ public class AIAgent : MonoBehaviour
             if (cycle_start)
             {
                 builder = new(CharacterCard.ModePrompt);
+                // 第一句只说赛前狠话（普通档）。**长期规划是第二句、另一个请求**（那一句才用 max）：
+                // 提示词在 CharacterCard.OpeningPlanPrompt，由 FirstRequest 在说完狠话之后追加。
                 builder.AppendLine(); builder.AppendLine("另外游戏开始，请各位选手在赛前放狠话。");
-
-                // ⚠⚠ 不要删！开局这一轮是**全局唯一一次**最高强度推理（档位见 CharacterCard.OpeningReasoningEffort，
-                // 在 FirstRequest 里设置）：让 AI 借这一轮把整局的长期规划想透。
-                // 这段提示词和那个档位是配套的，要改/要删都请两处一起动。
-                builder.AppendLine();
-                builder.AppendLine("开局这一轮请额外做一次【长期规划】——这一轮是全局唯一一次最高强度推理（之后都回到普通档），把该想的都想透，把结论写进你的思考里，它会成为你这一局的行动方针：");
-                builder.AppendLine("① 基于你对游戏规则的理解，推导一条可行的道具流派：什么道具配合什么升级最好；② 你打算怎么移动、怎么躲避危险；③ 平时积攒什么道具；④ 危险的时候怎么用护盾、怎么样最有效地抵御致命伤害；⑤ 你打算怎么确定敌人的位置；⑥ 怎么样合理安排升级点数（三选一什么时候该选哪个）。");
-                builder.AppendLine("正文照旧只写赛前那一句狠话（15 字以内），规划全放进思考里。");
             }
             else
             {
@@ -1260,7 +1262,7 @@ public class AIAgent : MonoBehaviour
 所有行动必须通过实际调用游戏工具执行，不得仅用文字描述。
 
 ## 一、世界与地图
-- 地图为 1024×1024 正方形，每个像素代表 1 单位领土。
+- 地图是 {MapConfig.Instance?.worldSize}×{MapConfig.Instance?.worldSize} 世界单位（坐标 ±{(MapConfig.Instance != null ? MapConfig.Instance.worldSize * 0.5f : 5f).ToString("0.#")}），领土按 {MapConfig.Instance?.resolution}×{MapConfig.Instance?.resolution} 像素结算（1 像素 = 1 点领土）；炮塔能移动的范围比地图略小（半边地图 − 炮塔半径），具体值每轮情报的「可移动范围」里都写着。
 - K = 1000,M = 1000K,B = 1000M,T = 1000B,P = 1000T
 - 四名玩家分别位于地图四角。
 - 0 号阵营为无主领土，无需重点关注。
@@ -1307,7 +1309,7 @@ public class AIAgent : MonoBehaviour
 ## 五、空槽升级
 每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择，你只能三选一：
 1. **额外弹珠：** 立即生成并发射两枚你的新弹珠，增强长期弹珠资源与倍乘收益。
-2. **炮塔强化：** 子弹显示半径变大、**击中大球时把它推得更远**（霰弹这类散射子弹同样受益），自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2），道具瞄准误差每级减半（15°→7.5°→3.75°）。可叠加。
+2. **炮塔强化：** 子弹显示半径变大、**击中大球时把它推得更远**（霰弹这类散射子弹同样受益），自动护卫极限转速 ×{Towel.GuardSpeedPerLevel}（常态转速不变）、**最大移动距离 +{MapConfig.Instance?.moveRangePerLevel}**（基础 {MapConfig.Instance?.moveRangeBase} 单位）、**移动速度 +{MapConfig.Instance?.moveSpeedPerLevel}/秒**，道具瞄准误差每级减半（基准 {ReactionSystem.BaseAimAngleError:0.#}°）。可叠加。
 3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（每级 2 秒，期间受到的伤害全部归零，穿甲弹同样无效）。可叠加。
 每次升级完成后，下一次升级所需值 ×{MapConfig.Instance?.upgradeCostGrowth}。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
 注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
@@ -1320,6 +1322,7 @@ public class AIAgent : MonoBehaviour
 - **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。
 - **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾不改变方向但会被拖慢、并持续啃掉盾值，离开护盾时方向会随机偏转；撞到敌方炮塔本体即秒杀（**命中本身不会触发对方护盾的无敌**）。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗。
 - **任意：** 任选以上一种道具。
+- **合并道具（merge_prop）：** 可以把两个**同种**道具并成一个（数值相加、省下一个槽位、免费）。但**无脑合并不一定是好事**：有些道具你根本用不了那么多，有些分开用收益最大——两颗大球朝两个方向、两发霰弹打两个目标、两次护盾分两轮顶伤害。槽位不紧张、或者确实需要一次性堆出大数值时再合。
 
 ## 七、最重要的规则：信息延迟
 **你收到的所有游戏信息都滞后 {Instance._cycleInterval} 秒**——你看到的不是现在，而是 {Instance._cycleInterval} 秒以前的世界。
@@ -1541,19 +1544,46 @@ public class AIAgent : MonoBehaviour
             return reply;
         }
 
-        private void SaveOpeningCache(DeepSeekMessage message)
+        /// <summary>
+        /// ⚠⚠ 不要删！开局**第二句**（长期规划）的提示词：第一句已经说过赛前狠话，这一轮专门做整局规划，
+        /// 并且**只在这一轮用最高档推理 "max"**（见 FirstRequest）。正文留空、不调工具，规划全写进思考。
+        /// 它和 FirstRequest 里的那句 reasoning_effort="max" 是配套的，要改/要删都请两处一起动。
+        /// </summary>
+        private const string OpeningPlanPrompt =
+            "现在做一次【长期规划】——这一轮是全局唯一一次最高档推理（之后都回到普通档），把该想的都想透，结论写进你的思考里，它会成为你这一局的行动方针："
+            + "① 基于你对游戏规则的理解，推导一条可行的道具流派：什么道具配合什么升级最好；"
+            + "② 你打算怎么移动、怎么躲避危险；③ 平时积攒什么道具；"
+            + "④ 危险的时候怎么用护盾、怎么样最有效地抵御致命伤害；⑤ 你打算怎么确定敌人的位置；"
+            + "⑥ 怎么样合理安排升级点数（三选一什么时候该选哪个）。"
+            + "这一轮**正文留空**（不说话、不调用工具），只输出思考。";
+
+        /// <summary>
+        /// 开局缓存：**两句一起存**。speech = 第一句（赛前狠话，舞台要播的那句）；
+        /// analysis = 第二句（同一局开头的长期规划，只写思考、正文为空）。
+        /// 旧格式（只存了一条消息）读出来会是空的，那就当没缓存、重问一次。
+        /// </summary>
+        [Serializable]
+        private class OpeningCache
         {
-            if (message == null || string.IsNullOrWhiteSpace(message.content)) return;
+            public DeepSeekMessage speech;
+            public DeepSeekMessage analysis;
+        }
+
+        private void SaveOpeningCache(DeepSeekMessage speech, DeepSeekMessage analysis)
+        {
+            if (speech == null || string.IsNullOrWhiteSpace(speech.content)) return;
             // 只缓存「assistant 说的开场白」：之前这里可能把最后一条任意消息（比如每轮补充情报）当开场白存下来
-            if (!string.Equals(message.role, "assistant", StringComparison.OrdinalIgnoreCase)) return;
-            if (message.content.Contains("【存活状态】")) return;
+            if (!string.Equals(speech.role, "assistant", StringComparison.OrdinalIgnoreCase)) return;
+            if (speech.content.Contains("【存活状态】")) return;
+            if (analysis == null || !string.Equals(analysis.role, "assistant", StringComparison.OrdinalIgnoreCase)) return;
 
             try
             {
                 string hash = GetOcHash();
-                string path = SLManager.ExportToJson(message, "Character/Cache", hash + ".json");
+                string path = SLManager.ExportToJson(new OpeningCache { speech = speech, analysis = analysis },
+                    "Character/Cache", hash + ".json");
                 if (!string.IsNullOrEmpty(path))
-                    Debug.Log($"[开局缓存] {name} 成功开头已保存: {path}");
+                    Debug.Log($"[开局缓存] {name} 开场白 + 开局规划已一起保存: {path}");
             }
             catch (System.Exception e)
             {
@@ -1561,21 +1591,26 @@ public class AIAgent : MonoBehaviour
             }
         }
 
-        private bool TryLoadOpeningCache(out DeepSeekMessage message)
+        private bool TryLoadOpeningCache(out DeepSeekMessage speech, out DeepSeekMessage analysis)
         {
-            message = null;
+            speech = null;
+            analysis = null;
             try
             {
                 string hash = GetOcHash();
-                DeepSeekMessage cached = SLManager.ImportFromJson<DeepSeekMessage>("Character/Cache", hash + ".json");
+                OpeningCache cached = SLManager.ImportFromJson<OpeningCache>("Character/Cache", hash + ".json");
 
                 // 缓存必须是「assistant 说的开场白」。旧版本可能把每轮补充情报（【存活状态】…）当成开场白存了进去，
                 // 搬到舞台上就是一句情报当台词念。不合格就当没缓存，老老实实重问一次。
-                if (cached == null || string.IsNullOrWhiteSpace(cached.content)) return false;
-                if (!string.Equals(cached.role, "assistant", StringComparison.OrdinalIgnoreCase)) return false;
-                if (cached.content.Contains("【存活状态】")) return false;
+                if (cached == null || cached.speech == null || string.IsNullOrWhiteSpace(cached.speech.content)) return false;
+                if (!string.Equals(cached.speech.role, "assistant", StringComparison.OrdinalIgnoreCase)) return false;
+                if (cached.speech.content.Contains("【存活状态】")) return false;
 
-                message = cached;
+                // 第二句（开局规划）也要在，否则这一局就没有规划可用 —— 两句是一起缓存的
+                if (cached.analysis == null || !string.Equals(cached.analysis.role, "assistant", StringComparison.OrdinalIgnoreCase)) return false;
+
+                speech = cached.speech;
+                analysis = cached.analysis;
                 return true;
             }
             catch (System.Exception e)
@@ -1615,9 +1650,53 @@ public class AIAgent : MonoBehaviour
         private bool noToolReminderSent;
 
         // 思考模式回复校验与重试（从 AIRequest 移入；不合格时无限重试，直到合格）
+        /// <summary>兜底用的通用 [格式修正]（说不上具体原因时发它）。正常走 BuildThinkingRetryPrompt。</summary>
         private const string ThinkingRetryPrompt =
             "[格式修正] 你上一条回复不合格。请重新输出：思考里必须用（我想：……）；" +
             "真实回复禁止使用括号，禁止输出[skip]，必须有实际内容的公开发言，或者继续调用工具执行行动。";
+
+        /// <summary>
+        /// 逐条列出这次回复**到底哪里不合格**。校验和提醒都用它，保证"提醒里说的"就是"校验拦的"。
+        /// </summary>
+        private static List<string> ThinkingProblems(DeepSeekMessage msg)
+        {
+            var reasons = new List<string>();
+            string reasoning = msg?.reasoning_content ?? "";
+            string content = msg?.content ?? "";
+            bool hasTools = msg != null && msg.tool_calls != null && msg.tool_calls.Count > 0;
+
+            if (string.IsNullOrWhiteSpace(reasoning))
+                reasons.Add("思考（reasoning_content）是空的：必须用「（我想：……）」写内心独白");
+            else if (!HasRoleplayThinkingMark(reasoning))
+                reasons.Add("思考里没有「（我想：」这个开头标记：内心独白必须以（我想：……）的形式写");
+
+            if (content.Contains("我想：") || content.Contains("我想:"))
+                reasons.Add("正文里出现了「我想：」——那是思考里才写的东西，正文不许写");
+            if (ContainsAnyParenthesis(content))
+                reasons.Add("正文里出现了括号（中英文括号都不行）");
+            if (content.Contains("[skip]"))
+                reasons.Add("正文里出现了 [skip]，禁止输出它");
+            if (!hasTools && string.IsNullOrWhiteSpace(content))
+                reasons.Add("正文是空的、又没有调用任何工具：要么写一句有实际内容的公开发言（15 字以内），要么调用工具执行行动");
+
+            return reasons;
+        }
+
+        /// <summary>
+        /// 按具体原因拼一条 [格式修正]：直接告诉模型刚才错在哪，别让它自己猜
+        /// （它猜错一次就白烧一整轮思考）。
+        /// </summary>
+        private static string BuildThinkingRetryPrompt(DeepSeekMessage msg)
+        {
+            List<string> reasons = ThinkingProblems(msg);
+            if (reasons.Count == 0) return ThinkingRetryPrompt;   // 兜底
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[格式修正]你上一条回复不合格，**具体原因**：");
+            foreach (string r in reasons) sb.AppendLine("· " + r);
+            sb.AppendLine("思考用（我想：……）开头；正文纯文本、15 字以内、不许括号；正文要有实际内容，或者直接调用工具。");
+            return sb.ToString();
+        }
 
         // ---------- AI 行为检查 ----------
         private const string BehaviorCheckerModel = "deepseek-flash";
@@ -1625,8 +1704,9 @@ public class AIAgent : MonoBehaviour
         private const string BehaviorCheckerSystemPrompt =
 @"你是一个严格的游戏 AI 行为检查器。你的任务只有：判断目标 AI 是否“说了要做某个具体行动，但没有调用对应工具执行”。你不调用任何工具，只输出分析文字和最终判断。
 
-目标 AI 可用的工具只有 4 个：
+目标 AI 可用的工具只有 5 个：
 - use_prop：使用自己武器栏里的道具（护盾、霰弹、扫射、大球、穿甲等）
+- merge_prop：把两个同种道具合并成一个（数值相加、省一个槽位，免费）
 - control_turret：控制自己炮塔瞄准
 - move_turret：移动自己的炮塔（第一次调用只是预览、不会移动，确认后才会真的移动）
 - whisper：给其他 AI 发悄悄话
@@ -1642,6 +1722,7 @@ public class AIAgent : MonoBehaviour
         private static readonly HashSet<string> BehaviorCheckAllowedTools = new HashSet<string>
         {
             "use_prop",
+            "merge_prop",
             "control_turret",
             "move_turret",
             "whisper"
@@ -1811,7 +1892,9 @@ public class AIAgent : MonoBehaviour
             return true;
         }
 
-        public async Task UntilGreatRequest(int roundStartIndex)
+        /// <summary>请求直到正确。allowThinkingOnly = 这一轮允许「只想不说」（正文空、不调工具，
+        /// 但思考里有内心独白标记）——开局长期规划那一句专用。</summary>
+        public async Task UntilGreatRequest(int roundStartIndex, bool allowThinkingOnly = false)
         {
             // 上下文超长自救：最多重发这么多次，别让一回合被卡死
             const int maxOverflowRetry = 3;
@@ -1847,7 +1930,7 @@ public class AIAgent : MonoBehaviour
                 info.apiUrl = url;
 
                 //保证已经检查完毕
-                info.validateAndMaybeRetry = (msg) => ValidateRoundReply(msg, info);
+                info.validateAndMaybeRetry = (msg) => ValidateRoundReply(msg, info, allowThinkingOnly);
 
                 roundRequestInFlight = true;
                 try
@@ -1895,10 +1978,12 @@ public class AIAgent : MonoBehaviour
             }
         }
 
-        /// <summary>思考校验：不合格时本轮只插入一条 [格式修正]，最终合格就把这条提醒移除。</summary>
-        private bool ValidateRoundReply(DeepSeekMessage msg, RequestInfo info)
+        /// <summary>思考校验：不合格时本轮只插入一条 [格式修正]，最终合格就把这条提醒移除。
+        /// allowThinkingOnly = 这一轮允许「只想不说」（正文空、没调工具，但思考里有内心独白标记）——
+        /// 开局的长期规划那一句专用，否则它永远过不了校验、被打回重写。</summary>
+        private bool ValidateRoundReply(DeepSeekMessage msg, RequestInfo info, bool allowThinkingOnly = false)
         {
-            if (IsRoleplayReasoning(msg))
+            if (IsRoleplayReasoning(msg) || (allowThinkingOnly && IsThinkingOnlyReply(msg)))
             {
                 RemoveRoundRetryReminder();
                 return true;
@@ -1907,13 +1992,13 @@ public class AIAgent : MonoBehaviour
             // 不合格就重发，**不设次数上限**：一定要拿到带（我想：…）的思考才放行。
             if (roundRetryReminder == null)
             {
-                roundRetryReminder = new DeepSeekMessage("user", ThinkingRetryPrompt);
+                roundRetryReminder = new DeepSeekMessage("user", BuildThinkingRetryPrompt(msg));
                 info.AddMessage(roundRetryReminder);
-                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。reasoning: {msg.reasoning_content}");
+                Debug.LogWarning($"[AIRequest] 思考模式校验失败，已拦截工具并重发。原因：{string.Join(" / ", ThinkingProblems(msg))}\nreasoning: {msg?.reasoning_content}");
             }
             else
             {
-                Debug.LogWarning($"[AIRequest] 思考模式校验再次失败（本轮只插一条提醒，不重复插入）。reasoning: {msg.reasoning_content}");
+                Debug.LogWarning($"[AIRequest] 思考模式校验再次失败（本轮只插一条提醒，不重复插入）。原因：{string.Join(" / ", ThinkingProblems(msg))}\nreasoning: {msg?.reasoning_content}");
             }
 
             AIRequest.SendRequest(info);
@@ -2000,10 +2085,11 @@ public class AIAgent : MonoBehaviour
 
             int roundStartIndex = history.Count;
 
-            // 有成功缓存就直接复用，不再请求/重刷
-            if (TryLoadOpeningCache(out DeepSeekMessage cachedOpening))
+            // 有成功缓存就直接复用（开场白 + 开局规划是**一起**缓存的，两句都得在）
+            if (TryLoadOpeningCache(out DeepSeekMessage cachedSpeech, out DeepSeekMessage cachedAnalysis))
             {
-                history.Add(cachedOpening);
+                history.Add(cachedSpeech);
+                history.Add(cachedAnalysis);   // 规划也放回历史，这一局它一直看得见
 
                 // 缓存的这条也必须喂给开场演出：它是从 UntilGreatRequest 的早退路径回来的，
                 // 那两个字段本来就只在那里赋值 —— 不补的话舞台上永远是「……」+「没有留下思考过程」，
@@ -2011,32 +2097,43 @@ public class AIAgent : MonoBehaviour
                 bool openingHandled = AIAgent.Instance != null && AIAgent.Instance.OpeningRoundActive;
                 if (openingHandled)
                 {
-                    openingSpeech = cachedOpening.content;
-                    openingThinking = cachedOpening.reasoning_content ?? "";
+                    openingSpeech = cachedSpeech.content;
+                    openingThinking = cachedSpeech.reasoning_content ?? "";
                 }
-                Say(position, cachedOpening.content);
+                Say(position, cachedSpeech.content);
 
                 return;
             }
-            // ⚠⚠ 不要删！开局这一轮**只此一次**用最高档推理（见 CharacterCard.OpeningReasoningEffort）：
-            // 借最高强度把整局的长期规划想透（道具流派 / 移动与躲避 / 攒什么道具 / 护盾怎么救命 /
-            // 怎么定位敌人 / 升级点数怎么分配）。请求发完立刻还原，后面每一轮都是普通档。
-            // 配套的规划提示词在 RunAIAnalysicCore 的 cycle_start 分支里，两处要一起改。
+
+            // ---------- 第一句：赛前狠话（**普通档，不用 max**）----------
+            request.tool_choice = "none";
+            await UntilGreatRequest(roundStartIndex);   // 这一轮的 content 会被舞台当开场白播
+            DeepSeekMessage speechMsg = GetLastAssistantMessage();
+
+            // ---------- 第二句：长期规划（**只有这一句用 max**，正文留空、不调工具）----------
+            // ⚠⚠ 不要删！全局仅此一次最高档推理：配套的提示词是 CharacterCard.OpeningPlanPrompt，
+            // 和这里那句 "max" 是配套的，两处要一起改。
+            int planStartIndex = history.Count;
+            history.Add(new DeepSeekMessage("user", OpeningPlanPrompt));
             string normalEffort = request.reasoning_effort;
             request.reasoning_effort = "max";
-            request.tool_choice = "none";
             try
             {
-                //请求直到正确
-                await UntilGreatRequest(roundStartIndex);
+                // allowThinkingOnly：这一句就是「只想不说」（正文空、不调工具），
+                // 否则 IsRoleplayReasoning 会因为正文为空判它不合格、无限打回重写。
+                await UntilGreatRequest(planStartIndex, allowThinkingOnly: true);
             }
             finally
             {
                 request.reasoning_effort = normalEffort;   // 只这一次：后面回到普通档
                 request.tool_choice = "auto";              // 开局结束后恢复自动工具调用
             }
+            DeepSeekMessage planMsg = GetLastAssistantMessage();
+            // 第二句请求失败时 GetLastAssistantMessage 还是会返回第一句（狠话）——那种情况下别把它当规划缓存
+            if (ReferenceEquals(planMsg, speechMsg)) planMsg = null;
 
-            SaveOpeningCache(request.messages[^1]);
+            // 两句一起存成开局缓存：下次同一个 oc 直接复用（见 OpeningCache）
+            SaveOpeningCache(speechMsg, planMsg);
 
             int endTokens = EstimateHistoryTokens(history);
             int sampleX = Mathf.Max(0, endTokens - startTokens);
@@ -2221,9 +2318,8 @@ public class AIAgent : MonoBehaviour
         {
             List<string> list = new()
             {
-                "球", "盾", "子弹", "弹药", "道具", "武器",
-                "炮塔", "瞄准", "移动", "位置", "撞击", "涂", "领土", "弹珠", "升级",
-                "攻击", "打", "轰", "推", "顶", "清", "用掉"
+                "球", "盾", "子弹", "弹药", "道具", "武器","穿",
+                "炮塔", "瞄准", "移动", "位置", "撞击", "涂", "领土", "弹珠", "升级"
             };
             foreach (WeaponKind kind in MapConfig.AllConcreteWeapons)
             {
