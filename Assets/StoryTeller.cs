@@ -900,6 +900,13 @@ public class StoryTeller : MonoBehaviour
     private bool queueRunning;
     private TaskCompletionSource<bool> queueDone;
 
+    /// <summary>
+    /// 舞台队列是否还在跑（含最后的关场淡出）。false = 舞台彻底收工：画面还给了战场、timeScale 也放开了。
+    /// 战场上的后续演出（升级连线 / 飘字）要等它变 false 再启动，否则 Screen Space Overlay 的 UI
+    /// 会直接压在还占着屏幕的舞台上。
+    /// </summary>
+    public bool IsPerforming => queueRunning;
+
     /// <summary>把一个演出交给舞台跑。队列空时自动开舞台，全部演完后自动关舞台。</summary>
     public void Play(StoryScene scene)
     {

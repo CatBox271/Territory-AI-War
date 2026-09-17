@@ -162,6 +162,8 @@ public class MarbleManager : MonoBehaviour
     /// 演出播完才 ApplyUpgradeChoice —— 这样炮塔升级的连线与飘字仍然留在战场上播。
     /// 反过来（先开舞台、在演出里请求）会让演出撞上录制的暂停/恢复：非实时录制下 AVPro 的
     /// ResumeCapture 会把 Time.timeScale 顶回 1，舞台还没播完战场就活了。
+    /// 另外「演完」指的是**舞台彻底收工**（队列跑完、关场淡出也走完），不是这一场演完就够：
+    /// 一次升级多格会连播好几场，连线是 Overlay 的 UI，会压在还开着的舞台上。
     /// </summary>
     IEnumerator AIUpgradeSequence(int stage)
     {
@@ -184,9 +186,24 @@ public class MarbleManager : MonoBehaviour
                 result = resultTask.Result;
 
             var scene = new UpgradeChoiceScene(stage, result);
-            StoryTeller.Instance.Play(scene);
+            StoryTeller show = StoryTeller.Instance;
+            show.Play(scene);
             while (!scene.Finished)
                 yield return null;
+
+            // 演出播完 ≠ 舞台收工：一次升级多格会连播好几场（队列里还有下一场），而且舞台相机正在淡出、
+            // timeScale 也还没放开。连线是 Screen Space Overlay 的 UI（canvas 的 m_RenderMode = 0），
+            // 画在所有相机之上 —— 舞台没关完就 ApplyUpgradeChoice，那条线就直接压在还在演的舞台上，
+            // 看上去就是"升级的线穿透舞台、显示在最上面"。
+            // 等队列彻底跑完（IsPerforming=false：关场淡出也走完、画面已经还给战场）再启动。
+            // 舞台期间 timeScale 是 0，所以计时得用 unscaled，顺带加个 30 秒兜底免得队列万一卡住把升级挂死。
+            float waited = 0f;
+            while (show.IsPerforming && waited < 30f)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
             ApplyUpgradeChoice(stage, (UpgradeChoice)scene.Choice);
             yield break;
         }
