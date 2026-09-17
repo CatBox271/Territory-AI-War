@@ -478,7 +478,7 @@ public class AIAgent : MonoBehaviour
                 result.Add(new DeepSeekMessage
                 {
                     role = "tool",
-                    content = $"已记录本次升级选择：{choice}（{UpgradeChoiceName(choice)}），系统会立刻生效。",
+                    content = $"已记录本次升级选择：{choice}（{UpgradeChoiceName(choice)}）。",
                     tool_call_id = call != null ? call.id : ""
                 });
             }
@@ -679,6 +679,8 @@ public class AIAgent : MonoBehaviour
     public async Task<UpgradeChoiceResult> UpgradeChoiceRequestAsync(int stage)
     {
         UpgradeChoiceResult result = new UpgradeChoiceResult();
+        // 已出局就不再询问：死亡时道具栈被清空，空槽反而最多、升级攒得最快，不拦的话会对着死者再演一场
+        if (deadStages.Contains(stage)) return result;
         CharacterCard card = cards.Find(c => c.position == stage);
         if (card == null) return result;
 
@@ -826,7 +828,7 @@ public class AIAgent : MonoBehaviour
         UpdateSoloState();
 
         if (card != null) return RequestLastWordsAsync(card, stage, killerStage);
-        return Task.FromResult("无言的告别");
+        return Task.FromResult("");
     }
 
     /// <summary>场上只剩一个阵营时返回那个阵营；否则返回 -1。</summary>
@@ -928,8 +930,8 @@ public class AIAgent : MonoBehaviour
             DeepSeekRequest copy = card.request.DeepCopy();
             if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
             copy.messages.Add(new DeepSeekMessage("user", final
-                ? "全场只剩你一个阵营，你是最后的赢家。说你的获奖感言，25字以内，只回复感言本身，不要调用工具，不要用括号，不要写动作描写。"
-                : "场上只剩你一个阵营，其他人都出局了。说一句宣告，25字以内，只回复这句话本身，不要调用工具，不要用括号，不要写动作描写。"));
+                ? "全场只剩你一个阵营，你是最后的赢家。说你的获奖感言，15字以内，只回复感言本身，不要调用工具，不要用括号，不要写动作描写。"
+                : "场上只剩你一个阵营，其他人都出局了。说一句宣告，15字以内，只回复这句话本身，不要调用工具，不要用括号，不要写动作描写。"));
             copy.tools = null;
             copy.tool_choice = null;
 
@@ -985,13 +987,14 @@ public class AIAgent : MonoBehaviour
 
     private async Task<string> RequestLastWordsAsync(CharacterCard card, int stage, int killerStage)
     {
-        string words = "无言的告别";
+        string words = "";
+        string killerName = killerStage > 0 ? GetStageName(killerStage) : "不明攻击";
         CapturePause.Pause();
         try
         {
             DeepSeekRequest copy = card.request.DeepCopy();
             if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
-            copy.messages.Add(new DeepSeekMessage("user", $"你刚刚被{killerStage}号阵营击杀。留下你的最后一句话，20字以内，表现的符合人设同时可以难受虚弱一点，如：“可恶啊”、“额啊”、“为什么...”。"));
+            copy.messages.Add(new DeepSeekMessage("user", $"你刚刚被{killerName}击杀。留下你的最后一句话，15字以内，表现的符合人设同时可以难受虚弱一点，如：“可恶啊”、“额啊”、“为什么...”。"));
             copy.tools = null;
             copy.tool_choice = null;
 
@@ -1013,19 +1016,19 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[遗言] stage {stage} 请求已发送");
             words = await tcs.Task;
             words = ExtractEmotion(words, out _, out _).Trim();   // 展示用文字里不保留 [emo:xxx]
-            if (string.IsNullOrWhiteSpace(words)) words = "无言的告别";
-            InformGetter.StageSpeech(stage, words);
+            if (!string.IsNullOrWhiteSpace(words)) InformGetter.StageSpeech(stage, words);
         }
         catch (Exception e)
         {
             Debug.LogError($"[遗言] stage {stage} 请求异常：{e}");
-            words = "无言的告别";
-            InformGetter.StageSpeech(stage, words);
         }
         finally
         {
             CapturePause.Resume();
         }
+
+        // 没拿到遗言就不显示任何东西：不做兜底文案（飘字与中央列表都不出现）
+        if (string.IsNullOrWhiteSpace(words)) return "";
 
         Debug.Log($"[遗言] stage {stage} 尝试 Say：{words}");
         try
@@ -1178,18 +1181,21 @@ public class AIAgent : MonoBehaviour
 - **领土：** 子弹和大球携带数值，将等量数值转化为地图上的己方领土；数值耗尽后消失。
 - **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回，成堆的子弹也能把它推开、改变它的路线。
 - **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球（挡不住穿甲弹），不阻挡己方。敌方护盾的当前大小不再是公开信息。大球是一次性撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开）。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔。每次撞击都会扣掉等量盾值，所以盾被撞一次基本就碎了。
-- **炮塔：** 被敌方攻击有效命中即**立即死亡**，该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
+- **炮塔：** 被敌方攻击有效命中即**立即死亡**（护盾强化后的无敌期除外），该阵营随之**出局**：不再有行动回合、领土判定为 0，残余的弹珠/道具/子弹会变成该阵营的大球留在场上。
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
+- **道具转向：** 用带瞄准目标的道具（传了 target_guid 或 aim_x/aim_y）时，炮塔会**直接转向**该方向再开火。
 - **移动：** 炮塔可以移动（用 move_turret），**每次移动固定消耗 @MOVE_ENERGY_COST@ 点升级能量**（固定单次扣除、与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动）。移动不会主动广播你的新位置，但如果你正好落进别人的移动视野截图范围里，他可能直接看到你。
+  - 移动速度 0.25 单位/秒：走满基础 2 单位要 8 秒；炮塔强化到 5 级时走满 12 单位要 48 秒。走多远就暴露多久。
+  - **移动消耗的能量与空槽升级共用同一个池子**：走一次就推迟下一次升级，反之攒着能量不动就能更快升级。
 - **移动要谨慎——距离是上限，不是目标：**
   - 走多远由你自己填，**没要求你每次都走满「最大移动距离」**。盲走满距离最容易一头送进未知区域、甚至正好停在别人身上；没把握就走短一点，剩下的距离留给下次。
   - **先预览、再确认**：预览会给出目标点、实际距离（超出上限会被夹）、是否越过地图边界、本次扣多少能量，而且**预览不扣能量、炮塔也不会动**——可以放心试算几个方向和距离，比好了再 confirm。
   - 确认前先自己核对安全性：①**预览附带的视野截图**里你周围一圈有什么（那正是你落点附近的地面）；②情报里的「各炮塔初始位置」（四角出发，之后不再更新）；③历次**撞击情报**反推出的敌方大致方位。注意对手也会移动，任何目标点都可能已经有人，别把初始位置当成全部。
   - 目标点靠近某人的初始位置、或落在撞击情报指出的方位上时，**换方向或缩短距离**，别赌对方已经走了。两个炮塔重叠时你不会被弹开、也不会自动停下（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——所以「撞上去」没有任何安全网。
   - 移动途中还能再走一次预览 + confirm 改道，但**改道算新的一次移动、再扣一次能量**。所以「一次走短一点、多走几次」是拿能量换安全，按局势自己权衡。
-- **胜负：** 成为最后存活的一方、并把领土推到 98%（系统的结束判定）才算赢；只剩你一个阵营后，还要把场上敌方游离的大球和子弹清掉。
-- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、半径约最大移动距离 0.6 倍的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见（图外的黑区没有信息）。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，系统会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
+- **胜负：** 成为最后存活的一方、并把领土推到 98% 才算赢；只剩你一个阵营后，还要把场上敌方游离的大球、穿甲弹和子弹清掉。
+- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、半径约最大移动距离 0.6 倍的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见（图外的黑区没有信息）。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，情报里会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
 
 ## 三、弹珠与资源
 - 每队初始拥有 @MARBLE_COUNT@ 个弹珠。
@@ -1201,11 +1207,11 @@ public class AIAgent : MonoBehaviour
 - 道具按获得顺序进入武器栏；超过当前可持有数量时，从最新获得的道具开始溢出并立即生效。
 
 ## 五、空槽升级
-每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择（不占用行动轮），你只能三选一：
+每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择，你只能三选一：
 1. **额外弹珠：** 立即生成并发射一枚你的新弹珠，增强长期弹珠资源与倍乘收益。
-2. **炮塔强化：** 炮塔后坐力提升，子弹显示半径变大、命中大球时的动量冲击更强，自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2）。可叠加。
-3. **护盾强化：** 护盾破碎后炮塔进入无敌时间，无视敌方子弹与大球伤害。可叠加。
-每次升级完成后，下一次升级所需值翻倍。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
+2. **炮塔强化：** 子弹显示半径变大、**击中大球时把它推得更远**（霰弹这类散射子弹同样受益），自动护卫极限转速翻倍（常态转速不变），最大移动距离提升（基础 2 单位，每级再 +2），道具瞄准误差每级减半（15°→7.5°→3.75°）。可叠加。
+3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（每级 2 秒，期间受到的伤害全部归零，穿甲弹同样无效）。可叠加。
+每次升级完成后，下一次升级所需值 ×@UPGRADE_COST_GROWTH@。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
 注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
 
 ## 六、道具
@@ -1285,9 +1291,11 @@ public class AIAgent : MonoBehaviour
             int marbleCount = MarbleManager.Instance != null ? MarbleManager.Instance.initialMarbleCount : 3;
             string delayText = Instance != null ? Instance._cycleInterval.ToString("0.#") : "0";
             string moveCostText = MarbleManager.Instance != null ? MarbleManager.Instance.moveEnergyCost.ToString("0.#") : "50";
+            string upgradeGrowthText = MarbleManager.Instance != null ? MarbleManager.Instance.upgradeCostGrowth.ToString("0.##") : "2";
             string text = world.Replace("@MARBLE_COUNT@", marbleCount.ToString())
                 .Replace("@INFO_DELAY@", delayText)
-                .Replace("@MOVE_ENERGY_COST@", moveCostText);
+                .Replace("@MOVE_ENERGY_COST@", moveCostText)
+                .Replace("@UPGRADE_COST_GROWTH@", upgradeGrowthText);
 
             return $"{text}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。";
         }
@@ -2136,7 +2144,7 @@ public class AIAgent : MonoBehaviour
             {
                 noToolReminderSent = true;
                 history.Add(new DeepSeekMessage("user",
-                    $"[行动提醒] 你已经连续 {roundsWithoutTool} 个系统录制回合没有调用工具。请尽快使用工具采取实际游戏行动，不要只发言或思考。注意：道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。"));
+                    $"[行动提醒] 你已经连续 {roundsWithoutTool} 轮没有调用工具。请尽快使用工具采取实际游戏行动，不要只发言或思考。注意：道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。"));
                 Debug.LogWarning($"[AIAgent] {name} 连续 {roundsWithoutTool} 个系统回合未调用工具，已追加行动提醒");
             }
         }
@@ -2144,7 +2152,7 @@ public class AIAgent : MonoBehaviour
             "[格式提醒] 检测到你上次的回复里带了中文或英文括号。下次回复禁止使用任何括号，请严格遵守：\n" +
             "1. 纯文本 + emoji，禁用 markdown，不使用括号，不要动作描写。\n" +
             "2. 别露内心戏，别露你的情报。\n" +
-            "3. 夸张化地沉浸在角色中，字数限制在 25 字。";
+            "3. 夸张化地沉浸在角色中，字数限制在 15 字。";
 
         private static readonly char[] ParenthesisChars = { '（', '）', '(', ')' };
 

@@ -167,6 +167,9 @@ public class MarbleManager : MonoBehaviour
     /// </summary>
     IEnumerator AIUpgradeSequence(int stage)
     {
+        // 已出局不再走升级流程：死亡时道具栈被清空、空槽反而最多，不拦就会对着死者再演一场升级选择
+        if (WhisperManager.IsDead(stage)) yield break;
+
         if (AIAgent.Instance == null)
         {
             ApplyUpgradeChoice(stage, UpgradeChoice.Marble);

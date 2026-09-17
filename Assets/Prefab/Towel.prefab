@@ -311,7 +311,7 @@ MonoBehaviour:
   turretUpgraded: 0
   shieldUpgradeOwned: 0
   shieldBreakInvincibleTime: 2
-  upgradedBulletRadiusScale: 1.2
+  upgradedBulletRadiusScale: 1.5
   upgradedBulletImpactScale: 1.6
   invincibleBlink: 1
   invincibleBlinkSpeed: 3

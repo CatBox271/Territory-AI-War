@@ -132,6 +132,30 @@ public class BulletManager : MonoBehaviour
         return count;
     }
 
+    /// <summary>
+    /// 某阵营阵亡时收掉它还在飞的子弹，返回这些子弹剩余数值的总和（调用方按"残余子弹变成一颗大球"结算）。
+    /// 子弹的 value 本来就是这一发还剩多少，加总即该阵营此刻还在场上的全部弹量。
+    /// </summary>
+    public HugeInt CollectStageBullets(int stage)
+    {
+        if (!bullets.IsCreated) return HugeInt.Zero;
+
+        HugeInt total = HugeInt.Zero;
+        for (int i = 0; i < MAX_BULLETS; i++)
+        {
+            var b = bullets[i];
+            if (b.alive == 0 || b.stage != stage) continue;
+
+            if (b.value > 0) total += new HugeInt(b.value);
+            b.alive = 0;
+            b.value = 0;
+            b.position = float2.zero;
+            b.oldPosition = float2.zero;
+            bullets[i] = b;
+        }
+        return total;
+    }
+
     public void DebugStats()
     {
         int alive = 0;

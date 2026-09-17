@@ -378,6 +378,13 @@ public class InformGetter : MonoBehaviour
             builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append(", "); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append("]，状态: "); builder.Append(self.MoveStateText);
+            // 无敌倒计时：情报本身有一轮（@INFO_DELAY@ 秒）的滞后，剩余时间不足这个滞后的就别报了——报过去也已经过期。
+            const float InvincibleReportMinSeconds = 7f;
+            float invincibleLeft = self.InvincibleRemaining;
+            if (invincibleLeft > InvincibleReportMinSeconds)
+            {
+                builder.Append("，无敌剩余 "); builder.Append(invincibleLeft.ToString("0.#")); builder.Append(" 秒");
+            }
             builder.AppendLine();
         }
         builder.AppendLine("(只有自己的位置是实时的。敌方炮塔会移动：近处靠 move_turret 预览附带的视野截图直接看，更远处只能靠撞击情报反推。)");
@@ -413,9 +420,9 @@ public class InformGetter : MonoBehaviour
     #endregion
 
     #region 终局提示
-    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球和子弹清掉，再把领土刷到 98%，这局才会结束；别在最后被反杀。";
+    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球、穿甲弹和子弹清掉，再把领土刷到 98%，这局才会结束；别在最后被反杀。";
 
-    /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球；判据同大球撞击预警。</summary>
+    /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球或穿甲弹；判据同大球撞击预警。</summary>
     public static bool HasEnemyBigBall(int stage)
     {
         foreach (var kv in Oitems)
@@ -424,7 +431,9 @@ public class InformGetter : MonoBehaviour
 
             foreach (ItemType item in kv.Value)
             {
-                if (item.description == "大球" && item.item != null) return true;
+                // 穿甲弹也是"带数值、还在场上飞"的弹体（BallPainter），终局清场必须一起算，
+                // 否则可能在被它命中的前一刻判定游戏结束。
+                if ((item.description == "大球" || item.description == "穿甲") && item.item != null) return true;
             }
         }
         return false;

@@ -465,6 +465,17 @@ public class Towel : MonoBehaviour, IStageValue
             yield return new WaitForSeconds(0.2f);
         }
 
+        // 还在飞的子弹：收掉并结算成一颗大球（和弹珠/道具同口径）
+        if (BulletManager.Instance != null)
+        {
+            HugeInt bulletsValue = BulletManager.Instance.CollectStageBullets(stage);
+            if (bulletsValue > 0)
+            {
+                SpawnBigBall(bulletsValue);
+                yield return new WaitForSeconds(0.2f);
+            }
+        }
+
         if (MarbleManager.Instance != null)
             MarbleManager.Instance.OnTeamDeath(stage);
 
