@@ -40,7 +40,7 @@
 - **回复校验**：非开局轮由 AIRequest.ValidateAndMaybeRetry 拦截（无括号、无 [skip]、有思考标记），最多重试 3 次；括号违规额外在 history 追加提醒
 - **大球撞击预警**：`InformGetter.AppendBallImpactWarning` 对每个敌方大球做轨迹推演（步长 0.02s、窗口 12s：直线运动 + 地图边界反弹 + 敌方护盾镜面反弹；同队盾无碰撞跳过），输出"预计 t 秒后第一次撞上你的护盾"，含球/盾直径与 guid
 - **武器栏 UI**：WeaponsDisplayer 每阵营两套 UIWeaponItem 实例——5 个固定槽实例只显示锁定/倒计时，另 5 个独立道具池实例跟着 PropEntry.id 走（不是槽位换皮）：使用道具后该格播消失动画，其余道具图标用位移动画（moveDuration）滑到前槽，新道具从池取空闲实例摆到目标槽播入场。PropEntry.id 是运行时唯一指纹；两套实例互不抢占
-- **遗言**：Towel.Die → AIAgent.OnStageDeathAsync（击杀横幅 + 遗言请求；**没有超时兜底**，请求失败或回复为空就不显示遗言）→ 死亡释放弹珠/道具/残余子弹为大球（子弹是收掉后合并成一颗球；**已知问题：释放弹珠时没按阵营过滤，会把别人的弹珠也变成自己的球**，见 `Towel.DieSequence`）
+- **遗言**：Towel.Die → AIAgent.OnStageDeathAsync（击杀横幅 + 遗言请求；**没有超时兜底**，请求失败或回复为空就不显示遗言）→ 死亡释放弹珠/道具/残余子弹为大球（子弹是收掉后合并成一颗球）
 - **HugeInt**：指数形式大数（2^n），ToShortString 显示
 - **存档**：SLManager.ExportToJson/ImportFromJson，CharacterCard 存 `Characters/<名字>`（含 request.messages 即 history）
 - **游戏结束**：GameEndMonitor 定期扫描 TerritoryCanvas 领土网格，某阵营涂满整图 → 停 AI 循环、停录制、时间冻结（可配退出）
