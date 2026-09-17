@@ -40,16 +40,55 @@ public class ShieldSlow : MonoBehaviour
         for (int i = 1; i < 5; i++)
         {
             if (i == stageValue.stage) continue;
-            if (!Towel.AllTowel.TryGetValue(i, out Towel t)) continue;
-            Transform tf = t.transform.GetChild(0);
-            shields[i] = new sv(tf.GetComponent<IStageValue>(), tf);
+            Transform tf = FindShieldTransform(i); // 统一走带校验的查找，炮塔缺失时不留脏引用
+            if (tf == null) continue;
+            IStageValue svValue = tf.GetComponent<IStageValue>();
+            if (svValue == null) continue;
+            shields[i] = new sv(svValue, tf);
         }
     }
+    /// <summary>
+    /// shields 里缓存的是各阵营炮塔子物体的 Transform，而炮塔被淘汰时会 Destroy 掉，
+    /// 缓存对象会变成"已销毁"（MissingReferenceException）。所以每次取用前都重新验证：
+    /// 已成 null 就查一遍 Towel.AllTowel，取不到就从字典里删掉。
+    /// </summary>
+    private bool TryGetShield(int stage, out sv shield)
+    {
+        shield = null;
+        if (!shields.TryGetValue(stage, out sv cached)) return false;
+
+        if (cached.tf == null) // Unity 的 == 能正确识别"已销毁"
+        {
+            cached.tf = FindShieldTransform(stage);
+            if (cached.tf == null)
+            {
+                shields.Remove(stage);
+                return false;
+            }
+            cached.value = cached.tf.GetComponent<IStageValue>();
+            if (cached.value == null)
+            {
+                shields.Remove(stage);
+                return false;
+            }
+        }
+        shield = cached;
+        return true;
+    }
+
+    /// <summary>按阵营号取炮塔子物体的 Transform；查不到或没子物体时返回 null。</summary>
+    private static Transform FindShieldTransform(int stage)
+    {
+        if (!Towel.AllTowel.TryGetValue(stage, out Towel t) || t == null) return null;
+        if (t.transform.childCount <= 0) return null;
+        return t.transform.GetChild(0);
+    }
+
     private void FixedUpdate()
     {
         for (int i = 1; i < 5; i++)
         {
-            if (!shields.TryGetValue(i, out sv shield)) continue;
+            if (!TryGetShield(i, out sv shield)) continue;
             if (Vector3.Distance(transform.position, shield.tf.position) <= shield.tf.lossyScale.x)
             {
                 Cost(shield.value);
