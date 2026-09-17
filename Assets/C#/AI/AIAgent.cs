@@ -1937,12 +1937,25 @@ public class AIAgent : MonoBehaviour
             return result;
         }
 
-        private static readonly List<string> 游戏关键词 = new()
+        // 行为检查的预筛关键词：只要本轮发言里出现任意一个就交给检查模型。
+        // 武器名字跟着 WeaponKind 枚举现算（BuildGameKeywords），以后新增武器不用再手改这里。
+        private static readonly List<string> 游戏关键词 = BuildGameKeywords();
+
+        private static List<string> BuildGameKeywords()
         {
-            "大球", "球", "护盾", "盾", "子弹", "弹药", "霰弹", "扫射", "穿甲", "道具", "武器",
-            "炮塔", "瞄准", "移动", "位置", "撞击", "涂", "领土", "弹珠", "升级",
-            "攻击", "打", "轰", "推", "顶", "清", "用掉"
-        };
+            List<string> list = new()
+            {
+                "球", "盾", "子弹", "弹药", "道具", "武器",
+                "炮塔", "瞄准", "移动", "位置", "撞击", "涂", "领土", "弹珠", "升级",
+                "攻击", "打", "轰", "推", "顶", "清", "用掉"
+            };
+            foreach (WeaponKind kind in MapConfig.AllConcreteWeapons)
+            {
+                string weaponName = kind.ToString();
+                if (!list.Contains(weaponName)) list.Add(weaponName);
+            }
+            return list;
+        }
         /// <summary>
         /// 行为检查：把本轮 content 与工具调用交给 thinking disabled 的 flash 模型判断。
         /// 返回“说了要做但没调用”的工具名列表。

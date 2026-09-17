@@ -504,8 +504,8 @@ public class Towel : MonoBehaviour, IStageValue
         WeaponKind kind = prop.item;
         if (kind == WeaponKind.任意)
         {
-            // 随机池与 MapConfig.ExecutePropEffect 里【任意】的随机口径一致（0~3：霰弹/扫射/护盾/大球）
-            kind = (WeaponKind)Random.Range(0, 4);
+            // 和正常使用【任意】同一个随机口径：所有实体武器（跟着 WeaponKind 枚举走，新增武器自动进池）
+            kind = MapConfig.RandomConcreteWeapon();
         }
         ReleaseWeaponOnDeath(kind, prop.value);
     }

@@ -170,6 +170,35 @@ public class MapConfig : MonoBehaviour
             ExecutePropEffect(top.stage, top.item, top.value);//溢出（内部触发OnPropPop）
         }
     }
+    /// <summary>
+    /// 所有"实体武器"（不含【任意】本身）。**从枚举现算** —— 以后往 WeaponKind 里加武器，
+    /// 【任意】的随机、【任意】的工具可选值、weapon 参数的文本解析都会自动带上，不用再手改列表。
+    /// </summary>
+    public static readonly WeaponKind[] AllConcreteWeapons = BuildConcreteWeapons();
+
+    private static WeaponKind[] BuildConcreteWeapons()
+    {
+        List<WeaponKind> list = new List<WeaponKind>();
+        foreach (WeaponKind kind in (WeaponKind[])Enum.GetValues(typeof(WeaponKind)))
+            if (kind != WeaponKind.任意) list.Add(kind);
+        return list.ToArray();
+    }
+
+    /// <summary>随机一种实体武器：【任意】的实际触发、以及阵亡时释放【任意】都用它。</summary>
+    public static WeaponKind RandomConcreteWeapon()
+    {
+        if (AllConcreteWeapons.Length == 0) return WeaponKind.大球;
+        return AllConcreteWeapons[Random.Range(0, AllConcreteWeapons.Length)];
+    }
+
+    /// <summary>实体武器的名字列表（工具的 @enum 与提示文案用，跟着枚举走）。</summary>
+    public static List<string> ConcreteWeaponNames()
+    {
+        List<string> names = new List<string>();
+        foreach (WeaponKind kind in AllConcreteWeapons) names.Add(kind.ToString());
+        return names;
+    }
+
     public void ExecutePropEffect(int stage, WeaponKind itemName, HugeInt val, ItemType aim_pos = null, WeaponKind? anyChoice = null, float aimAngleError = 0f)//anyChoice 只对【任意】生效；null=原来的随机
     {
         if (!Towel.AllTowel.TryGetValue(stage, out var towel)) return;
@@ -188,10 +217,10 @@ public class MapConfig : MonoBehaviour
         WeaponKind effectKind = itemName;
         if (effectKind == WeaponKind.任意)
         {
-            // AI 指定了具体武器就用指定的；否则维持原来的随机逻辑。
-            effectKind = anyChoice ?? (WeaponKind)Random.Range(0, 4);
+            // AI 指定了具体武器就用指定的；否则随机一种实体武器（含穿甲，以及以后新增的武器）
+            effectKind = anyChoice ?? RandomConcreteWeapon();
             if (effectKind == WeaponKind.任意)
-                effectKind = (WeaponKind)Random.Range(0, 4);
+                effectKind = RandomConcreteWeapon();
         }
 
         ExecuteWeaponEffect(effectKind, towel, val);

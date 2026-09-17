@@ -23,7 +23,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = UsePropToolName,
-                description = "使用自己阵营武器栏中指定格子的道具。index 从 1 开始：1=第 1 格，2=第 2 格，以此类推。需要朝目标射击时，优先传 target_guid（场上信息里的 guid）；没有 guid 时传 aim_x 和 aim_y 指定地图世界坐标。使用成功后道具立即消耗并生效。没有道具或 index 超过当前持有数量时不要调用。如果该道具是【任意】，可以传 weapon 从霰弹、扫射、护盾、大球里指定实际触发的武器；不传则随机。一次使用多个道具时，请按武器栈从后往前（高 index  低 index）依次调用，减少槽位反复移动。",
+                description = "使用自己阵营武器栏中指定格子的道具。index 从 1 开始：1=第 1 格，2=第 2 格，以此类推。需要朝目标射击时，优先传 target_guid（场上信息里的 guid）；没有 guid 时传 aim_x 和 aim_y 指定地图世界坐标。使用成功后道具立即消耗并生效。没有道具或 index 超过当前持有数量时不要调用。如果该道具是【任意】，可以传 weapon 从 " + string.Join("、", MapConfig.ConcreteWeaponNames()) + " 里指定实际触发的武器；不传则随机。一次使用多个道具时，请按武器栈从后往前（高 index  低 index）依次调用，减少槽位反复移动。",
                 parameters = new
                 {
                     type = "object",
@@ -43,8 +43,8 @@ public class ReactionSystem : MonoBehaviour, Itool
                             new
                             {
                                 type = "string",
-                                @enum = new List<string> { "霰弹", "扫射", "护盾", "大球" },
-                                description = "仅当目标道具是【任意】时生效：指定实际要触发的武器，可选值：霰弹、扫射、护盾、大球。其他道具不要传。"
+                                @enum = MapConfig.ConcreteWeaponNames(),
+                                description = "仅当目标道具是【任意】时生效：指定实际要触发的武器，可选值：" + string.Join("、", MapConfig.ConcreteWeaponNames()) + "。其他道具不要传。"
                             }
                         },
                         {
@@ -375,7 +375,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             if (!string.IsNullOrWhiteSpace(args.weapon))
             {
                 if (!TryParseWeapon(args.weapon, out WeaponKind choice))
-                    return new ToolOutcome($"使用道具失败：weapon 参数无效：{args.weapon}。可选值：霰弹、扫射、护盾、大球。");
+                    return new ToolOutcome($"使用道具失败：weapon 参数无效：{args.weapon}。可选值：{string.Join("、", MapConfig.ConcreteWeaponNames())}。");
                 anyChoice = choice;
             }
         }
@@ -757,13 +757,13 @@ public class ReactionSystem : MonoBehaviour, Itool
         weapon = WeaponKind.任意;
         if (string.IsNullOrWhiteSpace(text)) return false;
 
+        // 不写死列表：凡是能对上某个"实体武器"名字的就算有效（含穿甲，以及以后新增的武器）
         string t = text.Trim();
-        if (t == "霰弹") weapon = WeaponKind.霰弹;
-        else if (t == "扫射") weapon = WeaponKind.扫射;
-        else if (t == "护盾") weapon = WeaponKind.护盾;
-        else if (t == "大球") weapon = WeaponKind.大球;
-        else return false;
-        return true;
+        foreach (WeaponKind kind in MapConfig.AllConcreteWeapons)
+        {
+            if (kind.ToString() == t) { weapon = kind; return true; }
+        }
+        return false;
     }
 
     private void OnDestroy()
