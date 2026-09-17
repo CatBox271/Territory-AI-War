@@ -67,6 +67,10 @@ public static class StageStyle
     /// <summary>
     /// 把一段可能很长的思考裁短。**保留换行**（AI 的思考里本来就有分段），
     /// 只把 \r\n 归一、连续空行压成一个，最后超长才截断加省略号。
+    ///
+    /// 截断位置取「最后一个句末标点 / 换行」（>= 上限的一半），
+    /// 不这么干的话永远是硬切在句子中间，观众看到的最后一句是断的 —— 比截短本身更难读。
+    /// 实在找不到句末才退回硬切。
     /// </summary>
     public static string Clamp(string text, int max)
     {
@@ -74,8 +78,20 @@ public static class StageStyle
         text = text.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
         while (text.Contains("\n\n\n"))
             text = text.Replace("\n\n\n", "\n\n");
-        if (text.Length <= max) return text;
-        return text.Substring(0, max) + "…";
+        if (max <= 0 || text.Length <= max) return text;
+
+        int cut = LastSentenceEnd(text, max);
+        return text.Substring(0, cut).TrimEnd() + "…";
+    }
+
+    /// <summary>在 text 的前 max 个字符里找最后一个句末标点 / 换行的位置（找不到就返回 max）。</summary>
+    private static int LastSentenceEnd(string text, int max)
+    {
+        const string stops = "。！？…—；\n";
+        int floor = Mathf.Max(1, max / 2);
+        for (int i = max - 1; i >= floor; i--)
+            if (stops.IndexOf(text[i]) >= 0) return i + 1;
+        return max;
     }
 }
 
@@ -318,8 +334,12 @@ public abstract class StoryScene
     /// 思考条正文：先一行小标题（带是谁在思考），再内容。拿不到思考过程时给一句说明，而不是留一块空白。
     /// 三场演出都用它，保证「先出思考、再开口」的观感一致。
     /// 字号必须走 StageStyle.SizeTag（参数是世界单位高度）——TMP 的绝对 &lt;size&gt; 是点数，1 点 = 0.1 世界单位。
+    ///
+    /// max 是**兜底**上限，不是常规裁切：思考条的框在升级那场是 13 × 3.8 世界单位、字号 0.3（≈33px，行高约 1.2 倍），
+    /// 去掉内边距后大约能放 10 行 × 30 字，所以 320 字以内基本都装得下。
+    /// 原来这里是 140，正常两段思考都会被平白砍掉一截（就是「平白无故多个省略号」的来源）。
     /// </summary>
-    protected static string ThinkBody(string thinking, string owner = null, int max = 140)
+    protected static string ThinkBody(string thinking, string owner = null, int max = 320)
     {
         string head = ThinkHead(owner);
         if (string.IsNullOrWhiteSpace(thinking))
