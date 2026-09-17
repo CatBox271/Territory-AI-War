@@ -98,7 +98,9 @@ public static class WhisperManager
             return "悄悄话失败：升级能量不足（本次需要 " + energyCost.ToString("0.#")
                 + "，当前 " + mm.GetUpgradeEnergy(sender).ToString("0.#") + "）。能量来自空槽升级进度，会随时间积累。";
 
-        int? previousCooldownRound = lastWhisperRound.TryGetValue(sender, out int prev) ? prev : null;
+        // 开局就算"在冷却中"：没记录过就按第 0 回合算，所以第一发要等到第 cooldownRounds 回合。
+        // 退款也按这个基线还原（见 TryAcquireCooldown 的注释）。
+        int? previousCooldownRound = lastWhisperRound.TryGetValue(sender, out int prev) ? prev : 0;
         if (!TryAcquireCooldown(sender, currentRound, cooldownRounds, out string cooldownError))
             return cooldownError;
 
@@ -255,7 +257,7 @@ public static class WhisperManager
             }
 
             WhisperRequest newestInCycle = cycleEdges[0];
-            CompleteRequest(oldest, "繁忙中请等待通话调配：你发送的悄悄话已被系统调配转达，本次未消耗使用机会与升级能量，下一回合可继续使用。", refundCooldown: true);
+            CompleteRequest(oldest, "繁忙中请等待通话调配：你发送的悄悄话已被系统调配转达，本次未消耗使用机会与升级能量。", refundCooldown: true);
 
             // 转投：把最早那条悄悄话改为 A→C 的一次单向传达（不占用新的等待边），
             // 排在 C 已有的 B→C 等待之后，实现 C→A、B→C、A→C 的顺序。
@@ -309,7 +311,11 @@ public static class WhisperManager
             lastWhisperRound[sender] = currentRound;
             return true;
         }
-        if (lastWhisperRound.TryGetValue(sender, out int last) && currentRound - last < cooldownRounds)
+
+        // 开局就在冷却中：没记录过时按"第 0 回合用过"算（而不是可以立刻用），
+        // 于是第一发悄悄话要等到第 cooldownRounds 回合。
+        int last = lastWhisperRound.TryGetValue(sender, out int v) ? v : 0;
+        if (currentRound - last < cooldownRounds)
         {
             error = $"悄悄话失败：冷却中，每{cooldownRounds}回合只能使用一次，还需等待 {cooldownRounds - (currentRound - last)} 回合。";
             return false;

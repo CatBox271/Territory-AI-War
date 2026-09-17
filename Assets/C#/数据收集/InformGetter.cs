@@ -378,7 +378,7 @@ public class InformGetter : MonoBehaviour
                 if (cfg != null && cfg.whisperEnergyCost > 0f)
                 {
                     builder.Append("，发一次悄悄话消耗 "); builder.Append(cfg.whisperEnergyCost.ToString("0.#"));
-                    builder.Append(" 能量(每 "); builder.Append(Mathf.Max(1, cfg.whisperCooldownRounds)); builder.Append(" 回合一次)");
+                    builder.Append(" 能量(每 "); builder.Append(Mathf.Max(1, cfg.whisperCooldownRounds)); builder.Append(" 回合一次，开局就在冷却中)");
                 }
             }
             builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
