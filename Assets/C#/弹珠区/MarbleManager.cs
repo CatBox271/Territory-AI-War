@@ -157,8 +157,11 @@ public class MarbleManager : MonoBehaviour
 
     /// <summary>
     /// useAI 模式下：询问 AI 选择升级，选择后执行对应升级。
-    /// 舞台演出可用时，整件事交给 UpgradeChoiceScene 演（三张选项卡 + 先思考再揭晓），
-    /// 演出播完再让升级真正生效 —— 这样炮塔升级的连线与飘字仍然留在战场上播。
+    /// 顺序固定为「**先请求 → 再开舞台 → 演完才让升级生效**」：
+    /// 请求在舞台没开的时候发（录制暂停，等待不进视频），结果回来再开 UpgradeChoiceScene 演「揭晓」，
+    /// 演出播完才 ApplyUpgradeChoice —— 这样炮塔升级的连线与飘字仍然留在战场上播。
+    /// 反过来（先开舞台、在演出里请求）会让演出撞上录制的暂停/恢复：非实时录制下 AVPro 的
+    /// ResumeCapture 会把 Time.timeScale 顶回 1，舞台还没播完战场就活了。
     /// </summary>
     IEnumerator AIUpgradeSequence(int stage)
     {
@@ -170,7 +173,17 @@ public class MarbleManager : MonoBehaviour
 
         if (StoryTeller.CanPlay)
         {
-            var scene = new UpgradeChoiceScene(stage);
+            Task<UpgradeChoiceResult> resultTask = AIAgent.Instance.UpgradeChoiceRequestAsync(stage);
+            while (!resultTask.IsCompleted)
+                yield return null;
+
+            UpgradeChoiceResult result = null;
+            if (resultTask.IsFaulted || resultTask.IsCanceled)
+                Debug.LogWarning($"[Upgrade] stage {stage} 升级选择请求失败，按 +1 弹珠演。{resultTask.Exception}");
+            else
+                result = resultTask.Result;
+
+            var scene = new UpgradeChoiceScene(stage, result);
             StoryTeller.Instance.Play(scene);
             while (!scene.Finished)
                 yield return null;

@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using UnityEngine;
 
 /// <summary>
@@ -11,11 +10,16 @@ using UnityEngine;
 ///   标题 + AI 名字从上方进场 → 立绘从左侧进场
 ///   → 三张选项卡并排从下方错开进场（每张卡中间写的就是这一项的收益）
 ///   → 底部思考条进场，先显示「思考中…」
-///   → 等 AIAgent 的两步选择请求回来 → 思考条换成真实思考内容
+///   → 思考条换成真实思考内容（结果由 MarbleManager 在**开舞台之前**请求好，演出里不再发请求）
 ///   → 选中的卡亮起、其余压暗 → 名字行变成「XX 选择了「YY」」→ 一起滑下去。
 ///
 /// 升级本身不在这里生效：演出播完后由 MarbleManager 读 Choice 再生效，
 /// 这样炮塔升级的连线与飘字仍然留在战场上播。
+///
+/// 顺序（必须守住）：**先请求 → 再开舞台 → 演完才让升级生效（连线特效）**。
+/// 演出里绝对不要再发 AI 请求：非实时录制下 AVPro 的 ResumeCapture 会把 Time.timeScale 顶回 1，
+/// 舞台还没播完战场就活了；而且请求期间录制是暂停的，舞台动画照样按真实时间在走却不进视频，
+/// 恢复录制时画面会跳一下。请求放在开舞台之前，整段演出才能被完整连续地录下来。
 /// </summary>
 public class UpgradeChoiceScene : StoryScene
 {
@@ -55,6 +59,8 @@ public class UpgradeChoiceScene : StoryScene
     }
 
     private readonly int owner;
+    /// <summary>开舞台**之前**就请求好的选择结果（null = 请求失败，按默认项演）。</summary>
+    private readonly UpgradeChoiceResult result;
     private readonly List<Option> options = new();
 
     /// <summary>AI 最终选的是哪一项：1 额外弹珠 / 2 炮塔强化 / 3 护盾强化。</summary>
@@ -62,9 +68,11 @@ public class UpgradeChoiceScene : StoryScene
     /// <summary>演出是否已播完（MarbleManager 用它决定什么时候让升级真正生效）。</summary>
     public bool Finished { get; private set; }
 
-    public UpgradeChoiceScene(int owner)
+    /// <summary>owner 的升级选择演出。result 必须是开舞台之前就请求好的结果（演出里不再发请求）。</summary>
+    public UpgradeChoiceScene(int owner, UpgradeChoiceResult result)
     {
         this.owner = owner;
+        this.result = result;
     }
 
     public override IEnumerator Play()
@@ -117,24 +125,15 @@ public class UpgradeChoiceScene : StoryScene
 
         s.StartCoroutine(s.SlideIn(face, StoryTeller.Direction.Left, StageStyle.Distance, StageStyle.In, 0f, new Vector2(0.9f, 0.9f)));
         yield return SlideInAll(s, entering);
-        s.Float(face, 0.08f, 3.2f);   // 立绘轻轻浮动：等 AI 的时候画面不至于像张死图
+        s.Float(face, 0.08f, 3.2f);   // 立绘轻轻浮动：揭晓之前画面不至于像张死图
         yield return s.WaitStage(StageStyle.Short);
 
-        // ---------- 问 AI ----------
-        // AIAgent 内部会暂停录制；舞台时钟靠 RealTimeUpdate 兜底，动画不会卡住。
-        int choice = 1;
-        string thinking = "";
-        AIAgent agent = AIAgent.Instance;
-        if (agent != null)
-        {
-            Task<UpgradeChoiceResult> task = agent.UpgradeChoiceRequestAsync(owner);
-            while (!task.IsCompleted) yield return s.WaitForCaptureUpdate();   // 等外部结果，不占用帧锁时钟
-            if (!task.IsFaulted && !task.IsCanceled && task.Result != null)
-            {
-                choice = task.Result.choice;
-                thinking = task.Result.thinking;
-            }
-        }
+        // ---------- 选择结果 ----------
+        // 请求在开舞台之前就发完了（MarbleManager.AIUpgradeSequence）：
+        // 演出里只负责「先出思考、再揭晓」。这里绝不能再去请求 AI ——
+        // 请求会暂停录制，恢复录制时 AVPro 会把 Time.timeScale 顶回 1，舞台还没播完战场就活了。
+        int choice = result != null ? result.choice : 1;
+        string thinking = result != null ? result.thinking : "";
 
         Choice = choice;
 

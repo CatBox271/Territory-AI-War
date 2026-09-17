@@ -91,6 +91,19 @@ public class StoryTeller : MonoBehaviour
         CapturePause.Capture.CaptureUpdate += CaptureUpdate;//在CapturePause.Capture里注册时钟
         _ = RealTimeUpdate();
     }
+
+    /// <summary>
+    /// 舞台开着 = 战场必须冻结。OpenScene 已经把 timeScale 压成 0，但外部还会把它解开：
+    /// 非实时录制下 AVPro 的 PauseCapture / ResumeCapture 会直接把 timeScale 写成 0 / 1
+    /// （插件里那句 TODO 自己都承认「不该假设恢复时是 1」）。升级选择 / 悄悄话这类请求都可能在
+    /// 舞台期间暂停一次录制，恢复录制时就会把冻结漏掉，演出没播完战场就活了。
+    /// 这里在舞台还开着的时候把 timeScale 压回 0；CloseScene 一进来 IsBackground 就变 false
+    /// （关场淡出过程中不再强制），所以不会和 ECloseScene 恢复时间打架。
+    /// </summary>
+    private void Update()
+    {
+        if (IsBackground && Time.timeScale != 0f) Time.timeScale = 0f;
+    }
     #endregion
 
     #region 时钟
