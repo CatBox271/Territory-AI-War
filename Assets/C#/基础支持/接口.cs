@@ -48,3 +48,12 @@ public interface IStageValue
         WhileBeHit(_stage, -_value);
     }
 }
+
+public interface IValueEditor
+{
+    public float value { get; set; }
+}
+public interface IStringGetter
+{ 
+    public string stringInfo { get; }
+}

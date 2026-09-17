@@ -102,9 +102,6 @@ public class MapConfig : MonoBehaviour
     public float PierceShieldSlowFactor = 0.5f;
     [Tooltip("离开护盾时的随机偏转角（±度）")]
     public float PierceExitDeflectAngle = 30f;
-    [Range(0.01f, 1f)]
-    [Tooltip("每次击杀炮塔后弹体数值的倍率（照 LifeGame：减半）")]
-    public float PierceKillCostRatio = 0.5f;
 
     [Header("Towel")]
     public int TowelDefaultBullets = 4096;

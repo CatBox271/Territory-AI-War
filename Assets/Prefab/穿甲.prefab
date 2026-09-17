@@ -168,6 +168,8 @@ GameObject:
   - component: {fileID: 6264478398640388796}
   - component: {fileID: 2128266677755943854}
   - component: {fileID: 1653908957261971525}
+  - component: {fileID: 660627040639354114}
+  - component: {fileID: 5312698872435066164}
   m_Layer: 8
   m_Name: "\u7A7F\u7532"
   m_TagString: Ball
@@ -326,8 +328,8 @@ MonoBehaviour:
       m_RotationOrder: 4
   SpeedTimes: 8
   TR: {fileID: 622875075528979609}
-  fastA: 0.1
-  slowA: 0.1
+  fastA: 0.01
+  slowA: 0.01
   hurt_fast_pause: 0.3
 --- !u!114 &2128266677755943854
 MonoBehaviour:
@@ -356,6 +358,38 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3f868d63d1b3e9d4abbe32b2a918a545, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  SlowTimes: 0
+  CostSpeed: 0.25
+  EffectIntensity: 0
+  OutRandom: 0
+  RandomSpeed: 3
+  rb: {fileID: 3767908013893368130}
+--- !u!114 &660627040639354114
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2741485188931532298}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 99e15e0b96a3e9141964b1e089a33dfd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ball: {fileID: 6264478398640388796}
+--- !u!114 &5312698872435066164
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2741485188931532298}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8564636f3edfa248ba300feca4407b9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ball: {fileID: 6264478398640388796}
 --- !u!1 &4278316083713829892
 GameObject:
   m_ObjectHideFlags: 0

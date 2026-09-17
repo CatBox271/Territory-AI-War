@@ -605,6 +605,11 @@ public class Towel : MonoBehaviour, IStageValue
         if (bp != null) bp.guid = ballItem.guid;
         InformGetter.AddItem(stage, ballItem);
     }
+    /// <summary>
+    /// 穿甲弹：实例化配置里的预制体，把 **MapConfig 上的穿甲口径**写进弹体，然后出膛。
+    /// 口径统一放在 MapConfig（预制体上只留贴图/Trail/SpeedCurve 这类固定参数），
+    /// 所以这里必须把 shield 交互与出膛速度刷进去，否则弹体就用预制体上的占位值。
+    /// </summary>
     public void SpawnShell(HugeInt val)
     {
         if (config.pierceShellPrefab == null) return;
@@ -616,16 +621,33 @@ public class Towel : MonoBehaviour, IStageValue
         {
             bp.stage = stage;
             bp.value = val;
+            bp.game_item_name = "穿甲弹";   // 伤害/撞击情报里的名字（和"大球"共用 BallPainter，靠它区分）
         }
+
+        // 穿盾口径：MapConfig → 弹体上的 ShieldSlow
+        var shell = ob.GetComponent<ShieldSlow>();
+        if (shell != null)
+        {
+            // 盾内速度倍率：ShieldSlow 会写 valueEditor.value（= BallPainter.SpeedTimes）× 这个值
+            shell.SlowTimes = config.PierceShieldSlowFactor;
+            // 每秒啃掉的护盾比例
+            shell.CostSpeed = config.PierceShieldDrainPercentPerSecond;
+            // 离开护盾时随机偏转 ±N 度（角度 <= 0 就当关掉）
+            shell.OutRandom = config.PierceExitDeflectAngle > 0f;
+            shell.RandomAngle = config.PierceExitDeflectAngle;
+        }
+
         var rb = ob.GetComponent<Rigidbody2D>();
         if (rb != null)
         {
-
-            rb.velocity = transform.up * bigBallSpeed;
+            // 出膛速度（原来是 bigBallSpeed，跟穿甲的配置口径不一致）。
+            // 注意 BallPainter 的持续速度 = SpeedCurve(value) × SpeedTimes，所以这个值只决定出膛瞬间，
+            // 之后会被曲线接管；要让配置真正决定飞行速度，得把 SpeedTimes 反算成 配置速度 / 曲线值。
+            rb.velocity = transform.up * config.PierceShellSpeed;
         }
 
         //InformGeter
-        var ballItem = new ItemType(ob.transform, "大球", bp, rb);
+        var ballItem = new ItemType(ob.transform, bp != null ? bp.game_item_name : "穿甲弹", bp, rb);
         if (bp != null) bp.guid = ballItem.guid;
         InformGetter.AddItem(stage, ballItem);
     }

@@ -409,9 +409,9 @@ public class AIAgent : MonoBehaviour
         if (lines.Count == 0) return;
 
         StoryTeller show = StoryTeller.Instance;
-        show.Play(new OpeningRulesScene());                 // 开场介绍（7/9/5/13/5/9 秒分镜）
-        show.Play(new OpeningTalkScene(lines));             // 角色开场白
-        show.Play(new GameStartBannerScene());              // 游戏正式开始
+        //show.Play(new OpeningRulesScene());                 // 开场介绍（7/9/5/13/5/9 秒分镜）
+        //show.Play(new OpeningTalkScene(lines));             // 角色开场白
+        //show.Play(new GameStartBannerScene());              // 游戏正式开始
         Debug.Log($"[开场演出] 已入队：开场介绍 + {lines.Count} 位角色 + 开始横幅。");
     }
 
@@ -1214,7 +1214,7 @@ public class AIAgent : MonoBehaviour
 - **扫射：** 将道具数值加入子弹储备，由炮塔持续释放，以炮塔朝向涂抹地面。
 - **护盾：** 将道具数值加入己方护盾。一定要及时补充——无盾被碰到即死，盾无论多小都能抵御一次大球。
 - **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。
-- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾不改变方向但会被拖慢、并持续啃掉盾值；撞到敌方炮塔本体即秒杀，击杀后弹体数值减半、可继续飞（能连杀）。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗与连杀。
+- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾不改变方向但会被拖慢、并持续啃掉盾值，离开护盾时方向会随机偏转；撞到敌方炮塔本体即秒杀。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗。
 - **任意：** 任选以上一种道具。
 
 ## 七、最重要的规则：信息延迟

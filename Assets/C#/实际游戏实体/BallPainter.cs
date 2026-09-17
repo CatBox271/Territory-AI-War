@@ -7,6 +7,7 @@ public class BallPainter : MonoBehaviour, IStageValue
     public Collider2D col;
     [field: SerializeField] public int stage { get; set; }
     public string guid = "";//场上注册时由 ItemType 分配，供伤害来源定位实体
+    public string game_item_name = "大球";
     public int hurtSourceStage { get; set; }
     public string hurtSourceGuid { get; set; }
     public string hurtSourceDesc { get; set; }
@@ -191,12 +192,12 @@ public class BallPainter : MonoBehaviour, IStageValue
             //确保不会出现贷款
             max = (max > value) ? value : max;
             HugeInt shieldBefore = sv.value;
-            HugeInt cost = sv.Hit(stage, max, guid, $"{stage}号阵营大球");
+            HugeInt cost = sv.Hit(stage, max, guid, $"{stage}号阵营{game_item_name}");
             if (cost > 0)
             {
                 if (spawnEffect) SpawnHitCrossEffect(cost, collision);
                 string otherGuid = sv is BallPainter bp ? bp.guid : "";
-                string otherDesc = sv is BallPainter ? $"{sv.stage}号阵营大球" : $"{sv.stage}号阵营实体";
+                string otherDesc = sv is BallPainter _bp ? $"{sv.stage}号阵营{_bp.game_item_name}" : $"{sv.stage}号阵营实体";
                 ((IStageValue)this).Hit(sv.stage, cost, otherGuid, otherDesc);
 
                 // 撞击情报：撞到敌方护盾/炮塔本体时，只告诉撞人的一方（撞的是谁、撞击点、护盾前后大小）

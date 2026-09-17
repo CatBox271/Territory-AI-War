@@ -7474,6 +7474,9 @@ MonoBehaviour:
     RelativePos: {x: 1, y: 2.19}
     Scale: 1.3
   EachPassRound: 1
+  moveSightEnabled: 1
+  moveSightRadiusFactor: 0.6
+  moveSightResolution: 512
 --- !u!1 &1054705958
 GameObject:
   m_ObjectHideFlags: 0
@@ -7774,7 +7777,6 @@ MonoBehaviour:
   GoPicture: {fileID: 5810617936237472422, guid: ff496b15fe90a2545baca0255b2e6188, type: 3}
   enableScenes: 1
   suppressLegacySpeech: 1
-  pauseBattleDuringScene: 1
   iconMarble: {fileID: 21300000, guid: d19990fb286069543acd9a517027ceff, type: 3}
   iconTurret: {fileID: 21300000, guid: 86678fe6bb271264994813f12f294e30, type: 3}
   iconShield: {fileID: 21300000, guid: 1aca725dc5954a848bfc66563f5733b9, type: 3}
@@ -12508,7 +12510,7 @@ MonoBehaviour:
   angleRange: {x: -90, y: 90}
   loop: 0
   active: 1
-  guardMode: 1
+  guardMode: 0
   guardRadius: 4
   guardUpdateInterval: 0.2
   guardCompute: {fileID: 0}
@@ -15995,7 +15997,7 @@ MonoBehaviour:
   ShotGunMaxVal: 1048576
   ShotGunBulletSpeed: 3.6
   NormalBulletSpeed: 3.6
-  pierceShellPrefab: {fileID: 2741485188931532298, guid: 8c063dd2face6fb4fba1d1a349754dbc, type: 3}
+  pierceShellPrefab: {fileID: 2741485188931532298, guid: 0bbf910a8fee622438a29fd993acab3b, type: 3}
   PierceShellSpeed: 8
   PierceShieldDrainPercentPerSecond: 0.25
   PierceShieldSlowFactor: 0.5
