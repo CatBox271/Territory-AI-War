@@ -280,10 +280,40 @@ public class ReactionSystem : MonoBehaviour, Itool
         return result;
     }
 
+    /// <summary>
+    /// Debug 用：每个阵营这一批工具调用各自的耗时（毫秒，系统时间）。
+    /// 4 张卡是并行请求的，所以按阵营分开存；AIAgent 在回合结束时 TakeToolTimings(stage) 取走并清空。
+    /// </summary>
+    private static readonly Dictionary<int, List<string>> toolTimings = new();
+
+    /// <summary>取走某阵营这段时间里记下的工具耗时（取完就清空）。</summary>
+    public static List<string> TakeToolTimings(int callStage)
+    {
+        if (toolTimings.TryGetValue(callStage, out List<string> list))
+        {
+            toolTimings.Remove(callStage);
+            return list;
+        }
+        return new List<string>();
+    }
+
+    private static void RecordToolTiming(int callStage, string toolName, double ms, bool ok)
+    {
+        if (!toolTimings.TryGetValue(callStage, out List<string> list))
+        {
+            list = new List<string>();
+            toolTimings[callStage] = list;
+        }
+        list.Add($"{toolName} {ms:0}ms{(ok ? "" : "（失败）")}");
+    }
+
     private async Task<DeepSeekMessage> DealToolCall(ToolCall call, int callStage, List<DeepSeekMessage> sights)
     {
         ToolOutcome outcome;
         bool movePreviewCreated = false;
+
+        // Debug 耗时：从进来到这一条 tool 回执拼完，含 whisper 等对方回话、含移动预览附带的截图
+        System.Diagnostics.Stopwatch toolWatch = System.Diagnostics.Stopwatch.StartNew();
 
         if (call == null)
         {
@@ -325,6 +355,11 @@ public class ReactionSystem : MonoBehaviour, Itool
         // 移动预览额外附一张炮塔视野截图：图片只能放在 user 消息里，
         // 先攒到 sights，等这一批 tool 消息都发完再统一追加（见 DealToolCallsAsync）。
         if (movePreviewCreated) AppendMoveSight(sights, callStage);
+
+        // Debug 耗时：到这里这一条工具（含 whisper 等回话、含刚附上的截图）就算完了
+        toolWatch.Stop();
+        RecordToolTiming(callStage, call?.function?.name ?? "（空调用）", toolWatch.Elapsed.TotalMilliseconds,
+            !string.IsNullOrEmpty(outcome.action));
 
         return new DeepSeekMessage
         {

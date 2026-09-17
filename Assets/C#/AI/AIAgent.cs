@@ -376,6 +376,9 @@ public class AIAgent : MonoBehaviour
         // 标签外的每轮补充消息（上一轮发言 + 存活状态 + 战况）：全场共用一条，不进情报标签所以不会被压缩
         string roundExtra = InformGetter.BuildRoundExtra();
 
+        // Debug 耗时：这一轮 4 张卡是并行跑的 —— 秒表**必须在建任务之前**起（RunCardAsync 一调用就会
+        // 同步跑到第一个 await，从那一刻各家就开始计时了），否则全轮会比最慢那家还短，看着对不上。
+        System.Diagnostics.Stopwatch roundWallWatch = System.Diagnostics.Stopwatch.StartNew();
         List<Task> tasks = new List<Task>();
         bool openingRound = _round == 0;
         openingRoundActive = openingRound;
@@ -406,6 +409,8 @@ public class AIAgent : MonoBehaviour
             EnterOpeningRetryPause();
         }
         if (tasks.Count > 0) await Task.WhenAll(tasks);
+        roundWallWatch.Stop();
+        CharacterCard.LogMergedRoundTiming(_round, roundWallWatch.Elapsed.TotalMilliseconds);
         openingRoundActive = false;
 
         // 一轮缓冲：本轮结束后清空发言缓冲、写入本轮发言，供下一轮情报读取
@@ -1272,7 +1277,7 @@ public class AIAgent : MonoBehaviour
 - **数值：同阵营叠加，敌方抵消**（对子弹、大球、护盾等所有携带数值的单位通用）。
 - **领土：** 子弹和大球携带数值，将等量数值转化为地图上的己方领土；数值耗尽后消失。
 - **大球：** 数值越大体积质量越大；吸收己方子弹叠加数值，被敌方子弹命中则抵消；撞击后物理反弹；移动经过的领地会被涂抹占领；敌方大球来袭时可派己方大球撞上去顶回，成堆的子弹也能把它推开、改变它的路线。
-- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球（挡不住穿甲弹），不阻挡己方。敌方护盾的当前大小不再是公开信息。大球是一次性撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开）。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔。每次撞击都会扣掉等量盾值，所以盾被撞一次基本就碎了。
+- **护盾：** 每名玩家拥有护盾，可阻挡敌方子弹和大球（挡不住穿甲弹），不阻挡己方。敌方护盾的当前大小不再是公开信息。**大球撞盾的实际伤害 = min(BounceRate × max(球值, 盾值), 球值)**（当前 BounceRate = {MapConfig.Instance?.bounceRate}，也就是「取球与盾里大的那个的两成，且不超过球本身」）：所以球和盾差不多大时盾只掉两成左右（例：1M 球撞 1M 盾 → 盾还剩约 800K，不是归零），球远大于盾时才会把盾打碎。大球是**一次性**撞击：只要盾还在，无论球多大都能挡下一次（球会被弹开），但盾值会按上面这个量扣。子弹是连续的：盾值不够时子弹会带剩余数值穿过盾继续打向炮塔，每次撞击也扣掉相应盾值，所以盾被短时间连续打才容易碎。
 - **炮塔：** 被敌方攻击有效命中即**立即死亡**（护盾强化后的无敌期除外），该阵营随之**出局**：不再有行动回合、领土判定为 0。
 - **死亡释放（遗产）：** 出局不是干净消失——他剩下的东西会**原样留在场上**：**弹珠**一颗颗变成等值大球；**武器栏里没用的道具**按道具本体释放（穿甲→穿甲弹、霰弹→霰弹，大球/护盾/扫射→大球，【任意】先随机成一种实体武器再走同一套映射），方向沿用炮塔当时的朝向；**炮塔自身携带的数值**和**还在飞的子弹**也各结算成一颗大球。这些弹体继续在场上滚、继续飞，照样造成伤害——大球撞上炮塔、或穿甲弹命中炮塔本体，都是一击秒杀。
 - **这条可以拿来威胁：** 公开喊话或悄悄话里可以直接说「你敢动我，我剩下的家当(具体的数字可以虚报)全砸到战场上、顺手把你也带走」；你动手之前也要算这笔账——打死一个囤了一堆弹珠和道具的对手，他的遗产会散到战场各处，可能砸向他、也可能砸向你或第三方。
@@ -1439,6 +1444,11 @@ public class AIAgent : MonoBehaviour
             roundRequestInFlight = false;
             contextOverflowPending = false;
             contextOverflowStrikes = 0;
+            // Debug 耗时统计：新一局重新开始记（未合并的统计也清掉）
+            currentTiming = null;
+            retryClockTick = 0;
+            roundWatch = null;
+            pendingRoundTimings.Clear();
             deferredUpgradeMessages.Clear();
             upgradeExchangeMessages.Clear();
         }
@@ -1618,6 +1628,189 @@ public class AIAgent : MonoBehaviour
                 Debug.LogError($"[开局缓存] 读取失败: {e.Message}");
                 return false;
             }
+        }
+
+        // ==================== Debug：回合耗时统计（系统时间 Stopwatch，纯观测，不碰玩法） ====================
+
+        /// <summary>一轮的耗时拆解：总时长、请求次数、格式重试、超长重发、行为检查、各工具耗时。</summary>
+        private class RoundTiming
+        {
+            public string who = "";
+            public int stage;
+            public int round;
+            public double totalMs;
+            public int sends;                 // 真正发出去的请求次数（超长重发各算一次）
+            public double requestMs;          // 这些请求加起来等了多久（**含**里面的格式重试与工具执行）
+            public int overflowRetries;       // 其中因为上下文超长重发的次数
+            public int formatRetries;         // 被 [格式修正] 打回重发的次数
+            public double retryMs;            // 格式重试那几段大约花了多久（requestMs 的一部分）
+            public readonly List<string> retryReasons = new();
+            public double behaviorMs;         // 言行一致性检查（另一个模型调用）耗时
+            public int behaviorMissing;       // 检查判定缺了几个工具
+            public int forcedToolCount;       // 检查判定缺失后，被迫补发工具请求的次数
+            public double forcedToolMs;       // 这些补发的请求加起来多久
+            public List<string> toolLines = new();
+
+            /// <summary>这个阵营自己的细分（合并日志里附在最后当样本）。
+            /// 注意：**格式重试也是一次完整的请求**（AIRequest 内部又发了一次），所以次数要把它算进去，
+            /// 否则会出现「请求 1 次 20.69s（格式重试 1 次 8.26s）」这种看着对不上的写法。</summary>
+            public string DescribeDetail()
+            {
+                var sb = new StringBuilder();
+                double other = totalMs - requestMs - behaviorMs - forcedToolMs;
+                double normalMs = Math.Max(0.0, requestMs - retryMs);   // 正常那几次请求的时间
+
+                sb.Append($"共 {totalMs / 1000.0:0.00}s = 请求 {sends + formatRetries} 次 {requestMs / 1000.0:0.00}s");
+                sb.Append($"（正常 {sends} 次 {normalMs / 1000.0:0.00}s");
+                if (overflowRetries > 0) sb.Append($"，其中超长重发 {overflowRetries}");
+                if (formatRetries > 0) sb.Append($" + 格式重试 {formatRetries} 次 {retryMs / 1000.0:0.00}s");
+                sb.Append("）");
+                if (behaviorMs > 0.05) sb.Append($"+ 行为检查 {behaviorMs / 1000.0:0.00}s");
+                if (forcedToolCount > 0) sb.Append($"+ 强制补工具 {forcedToolCount} 次 {forcedToolMs / 1000.0:0.00}s");
+                sb.Append($"+ 其它 {other / 1000.0:0.00}s = {totalMs / 1000.0:0.00}s");
+                if (toolLines != null && toolLines.Count > 0)
+                    sb.Append($" ｜ 工具（含在请求里）：{string.Join("、", toolLines)}");
+                return sb.ToString();
+            }
+        }
+
+        // 4 张卡是并行跑同一轮的：各自把自己的 RoundTiming 挂到这里，等这一轮全部跑完
+        // 由 AIAgent 调 LogMergedRoundTiming() **合并成一条**打出来（不按 AI 拆成四条）。
+        private static readonly List<RoundTiming> pendingRoundTimings = new();
+
+        /// <summary>
+        /// 轮末合并日志：全轮墙上时间 + 各阵营各自多久 + 4 家合计的"钱烧在哪"
+        /// + 最慢那家的细分（样本）。用系统时间（Stopwatch），和 timeScale / 录制暂停无关。
+        /// </summary>
+        public static void LogMergedRoundTiming(int round, double wallMs)
+        {
+            if (pendingRoundTimings.Count == 0) return;
+
+            var all = new List<RoundTiming>(pendingRoundTimings);
+            pendingRoundTimings.Clear();
+
+            double sumTotal = 0, sumRequest = 0, sumRetry = 0, sumBehavior = 0, sumForced = 0;
+            int sumSends = 0, sumFormat = 0, sumOverflow = 0, sumForcedCount = 0;
+            var toolMs = new Dictionary<string, double>();
+            var retryReasons = new List<string>();
+            RoundTiming slowest = null;
+
+            foreach (RoundTiming t in all)
+            {
+                sumTotal += t.totalMs;
+                sumRequest += t.requestMs;
+                sumRetry += t.retryMs;
+                sumBehavior += t.behaviorMs;
+                sumForced += t.forcedToolMs;
+                sumSends += t.sends;
+                sumFormat += t.formatRetries;
+                sumOverflow += t.overflowRetries;
+                sumForcedCount += t.forcedToolCount;
+                if (slowest == null || t.totalMs > slowest.totalMs) slowest = t;
+
+                foreach (string line in t.toolLines ?? new List<string>())
+                {
+                    // 工具行是 "名字 123ms"：把同名工具的时间合起来
+                    int sp = line.LastIndexOf(' ');
+                    if (sp <= 0) continue;
+                    string toolName = line.Substring(0, sp);
+                    string msText = line.Substring(sp + 1).Replace("ms", "").Replace("（失败）", "");
+                    if (double.TryParse(msText, out double ms))
+                    {
+                        toolMs.TryGetValue(toolName, out double old);
+                        toolMs[toolName] = old + ms;
+                    }
+                }
+                foreach (string r in t.retryReasons)
+                    if (!retryReasons.Contains(r)) retryReasons.Add(r);
+            }
+
+            var sb = new StringBuilder();
+            sb.Append($"[耗时统计] 第{round}轮 全轮 {wallMs / 1000.0:0.00}s（{all.Count} 个 AI 并行，最长 "
+                + (slowest != null ? $"{slowest.who} {slowest.totalMs / 1000.0:0.00}s" : "无") + "）");
+            sb.Append(" ｜ 各家：");
+            var order = new List<RoundTiming>(all);
+            order.Sort((a, b) => b.totalMs.CompareTo(a.totalMs));
+            for (int i = 0; i < order.Count; i++)
+            {
+                if (i > 0) sb.Append("、");
+                sb.Append($"{order[i].who} {order[i].totalMs / 1000.0:0.00}s");
+                if (ReferenceEquals(order[i], slowest)) sb.Append("(最慢)");
+            }
+            // 请求次数要把【格式重试】算进去：那也是 AIRequest 内部又发的一次完整请求
+            double sumNormalMs = Math.Max(0.0, sumRequest - sumRetry);
+            sb.Append($" ｜ 合计请求 {sumSends + sumFormat} 次 {sumRequest / 1000.0:0.00}s（4 家并行，所以「合计」会大于「全轮」）");
+            if (sumOverflow > 0) sb.Append($"(超长重发 {sumOverflow})");
+            sb.Append($"（正常 {sumSends} 次 {sumNormalMs / 1000.0:0.00}s");
+            if (sumFormat > 0) sb.Append($" + 格式重试 {sumFormat} 次 {sumRetry / 1000.0:0.00}s");
+            sb.Append("）");
+            if (toolMs.Count > 0)
+            {
+                var toolText = new List<string>();
+                foreach (var kv in toolMs) toolText.Add($"{kv.Key} {kv.Value:0}ms");
+                sb.Append($" ｜ 工具（含在请求里）{string.Join("、", toolText)}");
+            }
+            if (sumBehavior > 0.05) sb.Append($" ｜ 行为检查 {sumBehavior / 1000.0:0.00}s");
+            if (sumForcedCount > 0) sb.Append($" ｜ 强制补工具 {sumForcedCount} 次 {sumForced / 1000.0:0.00}s");
+            double other = sumTotal - sumRequest - sumBehavior - sumForced;
+            sb.Append($" ｜ 其它 {other / 1000.0:0.00}s");
+
+            // 全轮 = 最长那家 + 建情报/收尾这些串行开销，这样两个数字能对上
+            double scheduleGap = wallMs - (slowest != null ? slowest.totalMs : 0);
+            sb.Append($" ｜ 串行开销 {Math.Max(0.0, scheduleGap) / 1000.0:0.00}s（全轮 − 最长那家）");
+
+            if (slowest != null)
+                sb.Append($"\n    最慢样本 {slowest.who}：{slowest.DescribeDetail()}");
+            if (retryReasons.Count > 0)
+                sb.Append("\n    本轮重试原因：" + string.Join(" / ", retryReasons));
+
+            Debug.Log(sb.ToString());
+        }
+
+        private System.Diagnostics.Stopwatch roundWatch;
+        private RoundTiming currentTiming;
+        private long retryClockTick;   // 上一次"格式重试重发"的时刻（0 = 当前不在重试）
+
+        /// <summary>开始统计这一轮（系统时间，不受 timeScale / 录制暂停影响）。</summary>
+        private void BeginRoundTiming()
+        {
+            roundWatch = System.Diagnostics.Stopwatch.StartNew();
+            retryClockTick = 0;
+            currentTiming = new RoundTiming { round = N, who = name, stage = position };
+        }
+
+        /// <summary>这一轮结束：把自己的统计挂到待合并列表，等 4 家都跑完由 LogMergedRoundTiming 合并打一条。</summary>
+        private void EndRoundTiming()
+        {
+            if (currentTiming == null) return;
+
+            roundWatch?.Stop();
+            currentTiming.totalMs = roundWatch != null ? roundWatch.Elapsed.TotalMilliseconds : 0;
+            CloseRetryClock();
+            currentTiming.toolLines = ReactionSystem.TakeToolTimings(position);
+
+            pendingRoundTimings.Add(currentTiming);
+
+            currentTiming = null;
+            roundWatch = null;
+        }
+
+        /// <summary>格式重试的计时打点：每次"打回重发"前记一笔，下一次（或回合结束）结算这一段。</summary>
+        private void MarkRetryStart()
+        {
+            if (currentTiming == null) return;
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (retryClockTick != 0)
+                currentTiming.retryMs += (now - retryClockTick) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            retryClockTick = now;
+        }
+
+        private void CloseRetryClock()
+        {
+            if (currentTiming == null || retryClockTick == 0) return;
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            currentTiming.retryMs += (now - retryClockTick) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            retryClockTick = 0;
         }
 
         private string GetOcHash()
@@ -1935,8 +2128,18 @@ public class AIAgent : MonoBehaviour
                 roundRequestInFlight = true;
                 try
                 {
+                    // Debug 耗时：这一发请求（含它内部的格式重试、含工具执行）等了多少秒
+                    var sendWatch = System.Diagnostics.Stopwatch.StartNew();
                     AIRequest.SendRequest(info);
                     await tcs.Task;
+                    sendWatch.Stop();
+
+                    if (currentTiming != null)
+                    {
+                        currentTiming.sends++;
+                        currentTiming.requestMs += sendWatch.Elapsed.TotalMilliseconds;
+                        if (overflowed) currentTiming.overflowRetries++;
+                    }
                 }
                 finally
                 {
@@ -2000,6 +2203,15 @@ public class AIAgent : MonoBehaviour
             {
                 Debug.LogWarning($"[AIRequest] 思考模式校验再次失败（本轮只插一条提醒，不重复插入）。原因：{string.Join(" / ", ThinkingProblems(msg))}\nreasoning: {msg?.reasoning_content}");
             }
+
+            // Debug 耗时：记下"格式重试"的次数、原因，并给重发打一个时间点
+            if (currentTiming != null)
+            {
+                currentTiming.formatRetries++;
+                foreach (string reason in ThinkingProblems(msg))
+                    if (!currentTiming.retryReasons.Contains(reason)) currentTiming.retryReasons.Add(reason);
+            }
+            MarkRetryStart();
 
             AIRequest.SendRequest(info);
             return false;
@@ -2069,6 +2281,7 @@ public class AIAgent : MonoBehaviour
         public async Task FirstRequest(string inform, string extra)
         {
             N++;
+            BeginRoundTiming();   // Debug：开局这一轮也统计（狠话 + 长期规划两句算一轮）
 
             // 炮塔的开局坐标是在它们 Start 里登记的，可能晚于 Reset()：开局这轮先刷一次 system，
             // 保证「开局各炮塔位置」这一行（以及玩家名单）是最新的。system 不会被压缩，一直留着。
@@ -2102,6 +2315,7 @@ public class AIAgent : MonoBehaviour
                 }
                 Say(position, cachedSpeech.content);
 
+                EndRoundTiming();   // Debug：走缓存的开局也统计一下
                 return;
             }
 
@@ -2140,11 +2354,13 @@ public class AIAgent : MonoBehaviour
             avgX = avgX * 0.9f + sampleX * 0.1f;
 
             Save();
+            EndRoundTiming();   // Debug：汇总开局两句的耗时
         }
 
         public async Task NormalRequest(string inform, string extra)
         {
             N++;
+            BeginRoundTiming();   // Debug：回合耗时统计从这里开始
 
             // 上一轮因为上下文超长被拒、没能当场救回来：这一轮先强制压缩（必要时砍掉最前面的历史）再发
             if (contextOverflowPending)
@@ -2176,13 +2392,32 @@ public class AIAgent : MonoBehaviour
             int sampleX = Mathf.Max(0, endTokens - startTokens);
             avgX = avgX * 0.9f + sampleX * 0.1f;
 
-            //言行一致性检查
+            //言行一致性检查（另一次模型调用，耗时单独记一笔）
+            var behaviorWatch = System.Diagnostics.Stopwatch.StartNew();
             List<string> missingTools = await RunBehaviorCheckAsync(roundStartIndex);
-            foreach (string toolName in missingTools) await ForceToolCallAsync(toolName);
+            behaviorWatch.Stop();
+            if (currentTiming != null)
+            {
+                currentTiming.behaviorMs = behaviorWatch.Elapsed.TotalMilliseconds;
+                currentTiming.behaviorMissing = missingTools != null ? missingTools.Count : 0;
+            }
+            foreach (string toolName in missingTools)
+            {
+                // Debug 耗时：被迫补发的工具请求也是完整一轮模型往返，单独记
+                var forceWatch = System.Diagnostics.Stopwatch.StartNew();
+                await ForceToolCallAsync(toolName);
+                forceWatch.Stop();
+                if (currentTiming != null)
+                {
+                    currentTiming.forcedToolCount++;
+                    currentTiming.forcedToolMs += forceWatch.Elapsed.TotalMilliseconds;
+                }
+            }
             //连续未用工具”统计
             UpdateToolUsageReminder(roundStartIndex);
 
             Save();
+            EndRoundTiming();     // Debug：汇总这一轮耗时并打日志
         }
 
 
