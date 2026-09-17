@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 // 自动旋转器：无锁定目标时按默认模式旋转；
 // 开启自动护卫后，会优先在 guardRadius 内寻找最近的敌方领土并持续朝向它。
@@ -18,6 +19,12 @@ public class AutoRotater : MonoBehaviour
     public float guardUpdateInterval = 0.2f;
     public ComputeShader guardCompute; // 不填时自动退回 CPU 扫描
 
+    // 同一个场景里只要有任意一个炮塔在 Inspector 里填了 shader，其余实例（例如从预制体解包出来、
+    // 忘记重新指定引用的场景实例）会自动复用同一个资产，避免悄悄退回 CPU 逐像素扫描。
+    private static ComputeShader sharedGuardCompute;
+    private static bool sharedGuardComputeSearched;
+    private bool guardGpuFallbackWarned;
+
     private float currentAngle;
     private int direction = 1;
 
@@ -34,6 +41,11 @@ public class AutoRotater : MonoBehaviour
     private ComputeBuffer guardResultBuffer;
     private int guardKernel = -1;
     private uint[] guardResultData;
+    private AsyncGPUReadbackRequest guardReadback;
+    private bool guardReadbackPending;
+    private float guardReadbackStartTime;
+    private bool guardScanPending;
+    private bool guardGpuLogged;
 
     void Start()
     {
@@ -42,7 +54,7 @@ public class AutoRotater : MonoBehaviour
         owner = GetComponentInParent<Towel>();
         config = MapConfig.Instance;
 
-        if (guardCompute != null && owner != null)
+        if (owner != null && ResolveGuardCompute())
         {
             guardKernel = guardCompute.FindKernel("CSFindNearest");
             guardResultBuffer = new ComputeBuffer(1, sizeof(uint));
@@ -50,10 +62,32 @@ public class AutoRotater : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 解析护卫扫描用的 compute shader：Inspector 引用 → 同场景其它实例共享的引用 → Resources/TerritoryNearest。
+    /// 这样即使某个实例（比如从预制体解包出来的场景炮塔）忘了填引用，也不会悄悄退回 CPU 全图逐像素扫描。
+    /// </summary>
+    bool ResolveGuardCompute()
+    {
+        if (guardCompute == null) guardCompute = sharedGuardCompute;
+        if (guardCompute == null && !sharedGuardComputeSearched)
+        {
+            sharedGuardComputeSearched = true;
+            guardCompute = Resources.Load<ComputeShader>("TerritoryNearest");
+        }
+        if (guardCompute != null) sharedGuardCompute = guardCompute;
+        return guardCompute != null;
+    }
+
     void OnDestroy()
     {
         if (guardResultBuffer != null)
         {
+            // 回读还在飞就先等它落地，否则释放 buffer 会报“还在使用中”
+            if (guardReadbackPending)
+            {
+                guardReadback.WaitForCompletion();
+                guardReadbackPending = false;
+            }
             guardResultBuffer.Release();
             guardResultBuffer = null;
         }
@@ -163,15 +197,30 @@ public class AutoRotater : MonoBehaviour
         var canvas = TerritoryCanvas.Instance;
         if (canvas == null || !canvas.territoryMap.IsCreated) return false;
 
-        // 有目标时按间隔重新扫描，避免每帧全图查询
-        if (hasGuardTarget && Time.time < nextGuardScanTime)
+        // 按间隔重新扫描，避免每帧全图查询；两次扫描之间沿用上一次的目标
+        if (Time.time < nextGuardScanTime)
         {
+            if (!hasGuardTarget) return false;
             target = guardTarget;
             return true;
         }
-
-        hasGuardTarget = ScanNearestEnemyTerritory(out guardTarget);
         nextGuardScanTime = Time.time + guardUpdateInterval;
+
+        // 回读卡住超过 0.5 秒就当这次丢了，下次重新发，别永远停在旧目标上
+        if (guardReadbackPending && Time.realtimeSinceStartup - guardReadbackStartTime > 0.5f)
+            guardReadbackPending = false;
+
+        if (ScanNearestEnemyTerritory(out Vector2 scanned))
+        {
+            guardTarget = scanned;
+            hasGuardTarget = true;
+        }
+        else if (!guardScanPending)
+        {
+            // 结果已经确定：半径内确实没有敌方领土
+            hasGuardTarget = false;
+        }
+        // guardScanPending：异步结果还在路上，先保持上一次的目标
 
         if (!hasGuardTarget) return false;
         target = guardTarget;
@@ -180,17 +229,65 @@ public class AutoRotater : MonoBehaviour
 
     bool ScanNearestEnemyTerritory(out Vector2 target)
     {
-        // 优先走 GPU；没配置 shader / 纹理不可用时退回 CPU 逻辑
-        if (guardCompute != null
-            && guardKernel >= 0
-            && guardResultBuffer != null
-            && TerritoryCanvas.Instance != null
-            && TerritoryCanvas.Instance.DataRT != null)
+        guardScanPending = false;
+
+        // 优先走 GPU；没配置 shader / 纹理不可用 / 半径超编码范围时，才退回 CPU 逐个像素扫
+        if (CanUseGuardGPU(out string gpuWhyNot)) return ScanNearestTerritoryGPU(out target);
+
+        if (!guardGpuFallbackWarned)
         {
-            return ScanNearestTerritoryGPU(out target);
+            guardGpuFallbackWarned = true;
+            Debug.LogWarning($"AutoRotater({name}) 护卫最近点扫描退回 CPU：{gpuWhyNot}", this);
         }
-        print("GPU距离计算未启用");
         return ScanNearestTerritoryCPU(out target);
+    }
+
+    /// <summary>
+    /// GPU 路径是否可用。结果编码是「12 位距离 + 10 位 x + 10 位 y」，
+    /// 因此分辨率上限 1024、半径上限 511 像素；超了宁可退回 CPU，也不能静默算错坐标。
+    /// </summary>
+    bool CanUseGuardGPU(out string whyNot)
+    {
+        whyNot = null;
+
+        if (guardCompute == null)
+        {
+            whyNot = "没有 compute shader（Inspector 里指定 TerritoryNearest.compute，或把它放进 Resources 目录）";
+            return false;
+        }
+        if (guardKernel < 0 || guardResultBuffer == null)
+        {
+            whyNot = "compute shader 初始化失败";
+            return false;
+        }
+
+        var canvas = TerritoryCanvas.Instance;
+        if (canvas == null || canvas.DataRT == null)
+        {
+            whyNot = "领地画布（TerritoryCanvas.DataRT）不可用";
+            return false;
+        }
+        if (config == null || config.worldSize <= 0f)
+        {
+            whyNot = "MapConfig 不可用";
+            return false;
+        }
+
+        int res = config.resolution;
+        if (res <= 0 || res > 1024)
+        {
+            whyNot = $"resolution={res} 超出 GPU 结果编码上限 1024";
+            return false;
+        }
+
+        int radiusPx = Mathf.CeilToInt(guardRadius / config.worldSize * res);
+        if (radiusPx <= 0 || radiusPx > 511)
+        {
+            whyNot = $"护卫半径 {guardRadius} 换算成 {radiusPx} 像素，超出 GPU 结果编码范围 1~511";
+            return false;
+        }
+
+        return true;
     }
 
     bool ScanNearestTerritoryGPU(out Vector2 target)
@@ -207,6 +304,10 @@ public class AutoRotater : MonoBehaviour
         int radiusPx = Mathf.CeilToInt(guardRadius / worldSize * res);
         if (radiusPx <= 0) return false;
 
+        // 上一次的结果还在回读路上：本次不重复 dispatch，等它落地（期间沿用上一次的目标）
+        guardScanPending = true;
+        if (guardReadbackPending) return false;
+
         guardResultData[0] = uint.MaxValue;
         guardResultBuffer.SetData(guardResultData);
 
@@ -218,9 +319,56 @@ public class AutoRotater : MonoBehaviour
         guardCompute.SetInt("_RadiusPx", radiusPx);
         guardCompute.Dispatch(guardKernel, (res + 7) / 8, (res + 7) / 8, 1);
 
+        guardScanPending = false;
+
+        if (SystemInfo.supportsAsyncGPUReadback)
+        {
+            // 异步回读：不在主线程等 GPU，结果一两帧后由回调写入 guardTarget
+            guardReadbackPending = true;
+            guardReadbackStartTime = Time.realtimeSinceStartup;
+            guardReadback = AsyncGPUReadback.Request(guardResultBuffer, OnGuardReadbackDone);
+            LogGuardGpuOnce("异步回读");
+            return false;
+        }
+
+        // 不支持异步回读时才同步取（会等 GPU 排空，但只读 4 字节）
+        LogGuardGpuOnce("同步回读");
         guardResultBuffer.GetData(guardResultData);
-        uint key = guardResultData[0];
-        if (key == uint.MaxValue) return false;
+        return DecodeGuardKey(guardResultData[0], res, worldSize, out target);
+    }
+
+    void LogGuardGpuOnce(string mode)
+    {
+        if (guardGpuLogged) return;
+        guardGpuLogged = true;
+        Debug.Log($"AutoRotater({name}) 护卫最近点扫描已走 GPU（TerritoryNearest.compute，{mode}）。", this);
+    }
+
+    void OnGuardReadbackDone(AsyncGPUReadbackRequest req)
+    {
+        guardReadbackPending = false;
+        if (req.hasError) return;   // 出错就当这次没结果，下一次扫描重发
+
+        var cfg = config != null ? config : MapConfig.Instance;
+        if (cfg == null || guardResultData == null) return;
+
+        uint key = req.GetData<uint>()[0];
+        if (DecodeGuardKey(key, cfg.resolution, cfg.worldSize, out Vector2 t))
+        {
+            guardTarget = t;
+            hasGuardTarget = true;
+        }
+        else
+        {
+            hasGuardTarget = false;
+        }
+    }
+
+    /// <summary>把 GPU 写回的最小 key 解成世界坐标；key == uint.MaxValue 表示半径内没有敌方领土。</summary>
+    static bool DecodeGuardKey(uint key, int res, float worldSize, out Vector2 target)
+    {
+        target = default;
+        if (key == uint.MaxValue || res <= 0) return false;
 
         int px = (int)((key >> 10) & 0x3FF);
         int py = (int)(key & 0x3FF);

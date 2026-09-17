@@ -45,6 +45,7 @@
 - **存档**：SLManager.ExportToJson/ImportFromJson，CharacterCard 存 `Characters/<名字>`（含 request.messages 即 history）
 - **游戏结束**：GameEndMonitor 定期扫描 TerritoryCanvas 领土网格，某阵营涂满整图 → 停 AI 循环、停录制、时间冻结（可配退出）
 - **弹珠**：MarbleManager 开局每队 3 颗；空槽升级（AI 模式：空槽每秒积进度，达标生成弹珠，cost×1.5）
+- **炮塔自动护卫找最近点（AutoRotater）**：走 GPU compute shader `TerritoryNearest.compute`（`CSFindNearest`，一张 1024² 的 grid 一次 dispatch + 异步回读 4 字节结果）。shader 放在 `Assets/Resources/`，Inspector 里没填也能自动加载（Inspector 引用 → 同场景其它实例共享 → Resources 三级兜底）；只有 shader 缺失 / 纹理不可用 / 半径超编码范围时才退回 `ScanNearestTerritoryCPU`，退回时打一条带原因的 warning。结果 key 是「12 位距离 + 10 位 x + 10 位 y」，所以 `resolution ≤ 1024`、半径 `≤ 511` 像素，超了必须走 CPU，否则坐标会静默算错
 
 ## 注意点 / 遗留
 - `DeepSeekCaptureController.cs` 是早期测试组件：发一个泛化 RTS 战局分析 prompt（与当前游戏无关），API 地址旧（`/chat/completions` 无 v1），疑似弃用；改 AI 流程时不要误碰它
