@@ -429,22 +429,30 @@ public class Towel : MonoBehaviour, IStageValue
 
     System.Collections.IEnumerator DieSequence()
     {
+        // 死亡瞬间先处理弹珠：只记自己阵营的数值，并立刻把自己阵营的弹珠全删掉（别人的弹珠不动）。
+        // 记下来的数值等遗言说完，再一颗颗放成大球。倒序遍历。
+        List<uint> myMarbleExponents = new List<uint>();
+        Marble[] marbles = FindObjectsOfType<Marble>();
+        for (int i = marbles.Length - 1; i >= 0; i--)
+        {
+            Marble marble = marbles[i];
+            if (marble == null || marble.stage != stage) continue;
+            if (marble.ValueExponent > 0) myMarbleExponents.Add(marble.ValueExponent);
+            Destroy(marble.gameObject);
+        }
+
         // 遗言放在死亡流程最前面：先说完遗言，再开始释放大球
         var lastWords = AIAgent.OnStageDeathAsync(stage, killerStage, killerWeapon);
         while (!lastWords.IsCompleted) yield return null;
         yield return new WaitForSeconds(1.5f); // 遗言气泡至少显示一会儿，避免立即销毁导致看不到
 
-        var marbles = FindObjectsOfType<Marble>();
-        foreach (var marble in marbles)
+        foreach (uint exponent in myMarbleExponents)
         {
-            if (marble.ValueExponent > 0)
-            {
-                SpawnBigBall(HugeInt.Pow(2, (int)marble.ValueExponent));
-                yield return new WaitForSeconds(0.2f);
-            }
+            SpawnBigBall(HugeInt.Pow(2, (int)exponent));
+            yield return new WaitForSeconds(0.2f);
         }
 
-        // 死亡时把道具栈里的道具也以大球形式释放
+        // 死亡时把道具栈里的道具按"道具本体"释放出去（护盾/扫射放不出去，见 ReleasePropAsWeapon）
         if (config != null && config.teamProps != null && stage >= 0 && stage < config.teamProps.Length)
         {
             List<PropEntry> props = config.teamProps[stage];
@@ -452,7 +460,7 @@ public class Towel : MonoBehaviour, IStageValue
             {
                 foreach (PropEntry prop in new List<PropEntry>(props))
                 {
-                    SpawnBigBall(prop.value);
+                    ReleasePropAsWeapon(prop);
                     yield return new WaitForSeconds(0.2f);
                 }
                 props.Clear();
@@ -481,6 +489,29 @@ public class Towel : MonoBehaviour, IStageValue
 
         AllTowel.Remove(stage);
         Destroy(gameObject);
+    }
+
+    /// <summary>
+    /// 阵亡时把一个道具"放出去"：**按道具本体释放** —— 大球放球、穿甲放穿甲弹、霰弹放霰弹。
+    /// 护盾与扫射本身是给自己的增益，放不出去，统一变成大球；【任意】没有具体形态，也按大球放。
+    /// 方向沿用炮塔当时的朝向。
+    /// </summary>
+    void ReleasePropAsWeapon(PropEntry prop)
+    {
+        if (prop == null) return;
+
+        switch (prop.item)
+        {
+            case WeaponKind.穿甲:
+                SpawnShell(prop.value);
+                break;
+            case WeaponKind.霰弹:
+                ShotGun(prop.value);
+                break;
+            default:   // 大球 / 护盾 / 扫射 / 任意
+                SpawnBigBall(prop.value);
+                break;
+        }
     }
 
     public HugeInt Hit(int _stage, HugeInt _value, string sourceGuid = "", string sourceDesc = "")
