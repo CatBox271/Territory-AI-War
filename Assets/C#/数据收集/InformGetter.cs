@@ -378,10 +378,9 @@ public class InformGetter : MonoBehaviour
             builder.Append("，可移动范围 x,y ∈ [-"); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append(", "); builder.Append(self.MoveBound.ToString("0.00"));
             builder.Append("]，状态: "); builder.Append(self.MoveStateText);
-            // 无敌倒计时：情报本身有一轮（@INFO_DELAY@ 秒）的滞后，剩余时间不足这个滞后的就别报了——报过去也已经过期。
-            const float InvincibleReportMinSeconds = 7f;
+            // 无敌倒计时：情报本身滞后一轮（= 面板上的轮间隔），剩余时间不够一轮的就别报了——报过去也已经过期。
             float invincibleLeft = self.InvincibleRemaining;
-            if (invincibleLeft > InvincibleReportMinSeconds)
+            if (invincibleLeft > AIAgent.RoundInterval)
             {
                 builder.Append("，无敌剩余 "); builder.Append(invincibleLeft.ToString("0.#")); builder.Append(" 秒");
             }
@@ -422,7 +421,7 @@ public class InformGetter : MonoBehaviour
     #region 终局提示
     public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球、穿甲弹和子弹清掉，再把领土刷到 98%，这局才会结束；别在最后被反杀。";
 
-    /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球或穿甲弹；判据同大球撞击预警。</summary>
+    /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球或穿甲弹；判据同撞击预警（读 BallPainter.game_item_name）。</summary>
     public static bool HasEnemyBigBall(int stage)
     {
         foreach (var kv in Oitems)
@@ -431,9 +430,9 @@ public class InformGetter : MonoBehaviour
 
             foreach (ItemType item in kv.Value)
             {
-                // 穿甲弹也是"带数值、还在场上飞"的弹体（BallPainter），终局清场必须一起算，
-                // 否则可能在被它命中的前一刻判定游戏结束。
-                if ((item.description == "大球" || item.description == "穿甲") && item.item != null) return true;
+                // 大球与穿甲弹都是"带数值、还在场上"的弹体，终局清场必须一起算，
+                // 否则可能在被穿甲弹命中的前一刻判定游戏结束。
+                if (RollingItemName(item) != null) return true;
             }
         }
         return false;
@@ -467,28 +466,45 @@ public class InformGetter : MonoBehaviour
     }
     #endregion
 
-    #region 大球撞击预警
-    // 轨迹推演参数：最多预测 12 秒、步长 0.02 秒。“几秒后第一次撞上护盾”按近似计算。
+    #region 弹体撞击预警（大球 / 穿甲弹）
+    // 轨迹推演参数：最多预测 12 秒、步长 0.02 秒。“几秒后撞上”按近似计算。
     private const float BallWarningMaxPredictTime = 12f;
     private const float BallWarningStep = 0.02f;
+    /// <summary>炮塔本体判定半径，与 BulletManager 里算撞击用的是同一个口径。</summary>
+    private const float TurretBodyRadius = 0.4f;
 
     /// <summary>
-    /// 大球撞击预警：对每个敌方大球做轨迹推演（直线运动 + 地图边界反弹 + 敌方护盾镜面反弹；
-    /// 同队护盾与球物理无碰撞，跳过），计算它大约几秒后第一次撞上请求方护盾。
-    /// 只在预测窗口内会撞上的大球输出预警，格式仿照“最近敌方领土”块。
+    /// 这项是不是“带数值在场上滚/飞的弹体”（大球 / 穿甲弹）：是就返回名字，否则 null。
+    /// 名字统一读 BallPainter.game_item_name —— 伤害与撞击情报的口径也是它，别再按 description 猜。
+    /// </summary>
+    private static string RollingItemName(ItemType item)
+    {
+        if (item == null || item.item == null) return null;
+        BallPainter bp = item.stageValue as BallPainter;
+        if (bp == null) bp = item.item.GetComponent<BallPainter>();
+        string name = bp != null ? bp.game_item_name : item.description;
+        return (name == "大球" || name == "穿甲") ? name : null;
+    }
+
+    /// <summary>
+    /// 弹体撞击预警：
+    /// - 大球：直线 + 地图边界反弹 + 敌方护盾镜面反弹，算它几秒后第一次撞上请求方护盾（盾没了就不报，球会被盾挡下）。
+    /// - 穿甲弹：**穿过护盾**直取炮塔本体，所以不算护盾反弹、也不算盾内减速与离盾偏转，直接算几秒后打到你的炮塔本体；
+    ///   护盾碎了同样要报（盾对它没有意义）。
+    /// 只在预测窗口内会命中的才输出，格式仿照“最近敌方领土”块。
     /// </summary>
     private static void AppendBallImpactWarning(StringBuilder builder, int stage)
     {
         var config = MapConfig.Instance;
         var canvas = TerritoryCanvas.Instance;
         if (config == null || canvas == null) return;
-        if (!Towel.AllTowel.TryGetValue(stage, out Towel self) || self == null || self.shield_value <= 0) return;
+        if (!Towel.AllTowel.TryGetValue(stage, out Towel self) || self == null) return;
 
         Vector2 mapCenter = canvas.transform.position;
         float mapHalf = config.worldSize * 0.5f;
-        Vector2 selfShieldPos = self.transform.position;
+        Vector2 selfPos = self.transform.position;
         float selfShieldR = self.shield != null ? self.shield.transform.lossyScale.x : 0f;
-        if (selfShieldR <= 0f) return;
+        bool shieldAlive = self.shield_value > 0 && selfShieldR > 0f;
 
         foreach (var kv in Oitems)
         {
@@ -496,30 +512,73 @@ public class InformGetter : MonoBehaviour
 
             foreach (ItemType item in kv.Value)
             {
-                if (item.description != "大球" || item.item == null) continue;
+                string itemName = RollingItemName(item);
+                if (itemName == null) continue;
+                bool isShell = itemName == "穿甲";
+                if (!isShell && !shieldAlive) continue;
 
                 BallPainter bp = item.stageValue as BallPainter;
-                float ballR = bp != null
+                float bodyR = bp != null
                     ? Mathf.Max(item.item.lossyScale.x, item.item.lossyScale.y) * bp.baseWorldRadius
                     : 0f;
-                float impactT = PredictShieldImpact(
-                    item.item.position,
-                    item.rb != null ? item.rb.velocity : Vector2.zero,
-                    ballR, mapCenter, mapHalf, stage, selfShieldPos, selfShieldR);
+                Vector2 vel = item.rb != null ? item.rb.velocity : Vector2.zero;
+
+                float impactT = isShell
+                    ? PredictShellImpact(item.item.position, vel, bodyR, mapCenter, mapHalf, selfPos, TurretBodyRadius)
+                    : PredictShieldImpact(item.item.position, vel, bodyR, mapCenter, mapHalf, stage, selfPos, selfShieldR);
                 if (impactT < 0f) continue;
 
                 builder.AppendLine(); builder.Append("{");
-                builder.Append("大球撞击预警: "); builder.Append(AIAgent.GetStageName(kv.Key));
-                builder.Append("的大球(");
+                builder.Append(isShell ? "穿甲弹撞击预警: " : "大球撞击预警: ");
+                builder.Append(AIAgent.GetStageName(kv.Key));
+                builder.Append(isShell ? "的穿甲弹(" : "的大球(");
                 builder.Append("guid: "); builder.Append(item.guid);
                 builder.Append(", 数值 "); builder.Append(item.value);
-                builder.Append(", 直径 "); builder.Append((ballR * 2).ToString("0.0"));
+                builder.Append(", 直径 "); builder.Append((bodyR * 2).ToString("0.0"));
                 builder.Append(")预计 "); builder.Append(impactT.ToString("0.0"));
-                builder.Append(" 秒后第一次撞上你的护盾(护盾当前直径 ");
-                builder.Append((selfShieldR * 2).ToString("0.0")); builder.Append(")");
+                if (isShell)
+                {
+                    builder.Append(" 秒后打到你的炮塔本体(炮塔本体直径 ");
+                    builder.Append((TurretBodyRadius * 2).ToString("0.0")); builder.Append(")");
+                }
+                else
+                {
+                    builder.Append(" 秒后第一次撞上你的护盾(护盾当前直径 ");
+                    builder.Append((selfShieldR * 2).ToString("0.0")); builder.Append(")");
+                }
                 builder.AppendLine(); builder.Append("}");
             }
         }
+    }
+
+    /// <summary>
+    /// 模拟穿甲弹轨迹，返回首次打中 targetPos（炮塔本体）的预计时间（秒）；窗口内打不中返回 -1。
+    /// 与大球不同：穿甲弹**穿过护盾**，所以这里不算护盾反弹、也不算盾内减速与离盾偏转
+    /// （那两条本来就会让预测变成瞎猜，不如按"最直的一条路"报）；只保留直线运动 + 地图边界反弹。
+    /// </summary>
+    private static float PredictShellImpact(Vector2 pos, Vector2 vel, float shellR, Vector2 mapCenter, float mapHalf, Vector2 targetPos, float targetR)
+    {
+        if (vel.sqrMagnitude < 0.0001f) return -1f;
+
+        float totalR = shellR + targetR;
+        if ((pos - targetPos).sqrMagnitude <= totalR * totalR) return 0f;
+
+        float minX = mapCenter.x - mapHalf + shellR, maxX = mapCenter.x + mapHalf - shellR;
+        float minY = mapCenter.y - mapHalf + shellR, maxY = mapCenter.y + mapHalf - shellR;
+        Vector2 v = vel;
+
+        for (float t = BallWarningStep; t <= BallWarningMaxPredictTime; t += BallWarningStep)
+        {
+            pos += v * BallWarningStep;
+
+            if (pos.x < minX) { pos.x = minX; if (v.x < 0) v.x = -v.x; }
+            else if (pos.x > maxX) { pos.x = maxX; if (v.x > 0) v.x = -v.x; }
+            if (pos.y < minY) { pos.y = minY; if (v.y < 0) v.y = -v.y; }
+            else if (pos.y > maxY) { pos.y = maxY; if (v.y > 0) v.y = -v.y; }
+
+            if ((pos - targetPos).sqrMagnitude <= totalR * totalR) return t;
+        }
+        return -1f;
     }
 
     /// <summary>

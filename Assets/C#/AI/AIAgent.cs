@@ -36,6 +36,9 @@ public class AIAgent : MonoBehaviour
     public static bool _isRunning;
     public static AIAgent Instance { get; private set; }
 
+    /// <summary>一轮的间隔秒数（面板上的 _cycleInterval）。情报的滞后量，以及"剩余时间不够一轮就别报"的门槛都用它。</summary>
+    public static float RoundInterval => Instance != null ? Instance._cycleInterval : 0f;
+
     // 开局 reasoning 重试期间暂停录制：多张卡并发时用计数保证全部退出后才恢复
     private static int capturePauseCount;
     private static void EnterOpeningRetryPause()
