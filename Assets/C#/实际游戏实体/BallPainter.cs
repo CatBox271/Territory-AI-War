@@ -14,11 +14,12 @@ public class BallPainter : MonoBehaviour, IStageValue
 
     public float baseWorldRadius = 0.5f;
     public float attackPower = 1.0f;
-    public float ScaleChangeSpeed = 3f;
+    public float ScaleSmoothSpeed = 3f;
 
     public CurveTransform ScaleCurve;
+    public float ScaleTimes = 1;
     public CurveTransform SpeedCurve;
-    public CurveTransform AcelerationCurve;
+    public float SpeedTimes = 1;
     public TrailRenderer TR;
 
     [Header("速度控制")]
@@ -71,11 +72,11 @@ public class BallPainter : MonoBehaviour, IStageValue
             }
             else
             {
-                transform.localScale = Mathf.Lerp(ts, aimScale, Time.fixedDeltaTime * ScaleChangeSpeed) * Vector3.one;
+                transform.localScale = Mathf.Lerp(ts, aimScale, Time.fixedDeltaTime * ScaleSmoothSpeed) * Vector3.one;
             }
         }
 
-        float targetSpeed = SpeedCurve.Evaluate(value);
+        float targetSpeed = SpeedCurve.Evaluate(value) * SpeedTimes;
         float curSpeed = rb.velocity.magnitude;
         if (curSpeed > 0.01f) lastMoveDir = rb.velocity / curSpeed;
         Vector2 dir = curSpeed > 0.01f ? rb.velocity / curSpeed : lastMoveDir;
@@ -122,7 +123,7 @@ public class BallPainter : MonoBehaviour, IStageValue
 
     void SetScaleMass()
     {
-        float s = ScaleCurve.Evaluate(value);
+        float s = ScaleCurve.Evaluate(value) * ScaleTimes;
         aimScale = s;
         TR.widthMultiplier = s;
         rb.mass = value / 81920000f;

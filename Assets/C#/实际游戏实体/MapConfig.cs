@@ -217,7 +217,7 @@ public class MapConfig : MonoBehaviour
                 towel.SpawnBigBall(val);
                 break;
             case WeaponKind.穿甲:
-                towel.FirePierce(val);
+                towel.SpawnShell(val);
                 break;
         }
     }

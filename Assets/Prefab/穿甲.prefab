@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 449478902768515284}
   - component: {fileID: 622875075528979609}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Trail
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -25,12 +25,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1595531244661921068}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: -0.31, z: 0}
+  m_LocalScale: {x: 0.4, y: 0.4, z: 0.4}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 6470868864055029153}
+  m_Father: {fileID: 4222657619570340843}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!96 &622875075528979609
 TrailRenderer:
@@ -74,11 +74,11 @@ TrailRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
-  m_Time: 0.35
+  m_Time: 1
   m_PreviewTimeScale: 1
   m_Parameters:
     serializedVersion: 3
-    widthMultiplier: 0.28
+    widthMultiplier: 0.19614807
     widthCurve:
       serializedVersion: 2
       m_Curve:
@@ -95,61 +95,7 @@ TrailRenderer:
         time: 0.27389228
         value: 1
         inSlope: -0
-        outSlope: -2.9241657
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.37327474
-        value: 0.7093892
-        inSlope: -2.9241657
-        outSlope: 0.03998325
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.47247607
-        value: 0.7133556
-        inSlope: 0.03998325
-        outSlope: -2.1911075
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.57480764
-        value: 0.4891361
-        inSlope: -2.1911075
-        outSlope: -0.022317553
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.68767095
-        value: 0.48661727
-        inSlope: -0.022317553
-        outSlope: -1.9831189
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.8040834
-        value: 0.2557575
-        inSlope: -1.9831189
-        outSlope: -0.08544042
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.89051896
-        value: 0.24837242
-        inSlope: -0.08544042
-        outSlope: -2.268634
+        outSlope: -1.3772061
         tangentMode: 69
         weightedMode: 0
         inWeight: 0.33333334
@@ -157,7 +103,7 @@ TrailRenderer:
       - serializedVersion: 3
         time: 1
         value: 0
-        inSlope: -2.268634
+        inSlope: -1.3772061
         outSlope: -2.8275096
         tangentMode: 69
         weightedMode: 0
@@ -219,10 +165,12 @@ GameObject:
   - component: {fileID: 6470868864055029153}
   - component: {fileID: 6864175156454396675}
   - component: {fileID: 3767908013893368130}
-  - component: {fileID: 3422996219412846560}
-  m_Layer: 0
-  m_Name: "\u7A7F\u7532\u5F39"
-  m_TagString: Untagged
+  - component: {fileID: 6264478398640388796}
+  - component: {fileID: 2128266677755943854}
+  - component: {fileID: 1653908957261971525}
+  m_Layer: 8
+  m_Name: "\u7A7F\u7532"
+  m_TagString: Ball
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -236,13 +184,11 @@ Transform:
   m_GameObject: {fileID: 2741485188931532298}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1.3510144, y: -0.85236096, z: 0}
-  m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
+  m_LocalPosition: {x: 1.819, y: -0.753, z: 0}
+  m_LocalScale: {x: 0.25, y: 0.25, z: 0.25}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 4222657619570340843}
-  - {fileID: 2207786219490197638}
-  - {fileID: 449478902768515284}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!58 &6864175156454396675
@@ -279,7 +225,7 @@ CircleCollider2D:
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
   serializedVersion: 2
-  m_Radius: 0.5
+  m_Radius: 0.2
 --- !u!50 &3767908013893368130
 Rigidbody2D:
   serializedVersion: 4
@@ -307,7 +253,7 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 1
   m_Constraints: 4
---- !u!114 &3422996219412846560
+--- !u!114 &6264478398640388796
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -316,25 +262,100 @@ MonoBehaviour:
   m_GameObject: {fileID: 2741485188931532298}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9b4adfc043a74f54d99bbb950640b521, type: 3}
+  m_Script: {fileID: 11500000, guid: ba78220b03d70a8428d37c720be3bc96, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  <stage>k__BackingField: 0
-  guid: 
+  sp: {fileID: 5066242117563904447}
   rb: {fileID: 3767908013893368130}
   col: {fileID: 6864175156454396675}
-  sp: {fileID: 5066242117563904447}
-  tr: {fileID: 622875075528979609}
-  speed: 8
-  massDivisor: 81920000
-  outOfBoundsMargin: 1
-  shieldDrainPercentPerSecond: 0.25
-  shieldSlowFactor: 0.5
-  exitDeflectAngle: 30
-  shieldHitInterval: 0.05
-  killCostRatio: 0.5
-  alignSpriteToVelocity: 1
-  spriteAngleOffset: 0
+  <stage>k__BackingField: 2
+  guid: 
+  baseWorldRadius: 0.2
+  attackPower: 1
+  ScaleSmoothSpeed: 3
+  ScaleCurve:
+    curve:
+      serializedVersion: 2
+      m_Curve:
+      - serializedVersion: 3
+        time: 0
+        value: 1
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 34
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
+      - serializedVersion: 3
+        time: 1
+        value: 1
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 34
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  ScaleTimes: 0.25
+  SpeedCurve:
+    curve:
+      serializedVersion: 2
+      m_Curve:
+      - serializedVersion: 3
+        time: 0
+        value: 1
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 34
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
+      - serializedVersion: 3
+        time: 1
+        value: 1
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 34
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  SpeedTimes: 8
+  TR: {fileID: 622875075528979609}
+  fastA: 0.1
+  slowA: 0.1
+  hurt_fast_pause: 0.3
+--- !u!114 &2128266677755943854
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2741485188931532298}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 05fb0e85154ac6040ac127b9ac50bc83, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  stage: 2
+  value: 1048576
+  AutoDestroy: 1
+--- !u!114 &1653908957261971525
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2741485188931532298}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3f868d63d1b3e9d4abbe32b2a918a545, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &4278316083713829892
 GameObject:
   m_ObjectHideFlags: 0
@@ -345,7 +366,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4222657619570340843}
   - component: {fileID: 5066242117563904447}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: PIC
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -362,9 +383,11 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_LocalScale: {x: 2.5, y: 2.5, z: 2.5}
+  m_ConstrainProportionsScale: 1
+  m_Children:
+  - {fileID: 2207786219490197638}
+  - {fileID: 449478902768515284}
   m_Father: {fileID: 6470868864055029153}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!212 &5066242117563904447
@@ -387,7 +410,7 @@ SpriteRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 10754, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: 61c3f0cc38830b444ac0e00b8c6883a0, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -432,7 +455,7 @@ GameObject:
   - component: {fileID: 3967913570602742917}
   - component: {fileID: 6357157271336692195}
   - component: {fileID: 5488662140748159394}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Text (Legacy)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -448,14 +471,14 @@ RectTransform:
   m_GameObject: {fileID: 7952261177358053116}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.03, y: 0.03, z: 0.03}
+  m_LocalScale: {x: 0.012, y: 0.012, z: 0.012}
   m_ConstrainProportionsScale: 1
   m_Children: []
-  m_Father: {fileID: 6470868864055029153}
+  m_Father: {fileID: 4222657619570340843}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: -0.482}
   m_SizeDelta: {x: 29.4, y: 23.6}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &5006211971371850014

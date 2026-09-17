@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 449478902768515284}
   - component: {fileID: 622875075528979609}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Trail
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -95,61 +95,7 @@ TrailRenderer:
         time: 0.27389228
         value: 1
         inSlope: -0
-        outSlope: -2.9241657
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.37327474
-        value: 0.7093892
-        inSlope: -2.9241657
-        outSlope: 0.03998325
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.47247607
-        value: 0.7133556
-        inSlope: 0.03998325
-        outSlope: -2.1911075
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.57480764
-        value: 0.4891361
-        inSlope: -2.1911075
-        outSlope: -0.022317553
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.68767095
-        value: 0.48661727
-        inSlope: -0.022317553
-        outSlope: -1.9831189
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.8040834
-        value: 0.2557575
-        inSlope: -1.9831189
-        outSlope: -0.08544042
-        tangentMode: 69
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.89051896
-        value: 0.24837242
-        inSlope: -0.08544042
-        outSlope: -2.268634
+        outSlope: -1.3772061
         tangentMode: 69
         weightedMode: 0
         inWeight: 0.33333334
@@ -157,7 +103,7 @@ TrailRenderer:
       - serializedVersion: 3
         time: 1
         value: 0
-        inSlope: -2.268634
+        inSlope: -1.3772061
         outSlope: -2.8275096
         tangentMode: 69
         weightedMode: 0
@@ -221,7 +167,7 @@ GameObject:
   - component: {fileID: 3767908013893368130}
   - component: {fileID: 6264478398640388796}
   - component: {fileID: 2128266677755943854}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: "\u57FA\u7840\u7403"
   m_TagString: Ball
   m_Icon: {fileID: 0}
@@ -327,7 +273,7 @@ MonoBehaviour:
   guid: 
   baseWorldRadius: 0.5
   attackPower: 1
-  ScaleChangeSpeed: 3
+  ScaleSmoothSpeed: 3
   ScaleCurve:
     curve:
       serializedVersion: 2
@@ -371,6 +317,7 @@ MonoBehaviour:
       m_PreInfinity: 2
       m_PostInfinity: 2
       m_RotationOrder: 4
+  ScaleTimes: 1
   SpeedCurve:
     curve:
       serializedVersion: 2
@@ -405,31 +352,7 @@ MonoBehaviour:
       m_PreInfinity: 2
       m_PostInfinity: 2
       m_RotationOrder: 4
-  AcelerationCurve:
-    curve:
-      serializedVersion: 2
-      m_Curve:
-      - serializedVersion: 3
-        time: 0
-        value: 0.1
-        inSlope: -0.003
-        outSlope: -0.003
-        tangentMode: 34
-        weightedMode: 0
-        inWeight: 0
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 30
-        value: 0.01
-        inSlope: -0.003
-        outSlope: -0.003
-        tangentMode: 34
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0
-      m_PreInfinity: 2
-      m_PostInfinity: 2
-      m_RotationOrder: 4
+  SpeedTimes: 1
   TR: {fileID: 622875075528979609}
   fastA: 0.5
   slowA: 2
@@ -459,7 +382,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4222657619570340843}
   - component: {fileID: 5066242117563904447}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: PIC
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -546,7 +469,7 @@ GameObject:
   - component: {fileID: 3967913570602742917}
   - component: {fileID: 6357157271336692195}
   - component: {fileID: 5488662140748159394}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Text (Legacy)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
