@@ -213,6 +213,13 @@ public class BallPainter : MonoBehaviour, IStageValue
                         InformGetter.ImpactSourceBall);
                 }
             }
+
+            // 穿甲弹命中敌方炮塔本体：结算完立刻消失——不留着继续飞、也不会被算进死亡释放的遗产。
+            if (sv is Towel && game_item_name == "穿甲")
+            {
+                Die();
+                return;
+            }
         }
         if (value == 0) Die();
     }

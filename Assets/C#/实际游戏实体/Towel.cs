@@ -479,22 +479,22 @@ public class Towel : MonoBehaviour, IStageValue
             }
         }
 
+        // 炮塔上带的两样：子弹量 → 一颗大球
         if (value > 0)
         {
             SpawnBigBall(value);
             yield return new WaitForSeconds(0.2f);
         }
 
-        // 还在飞的子弹：收掉并结算成一颗大球（和弹珠/道具同口径）
-        if (BulletManager.Instance != null)
+        // 护盾值 → 一颗大球
+        if (shield_value > 0)
         {
-            HugeInt bulletsValue = BulletManager.Instance.CollectStageBullets(stage);
-            if (bulletsValue > 0)
-            {
-                SpawnBigBall(bulletsValue);
-                yield return new WaitForSeconds(0.2f);
-            }
+            SpawnBigBall(shield_value);
+            yield return new WaitForSeconds(0.2f);
         }
+
+        // 死亡释放**只有这四样**：弹珠、道具、子弹量、护盾值。
+        // 其它一律不管：还在飞的子弹、大球、穿甲弹都不进遗产，照旧留在场上。
 
         if (MarbleManager.Instance != null)
             MarbleManager.Instance.OnTeamDeath(stage);

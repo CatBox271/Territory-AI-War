@@ -223,12 +223,93 @@ public class ReactionSystem : MonoBehaviour, Itool
                     required = new List<string> { "to", "content" }
                 }
             }
+        },
+        new Tool
+        {
+            type = "function",
+            function = new Function
+            {
+                name = ReadyActionToolName,
+                description = "预行动：登记一个「等条件满足后再替我执行」的工具调用，并管理已登记的预行动。"
+                    + "action=add 时必填 tool_name（触发时调用哪个工具）与 ready（条件串数组）；"
+                    + "action=list 列出当前全部预行动（含是否满足、已执行几次、失败记录）；"
+                    + "action=remove 需要 id；action=clear 清空；action=pause/resume 需要 id。"
+                    + "ready 的写法（每条字符串用 -- 分词）："
+                    + "① 条件：all--对象--比较--值（any-- 任一满足、not-- 取反）；对象有 upgrade(升级能量) left(空槽数) slot(槽位上限) shield(护盾值) bullet(子弹量) marble(弹珠数) territory(领土像素) threat(最近敌方领土距离) threatPos--x/y(最近敌方领土坐标) round(回合数) enemyNum(存活敌人数) moveCost/whisperCost(本次价格) pos--x/y(自己坐标) moving--is--true/false prop--contain--种类--value--比较--值 prop--count--比较--值 warn--count--比较--值 warn--type--穿甲/大球--eta--比较--秒；比较 = more/less/moreEqual/lessEqual/equal。"
+                    + "② select--prop--…：触发时挑哪一格道具（contain--种类--value--比较--值 / smallest / biggest / index--N），结果自动填进 index。"
+                    + "③ para--参数名--值：触发时覆盖/补充这次工具调用的参数（如 para--aim_x--0、para--angle--0、para--distance--1.5、para--weapon--大球、para--to--3、para--content--……）。"
+                    + "④ reuse--0/-1/N：0=执行一次后自动取消（默认）、-1=永久、N=存活 N 个 AI 轮次。"
+                    + "例：想「槽满时自动把最小的一颗大球打向(0,0)腾格子」就 add → tool_name=use_prop，ready=[\"all--left--less--1\",\"all--prop--contain--大球--value--less--1048576\",\"select--prop--contain--大球--value--less--1048576\",\"para--aim_x--0\",\"para--aim_y--0\"]。"
+                    + "每个阵营最多 5 条；执行失败会保留并在每轮情报里合并显示失败原因。",
+                parameters = new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    properties = new Dictionary<string, object>
+                    {
+                        {
+                            "action",
+                            new
+                            {
+                                type = "string",
+                                @enum = new List<string> { "add", "list", "remove", "clear", "pause", "resume" },
+                                description = "add=登记新预行动（默认）；list=列出；remove=按 id 删除；clear=清空；pause/resume=暂停或恢复某条。"
+                            }
+                        },
+                        {
+                            "tool_name",
+                            new
+                            {
+                                type = "string",
+                                @enum = new List<string> { "use_prop", "merge_prop", "move_turret", "control_turret", "whisper" },
+                                description = "add 时必填：触发时实际要调用的工具名。"
+                            }
+                        },
+                        {
+                            "ready",
+                            new
+                            {
+                                type = "array",
+                                items = new { type = "string" },
+                                description = "add 时必填：条件与动作串数组，见工具说明里的 ①②③④ 写法。"
+                            }
+                        },
+                        {
+                            "reuse",
+                            new
+                            {
+                                type = "integer",
+                                description = "0=执行一次后自动取消（默认）、-1=永久保留、N=存活 N 个 AI 轮次。"
+                            }
+                        },
+                        {
+                            "id",
+                            new
+                            {
+                                type = "integer",
+                                description = "remove / pause / resume 时要操作的那条预行动的 id（list 里能看到）。"
+                            }
+                        }
+                    },
+                    required = new List<string> { "action" }
+                }
+            }
         }
     };
 
     private const string UsePropToolName = "use_prop";
     /// <summary>合并道具：把两个同种道具并成一个（数值相加）。</summary>
     private const string MergePropToolName = "merge_prop";
+    /// <summary>预行动：登记"等条件满足再执行"的工具调用（唯一入口，见 ReadyActionManager）。</summary>
+    private const string ReadyActionToolName = ReadyActionManager.ToolName;
+
+    /// <summary>场景里的那个实例：预行动系统要拿它来直接执行工具。</summary>
+    public static ReactionSystem Instance { get; private set; }
+
+    private void Awake()
+    {
+        Instance = this;
+    }
     private const string ControlTurretToolName = "control_turret";
     private const string MoveTurretToolName = "move_turret";
     private const string WhisperToolName = "whisper";
@@ -330,6 +411,10 @@ public class ReactionSystem : MonoBehaviour, Itool
         else if (call.function.name == MergePropToolName)
         {
             outcome = MergeProp(call.function.arguments, callStage);
+        }
+        else if (call.function.name == ReadyActionToolName)
+        {
+            outcome = ReadyAction(call.function.arguments, callStage);
         }
         else if (call.function.name == ControlTurretToolName)
         {
@@ -469,6 +554,76 @@ public class ReactionSystem : MonoBehaviour, Itool
             $"已合并：第 {args.index_a} 格 + 第 {args.index_b} 格 → {a.item} {sum.ToShortString()}（现在共 {props.Count} 格道具）。"
             + "合并免费、总数值不变；但分开用有时更划算（两个不同目标、两轮不同时间），需要分着用就别合。",
             $"【合并道具】{a.item} {sum.ToShortString()}");
+    }
+
+    /// <summary>预行动工具：登记 / 列出 / 删除 / 清空 / 暂停 / 恢复（逻辑都在 ReadyActionManager）。</summary>
+    private ToolOutcome ReadyAction(string argumentsJson, int callStage)
+    {
+        ReadyActionArguments args = null;
+        try { args = JsonConvert.DeserializeObject<ReadyActionArguments>(argumentsJson); } catch { }
+        if (args == null)
+            return new ToolOutcome("预行动失败：参数无法解析，需要 {\"action\":\"add\",\"tool_name\":\"use_prop\",\"ready\":[...]}。");
+
+        string action = string.IsNullOrWhiteSpace(args.action) ? "add" : args.action.Trim().ToLowerInvariant();
+        switch (action)
+        {
+            case "list":
+                return new ToolOutcome("预行动清单：\n" + ReadyActionManager.ListText(callStage));
+            case "remove":
+                return new ToolOutcome(ReadyActionManager.Remove(callStage, args.id));
+            case "clear":
+                return new ToolOutcome(ReadyActionManager.Clear(callStage));
+            case "pause":
+                return new ToolOutcome(ReadyActionManager.SetPaused(callStage, args.id, true));
+            case "resume":
+                return new ToolOutcome(ReadyActionManager.SetPaused(callStage, args.id, false));
+            default:
+            {
+                string msg = ReadyActionManager.Add(callStage, args.tool_name, args.ready, args.reuse);
+                if (msg.StartsWith("登记预行动失败")) return new ToolOutcome(msg);
+                return new ToolOutcome(msg, "【预行动】已登记");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 预行动系统专用：按工具名 + JSON 参数**直接执行一次**（不走 AI 请求、不附视野截图、不飘字）。
+    /// 返回 false 表示没做成，error 里是失败原因（会被预行动系统合并计数后在情报里显示）。
+    /// </summary>
+    public bool ExecuteToolDirect(string toolName, string argumentsJson, int callStage, out string error)
+    {
+        error = null;
+        ToolOutcome outcome;
+
+        switch (toolName)
+        {
+            case UsePropToolName: outcome = UseProp(argumentsJson, callStage); break;
+            case MergePropToolName: outcome = MergeProp(argumentsJson, callStage); break;
+            case ControlTurretToolName: outcome = ControlTurret(argumentsJson, callStage); break;
+            case MoveTurretToolName:
+            {
+                bool previewCreated = false;
+                outcome = MoveTurret(argumentsJson, callStage, out previewCreated);
+                // 预行动给的是"一步到位"的参数（方向 + 距离）：这次预览成功了就顺手补上 confirm，
+                // 否则它只会留下一个待确认的预览、炮塔根本不动。
+                if (previewCreated && !string.IsNullOrEmpty(outcome.action))
+                    outcome = MoveTurret("{\"confirm\":true}", callStage, out _);
+                break;
+            }
+            case WhisperToolName:
+                _ = Whisper(argumentsJson, callStage);   // 悄悄话要等对方回话，异步发出去就算成功
+                return true;
+            default:
+                error = "未知工具：" + toolName;
+                return false;
+        }
+
+        if (string.IsNullOrEmpty(outcome.action))
+        {
+            error = outcome.result;      // 失败时 action 为空、result 就是失败原因
+            return false;
+        }
+        return true;
     }
 
     private ToolOutcome UseProp(string argumentsJson, int callStage)
@@ -948,6 +1103,16 @@ public class ReactionSystem : MonoBehaviour, Itool
             this.result = result;
             this.action = action;
         }
+    }
+
+    [System.Serializable]
+    private class ReadyActionArguments
+    {
+        public string action = "add";
+        public string tool_name = "";
+        public List<string> ready = new List<string>();
+        public int reuse = 0;
+        public int id = 0;
     }
 
     [System.Serializable]

@@ -98,8 +98,7 @@ public class DeepSeekCaptureController : MonoBehaviour
                 new { role = "system", content = "You are a helpful assistant." },
                 new { role = "user", content = userMessage }
             },
-            thinking = new { type = "enabled" },
-            reasoning_effort = "high",
+            thinking = new { type = "disabled" },   // 全项目统一：不需要思考（省时省 token）
             max_tokens = 4096,
             temperature = 1,
             top_p = 1

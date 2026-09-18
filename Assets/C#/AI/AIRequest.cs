@@ -248,7 +248,8 @@ public class DeepSeekRequest
     public bool stream = false;
     public string reasoning_effort;
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-    public ThinkingConfig thinking = new(true);
+    // 思考（reasoning）全面关掉：模型把"想"写在 content 的【分析：…】里（见 AIAgent 的三段格式）
+    public ThinkingConfig thinking = new(false);
 
     public bool ShouldSerializethinking()
     {

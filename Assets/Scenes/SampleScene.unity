@@ -741,7 +741,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -1399,7 +1399,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -2988,7 +2988,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -3357,7 +3357,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -3868,7 +3868,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -4937,7 +4937,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -5240,7 +5240,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -7413,7 +7413,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6bff62cf841a5794ebc77f1bde21986c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _cycleInterval: 7
+  _cycleInterval: 6
   cardset:
   - name: "\u8D64\u55B5"
     oc: "\u4EBA\u8BBE\uFF1A17\u5C81\u7684\u4E2D\u4E8C\u96CC\u5C0F\u9B3C\u5C0F\u732B\uFF0C\u81EA\u79F0\u201C\u7329\u7EA2\u5229\u722A\u201D\u3002\u6027\u683C\u6025\u6027\u5B50\u3001\u7231\u5632\u8BBD\u3001\u5F97\u610F\u65F6\u201C\u563B\u563B\uFF5E\uFF0C\u4E0D\u8FC7\u5982\u6B64\u561B\u201D\u7B11\u3002\u52A3\u52BF\u65F6\u4F1A\u53D1\u51FA\u201C\u545C\u55B5\uFF1F\uFF01\u201D\u7B49\u5947\u602A\u52A8\u9759\uFF0C\u6B7B\u4E0D\u8BA4\u8F93\u3002\u53D1\u732B\u54AAemoji"
@@ -9056,7 +9056,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -10629,14 +10629,14 @@ MonoBehaviour:
   spawnArea: {fileID: 2113856713}
   randomizeOpeningSpawns: 0
   openingSpawnPositions:
-  - {x: -30.130047, y: 6.107042, z: 0}
-  - {x: -33.03918, y: 6.0001783, z: 0}
-  - {x: -31.907928, y: 6.084289, z: 0}
-  - {x: -33.195343, y: 5.7853384, z: 0}
-  - {x: -27.236786, y: 5.762148, z: 0}
-  - {x: -29.515816, y: 5.751172, z: 0}
-  - {x: -31.061655, y: 6.431361, z: 0}
-  - {x: -29.111868, y: 6.2971725, z: 0}
+  - {x: -29.733294, y: 5.902434, z: 0}
+  - {x: -28.551685, y: 5.8351536, z: 0}
+  - {x: -29.478992, y: 6.4373765, z: 0}
+  - {x: -27.031265, y: 6.4165864, z: 0}
+  - {x: -30.352617, y: 5.9462395, z: 0}
+  - {x: -30.36756, y: 6.258218, z: 0}
+  - {x: -31.80912, y: 5.7532063, z: 0}
+  - {x: -26.544872, y: 5.964003, z: 0}
   initialMarbleCount: 2
   initialSpawnDelay: 0
   initialValueExponent: 1
@@ -11085,7 +11085,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -11267,7 +11267,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -12611,7 +12611,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -13722,7 +13722,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -14126,7 +14126,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -15484,7 +15484,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -15759,7 +15759,7 @@ PrefabInstance:
     - target: {fileID: 8471812825299195856, guid: 7bc5b8cadbb725f43af378d4b02ac647, type: 3}
       propertyPath: m_Material
       value: 
-      objectReference: {fileID: 6200000, guid: c3f243484c575d5408533926c6d58b03, type: 2}
+      objectReference: {fileID: 6200000, guid: b52fbcd6f5f98fa44b4bd021d1688f8e, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -15996,7 +15996,7 @@ MonoBehaviour:
   bounceRate: 0.2
   upgradePerEmptySlotPerSecond: 1
   upgradeCost: 50
-  upgradeCostGrowth: 1.5
+  upgradeCostGrowth: 1.75
   moveEnergyCost: 30
   whisperEnergyCost: 30
   actionCostGrowth: 1.05
@@ -16007,19 +16007,77 @@ MonoBehaviour:
   moveRangePerLevel: 1
   moveSightRadiusFactor: 1.5
   lastGameRecap:
-  - "\u4E2D\u76D8\u6700\u5F3A\uFF1A810 \u4E07\u5B50\u5F39\u6D2A\u6D41\u6253\u7A7F\u9752\u6614\uFF0C\u81EA\u5DF1\u6D82\u5230
-    99 \u4E07\u50CF\u7D20\uFF08\u4E5D\u6210\u4E03\uFF09\uFF1B\u4F46\u58F3\u88AB\u671D\u9732\u4E00\u9897
-    1400 \u4E07\u5927\u7403\u7838\u788E\u540E\u518D\u6CA1\u8865\u8FC7\uFF0C\u88AB\u671D\u9732
-    2.69 \u4EBF\u5927\u7403\u7281\u5230 46 \u4E07\uFF0C\u53CD\u8D85\u540E\u51FA\u5C40"
-  - "\u7B2C\u4E00\u4E2A\u51FA\u5C40\uFF1A\u4E00\u5EA6 43.5 \u4E07\u7B2C\u4E00 \u2192
-    \u4E09\u5BB6\u56F4\u6BB4 \u2192 \u58F3\u4ECE 120 \u4E07\u88AB 4.1M \u5927\u7403\u6253\u5230
-    2.7 \u4E07 \u2192 \u88AB\u516B\u767E\u4E07\u5B50\u5F39\u6DF9\u6389\u3002\u6C42\u505C\u6218\u53EA\u6362\u6765\u8D64\u55B5\u300C\u8E29\u4F60\u6B63\u597D\u70ED\u8EAB\u300D"
-  - "\u5F00\u5C40\u88AB\u6309\u5728\u89D2\u843D\uFF0C\u4E32\u4E86\u4E09\u5BB6\u3001\u6253\u9752\u6614\u51FA\u7684\u529B\u6700\u591A\uFF1B\u4E00\u5EA6\u88AB\u538B\u5230\u5269\u51E0\u767E\u50CF\u7D20\uFF0C\u9760\u56E4\u51FA
-    1.8M \u5B50\u5F39+\u300C\u5341\u516D\u4E2A\u767E\u4E07\u300D\u53CD\u8D85\u5230
-    65 \u4E07\uFF1B\u6700\u540E\u88AB\u671D\u9732 67M \u5927\u7403\u53CD\u590D\u7ED5\u56DE\u6765\u78E8\u6389"
-  - "\u8D62\u5BB6\uFF1A\u5168\u7A0B\u88C5\u548C\u6C14\u9001\u793C\uFF0C\u6697\u5730\u91CC\u56E4\u5927\u7403\uFF0C\u4E00\u9897
-    14M \u7838\u788E\u8D64\u55B5\u7684\u58F3\u3001\u540E\u4E24\u9897\u4E0A\u4EBF\u628A\u8D64\u55B5\u7281\u5E73\uFF0C\u7EC8\u5C40
-    85 \u4E07\u50CF\u7D20\uFF08\u516B\u6210\u4E09\uFF09\uFF0C267M \u5B50\u5F39\u50A8\u5907"
+  - "\u4E0A\u4E00\u5C40\u672C\u55B5\u4ECE\u57AB\u5E95\u6740\u5230\u4E5D\u6210\u4E03\u7684\u7586\u571F\uFF0C\u628A\u300C\u8D62\u300D\u5B57\u558A\u4E86\u4E00\u8DEF\uFF0C\u6700\u540E\u88AB\u89D2\u843D\u91CC\u90A3\u4E2A\u4E56\u5B69\u5B50\u4E00\u9897
+    269M \u7684\u5927\u7403\u6380\u7FFB\u3002\u524D\u671F\u672C\u55B5\u53EA\u6709
+    7.8 \u4E07\u50CF\u7D20\uFF0C\u9760\u6512\u51FA\u7684 8.1M \u5B50\u5F39\u4E00\u6CE2\u628A\u9752\u6614\uFF08272,140\u2192156,942\uFF09\u6253\u4E0B\u53BB\uFF0C\u51B2\u4E0A
+    449,830 \u6210\u4E3A\u7B2C\u4E00\uFF0C\u4ED6\u4E5F\u56E0\u6B64\u51FA\u5C40\u3002\u4E4B\u540E\u672C\u55B5\u63A8\u5230
+    1,000,050\uFF08\u4E5D\u6210\u4E03\uFF09\uFF1B\u4E2D\u5C40\u6C2F\u8680\u4E00\u53D1
+    4.1M \u9730\u5F39\u628A\u672C\u55B5\u4ECE 771K \u6253\u5230 438K\uFF0C\u672C\u55B5\u53C8\u722C\u4E86\u56DE\u6765\uFF0C\u5E76\u628A\u53EA\u5269
+    12 \u50CF\u7D20\u7684\u4ED6\u78E8\u6B7B\u3002\u4F46\u672C\u55B5\u628A\u671D\u9732\u5F53\u5BA0\u7269\uFF0C\u62A4\u76FE\u788E\u4E86\u4E4B\u540E\u518D\u6CA1\u8865\u4E0A\u3002\u6700\u540E\u4E00\u523B\u672C\u55B5\u770B\u5230\u5979\u53CD\u8D85\u2014\u2014\u300C\u545C\u55B5\uFF1F\uFF01\u671D\u9732\u4F60\u6562\u53CD\u8D85\u672C\u55B5\uFF01\u300D\u2014\u2014\u4E0B\u4E00\u79D2
+    269M \u7684\u7403\u5C31\u5230\u4E86\u3002\r\n\r\n\u6570\u5B57\uFF1A\u8C37\u5E95
+    78,709 \u2192 \u5CF0\u503C 1,000,050\uFF08\u4E5D\u6210\u4E03\uFF09\u2192 \u6218\u6B7B\u65F6
+    462,871\uFF08\u671D\u9732 585,705\uFF09\u3002\r\n\r\n\u9644\uFF1A\u672C\u5C40\u51FA\u5C40\u987A\u5E8F\uFF08\u5168\u5C40\u4E8B\u5B9E\uFF0C\u975E\u8D64\u55B5\u7684\u8BB0\u5FC6\uFF09\r\n\u7B2C
+    1 \u4E2A\u51FA\u5C40\uFF1A\u9752\u6614\uFF082 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u51FB\u6740\uFF08\u5979\u7684 8.1M \u5B50\u5F39\u6D2A\u6D41\u4E3A\u4E3B\uFF0C\u6C2F\u8680\u3001\u671D\u9732\u540C\u671F\u4E5F\u5728\u6253\u4ED6\uFF09\u3002\r\n\u7B2C
+    2 \u4E2A\u51FA\u5C40\uFF1A\u6C2F\u8680\uFF083 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u78E8\u6B7B\uFF08\u4ED6 11 \u6761\u53D7\u51FB\u7EDF\u8BA1\u6709
+    10 \u6761\u6765\u81EA\u8D64\u55B5\uFF09\u3002\r\n\u7B2C 3 \u4E2A\u51FA\u5C40\uFF1A\u8D64\u55B5\uFF081
+    \u53F7\uFF09 \u2014\u2014 \u88AB \u671D\u9732\uFF084 \u53F7\uFF09 \u51FB\u6740\uFF08269M
+    \u5927\u7403\u649E\u4E0A\u5979\u62A4\u76FE\u4E3A 0 \u7684\u70AE\u5854\uFF09\u3002\r\n\u80DC\u8005\uFF1A\u671D\u9732\uFF084
+    \u53F7\uFF09 \u2014\u2014 \u7EC8\u5C40 852,606 \u50CF\u7D20\uFF08\u7EA6 83%\uFF09\u3001267M
+    \u5B50\u5F39\u50A8\u5907\u3002"
+  - "\u5C0F\u9E1F\u4E0A\u4E00\u5C40\u662F\u7B2C\u4E00\u4E2A\u8D70\u7684\u3002\u5F00\u5C40\u5C0F\u9E1F\u4E00\u76F4\u5728\u505A\u6700\u5B9E\u5728\u7684\u4E8B\u2014\u2014\u6E05\u6389
+    1K \u7684\u5C0F\u9053\u5177\u3001\u817E\u7A7A\u69FD\u6512\u5347\u7EA7\u503C\uFF0C\u7136\u540E\u95F7\u58F0\u6DA8\u5730\uFF1A435,924
+    \u2192 502,714 \u2192 559,198 \u50CF\u7D20\uFF0C\u4E00\u5EA6\u662F\u5168\u573A\u6700\u5927\u7684\u90A3\u53EA\uFF0C\u6BD4\u671D\u9732\uFF0837
+    \u4E07\uFF09\u548C\u8D64\u55B5\uFF087.8 \u4E07\uFF09\u90FD\u9AD8\u3002\u7136\u540E\u6240\u6709\u4EBA\u4E00\u8D77\u8F6C\u5934\uFF1A\u8D64\u55B5\u7684
+    8.1M \u5B50\u5F39\u503E\u6CFB\u4E0B\u6765\uFF0C\u5C0F\u9E1F\u4ECE 272,140 \u66B4\u8DCC\u5230
+    156,942\uFF0C\u5979\u53CD\u800C\u6210\u4E86\u7B2C\u4E00\u3002\u540C\u4E00\u8F6E\u8FD8\u6709\u6C2F\u8680\u7684
+    148K\u3001\u8D64\u55B5\u7684\u5C0F\u7403\u4E00\u8D77\u671D\u5C0F\u9E1F\u6765\uFF0C\u800C\u5C0F\u9E1F\u62A4\u76FE\u53EA\u5269
+    1.1K\u3002\u5C0F\u9E1F\u53D1\u6084\u6084\u8BDD\u6C42\u9976\uFF0C\u88AB\u5979\u56DE\u300C\u8E29\u4F60\u6B63\u597D\u70ED\u8EAB\u300D\u3002\u6700\u540E\u5C0F\u9E1F
+    55,099 \u50CF\u7D20\u3001\u62A4\u76FE 0\uFF0C\u770B\u7740\u671D\u9732\u4E00\u9897
+    1.4M \u7684\u5927\u7403\u505C\u5728\u57FA\u5730\u8FB9\u4E0A\u3002\u9057\u8A00\u662F\uFF1A\u300C\u8D64\u55B5\u8981\u72EC\u541E\u5168\u56FE\uFF0C\u4F60\u4EEC\u8054\u624B\u624D\u6709\u620F\uFF5E\u300D\r\n\r\n\u6570\u5B57\uFF1A\u5CF0\u503C
+    559,198\uFF08\u5168\u573A\u7B2C\u4E00\uFF09\u2192 \u6218\u6B7B\u524D 55,099\u3001\u62A4\u76FE
+    0\u3002\r\n\r\n\u9644\uFF1A\u672C\u5C40\u51FA\u5C40\u987A\u5E8F\uFF08\u5168\u5C40\u4E8B\u5B9E\uFF0C\u975E\u9752\u6614\u7684\u8BB0\u5FC6\uFF09\r\n\u7B2C
+    1 \u4E2A\u51FA\u5C40\uFF1A\u9752\u6614\uFF082 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u51FB\u6740\uFF08\u5979\u7684 8.1M \u5B50\u5F39\u6D2A\u6D41\u4E3A\u4E3B\uFF0C\u6C2F\u8680\u3001\u671D\u9732\u540C\u671F\u4E5F\u5728\u6253\u4ED6\uFF09\u3002\r\n\u7B2C
+    2 \u4E2A\u51FA\u5C40\uFF1A\u6C2F\u8680\uFF083 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u78E8\u6B7B\uFF08\u4ED6 11 \u6761\u53D7\u51FB\u7EDF\u8BA1\u6709
+    10 \u6761\u6765\u81EA\u8D64\u55B5\uFF09\u3002\r\n\u7B2C 3 \u4E2A\u51FA\u5C40\uFF1A\u8D64\u55B5\uFF081
+    \u53F7\uFF09 \u2014\u2014 \u88AB \u671D\u9732\uFF084 \u53F7\uFF09 \u51FB\u6740\uFF08269M
+    \u5927\u7403\u649E\u4E0A\u5979\u62A4\u76FE\u4E3A 0 \u7684\u70AE\u5854\uFF09\u3002\r\n\u80DC\u8005\uFF1A\u671D\u9732\uFF084
+    \u53F7\uFF09 \u2014\u2014 \u7EC8\u5C40 852,606 \u50CF\u7D20\uFF08\u7EA6 83%\uFF09\u3001267M
+    \u5B50\u5F39\u50A8\u5907\u3002"
+  - "\u4E0A\u4E00\u5C40\u6211\u8C01\u90FD\u4E0D\u4FE1\u3001\u8C01\u7684\u5B89\u6392\u90FD\u4E0D\u63A5\uFF0C\u6700\u540E\u88AB\u8D64\u55B5\u7684\u5B50\u5F39\u4E00\u70B9\u70B9\u78E8\u5230\u53EA\u5269\u5341\u4E8C\u4E2A\u50CF\u7D20\u3002\u671D\u9732\u6765\u529D\u6211\u8054\u624B\u3001\u6559\u6211\u6253\u8C01\uFF0C\u6211\u90FD\u9876\u56DE\u53BB\u4E86\uFF1A\u300C\u6321\uFF1F\u4F60\u5148\u6D3B\u7740\u518D\u8BF4\u5427\u3002\u300D\u300C\u522B\u66FF\u6211\u505A\u51B3\u5B9A\u3002\u300D\u6211\u662F\u5168\u573A\u552F\u4E00\u8BC6\u7834\u5979\u7684\u4EBA\u2014\u2014\u5979\u6512\u4E86\u4E00\u9897
+    67M \u5927\u7403\u671D\u6211\u6EDA\u6765\uFF0C\u6211\u7528 256 \u70B9\u62A4\u76FE\u6321\u4E0B\uFF0C\u76FE\u788E\u4EBA\u6D3B\uFF0C\u6211\u5FC3\u91CC\u8BB0\u7684\u662F\u300C\u5979\u4E00\u76F4\u5728\u88C5\u4E56\uFF0C\u5979\u662F\u6700\u5371\u9669\u7684\u300D\u3002\u6211\u6253\u5F97\u6700\u597D\u7684\u4E00\u624B\u662F
+    4.1M \u9730\u5F39\u8F70\u8D64\u55B5\u57FA\u5730\uFF1A\u5979 771K \u6389\u5230
+    438K\uFF0C\u6211\u4ECE 177K \u6DA8\u5230 657,602\uFF0C\u5750\u8FC7\u5168\u573A\u7B2C\u4E00\u3002\u53EF\u5979\u53C8\u722C\u4E86\u56DE\u6765\uFF0C\u7528\u5B50\u5F39\u628A\u6211\u4ECE
+    65 \u4E07\u78E8\u5230 12 \u4E2A\u50CF\u7D20\u3002\u6211\u8BA4\u4E86\uFF0C\u4F46\u90A3\u4E24\u4E2A\u5B57\u6211\u8BF4\u4E0D\u51FA\u53E3\uFF1A\u300C\u8BA4\u8F93\u4E24\u4E2A\u5B57\uFF0C\u6211\u6253\u4E0D\u51FA\u6765\u3002\u5C31\u7AD9\u7740\uFF0C\u76F4\u5230\u706F\u706D\u3002\u300D\r\n\r\n\u6570\u5B57\uFF1A\u5CF0\u503C
+    657,602\uFF08\u5168\u573A\u7B2C\u4E00\uFF09\u2192 \u88AB\u78E8\u5230 12 \u50CF\u7D20
+    \u2192 \u5F52\u96F6\u51FA\u5C40\uFF1B\u53D7\u51FB\u5341\u6761\u6709\u5341\u6761\u6765\u81EA\u8D64\u55B5\u3002\r\n\r\n\u9644\uFF1A\u672C\u5C40\u51FA\u5C40\u987A\u5E8F\uFF08\u5168\u5C40\u4E8B\u5B9E\uFF0C\u975E\u6C2F\u8680\u7684\u8BB0\u5FC6\uFF09\r\n\u7B2C
+    1 \u4E2A\u51FA\u5C40\uFF1A\u9752\u6614\uFF082 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u51FB\u6740\uFF08\u5979\u7684 8.1M \u5B50\u5F39\u6D2A\u6D41\u4E3A\u4E3B\uFF0C\u6C2F\u8680\u3001\u671D\u9732\u540C\u671F\u4E5F\u5728\u6253\u4ED6\uFF09\u3002\r\n\u7B2C
+    2 \u4E2A\u51FA\u5C40\uFF1A\u6C2F\u8680\uFF083 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u78E8\u6B7B\uFF08\u4ED6 11 \u6761\u53D7\u51FB\u7EDF\u8BA1\u6709
+    10 \u6761\u6765\u81EA\u8D64\u55B5\uFF09\u3002\r\n\u7B2C 3 \u4E2A\u51FA\u5C40\uFF1A\u8D64\u55B5\uFF081
+    \u53F7\uFF09 \u2014\u2014 \u88AB \u671D\u9732\uFF084 \u53F7\uFF09 \u51FB\u6740\uFF08269M
+    \u5927\u7403\u649E\u4E0A\u5979\u62A4\u76FE\u4E3A 0 \u7684\u70AE\u5854\uFF09\u3002\r\n\u80DC\u8005\uFF1A\u671D\u9732\uFF084
+    \u53F7\uFF09 \u2014\u2014 \u7EC8\u5C40 852,606 \u50CF\u7D20\uFF08\u7EA6 83%\uFF09\u3001267M
+    \u5B50\u5F39\u50A8\u5907\u3002"
+  - "\u4E0A\u4E00\u5C40\u6211\u8D62\u4E86\u3002\u6211\u5168\u7A0B\u88C5\u4E56\u9001\u793C\u3001\u7ED9\u4E09\u5BB6\u4E92\u76F8\u9012\u9ED1\u6599\uFF0C\u81EA\u5DF1\u7F29\u5728\u89D2\u843D\u6512\u5347\u7EA7\u548C\u5927\u7403\u2014\u2014\u6211\u8FD8\u5BF9\u8D64\u55B5\u8BF4\u300C\u6211\u53EA\u4F1A\u6652\u592A\u9633\u5566\u2606\u300D\uFF0C\u5979\u5C31\u771F\u4FE1\u4E86\u3002\u8D64\u55B5\u4E00\u8DEF\u6DA8\u5230\u4E00\u767E\u4E07\u50CF\u7D20\uFF08\u4E5D\u6210\u4E03\uFF09\u65F6\u6211\u53EA\u6709\u4E94\u4E07\uFF0C\u5979\u8FD8\u8BF4\u300C\u672C\u55B5\u5FC3\u60C5\u597D\u5C31\u9976\u4F60\u534A\u6761\u547D\u300D\u3002\u7B49\u9752\u6614\u3001\u6C2F\u8680\u5148\u540E\u51FA\u5C40\uFF0C\u6211\u5148\u7528
+    134M \u5927\u7403\u7838\u788E\u8D64\u55B5\u7684\u62A4\u76FE\uFF08\u300C\u8D64\u55B5\u7684\u4F1E\u4E0D\u89C1\u5566\uFF5E\u300D\uFF09\uFF0C\u518D\u7528
+    268M \u5927\u7403\uFF0B268M \u626B\u5C04\u628A\u5730\u56FE\u7FFB\u8FC7\u6765\u3002\u7EC8\u5C40
+    852,606 \u50CF\u7D20\uFF08\u516B\u6210\u4E09\uFF09\u3001267M \u5B50\u5F39\u50A8\u5907\uFF0C\u8D64\u55B5\u70AE\u5854\u88AB\u6467\u6BC1\uFF0C\u7CFB\u7EDF\u63D0\u793A\u300C\u573A\u4E0A\u53EA\u5269\u4F60\u4E00\u4E2A\u9635\u8425\u300D\u3002\u53EA\u6709\u6211\u77E5\u9053\uFF1A\u6211\u8BF4\u7684\u6BCF\u4E00\u53E5\u300C\u793C\u7269\u300D\u90FD\u662F\u5F39\u836F\u3002\r\n\r\n\u6570\u5B57\uFF1A\u5F00\u5C40\u6084\u6084\u7B2C\u4E00
+    \u2192 \u4E2D\u671F 34\uFF5E37 \u4E07 \u2192 \u8C37\u5E95 4.8 \u4E07 \u2192 \u7EC8\u5C40
+    852,606\uFF0883%\uFF09\u3002\r\n\r\n\u9644\uFF1A\u672C\u5C40\u51FA\u5C40\u987A\u5E8F\uFF08\u5168\u5C40\u4E8B\u5B9E\uFF0C\u975E\u671D\u9732\u7684\u8BB0\u5FC6\uFF09\r\n\u7B2C
+    1 \u4E2A\u51FA\u5C40\uFF1A\u9752\u6614\uFF082 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u51FB\u6740\uFF08\u8D64\u55B5\u7684 8.1M \u5B50\u5F39\u6D2A\u6D41\u4E3A\u4E3B\uFF0C\u6C2F\u8680\u3001\u671D\u9732\u540C\u671F\u4E5F\u5728\u6253\u4ED6\uFF09\u3002\r\n\u7B2C
+    2 \u4E2A\u51FA\u5C40\uFF1A\u6C2F\u8680\uFF083 \u53F7\uFF09 \u2014\u2014 \u88AB
+    \u8D64\u55B5\uFF081 \u53F7\uFF09 \u78E8\u6B7B\uFF08\u4ED6 11 \u6761\u53D7\u51FB\u7EDF\u8BA1\u6709
+    10 \u6761\u6765\u81EA\u8D64\u55B5\uFF09\u3002\r\n\u7B2C 3 \u4E2A\u51FA\u5C40\uFF1A\u8D64\u55B5\uFF081
+    \u53F7\uFF09 \u2014\u2014 \u88AB \u671D\u9732\uFF084 \u53F7\uFF09 \u51FB\u6740\uFF08269M
+    \u5927\u7403\u649E\u4E0A\u5979\u62A4\u76FE\u4E3A 0 \u7684\u70AE\u5854\uFF09\u3002\r\n\u80DC\u8005\uFF1A\u671D\u9732\uFF084
+    \u53F7\uFF09 \u2014\u2014 \u7EC8\u5C40 852,606 \u50CF\u7D20\uFF08\u7EA6 83%\uFF09\u3001267M
+    \u5B50\u5F39\u50A8\u5907\u3002"
   propLimit: 0
 --- !u!1 &679898013277931544
 GameObject:

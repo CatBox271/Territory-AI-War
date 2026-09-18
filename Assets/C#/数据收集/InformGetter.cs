@@ -130,6 +130,8 @@ public class InformGetter : MonoBehaviour
     public static void GetInfo(StringBuilder builder, int stage, bool clearDamage = false)
     {
         builder.AppendLine(); builder.AppendLine(IntelInfoStart);
+        // 回合数：全局第几轮 + 这张卡自己的第几轮（预行动的 reuse 按 AI 轮次算）
+        builder.Append("当前回合: 全局第 ").Append(AIAgent.CurrentRound).Append(" 轮，你的第 ").Append(ReadyActionManager.RoundOf(stage)).AppendLine(" 轮");
         //自己的道具栈放最前面，AI 第一眼就能看到
         GetInfoProp(builder, stage);
         AppendTurretControlNotice(builder, stage);
@@ -137,6 +139,7 @@ public class InformGetter : MonoBehaviour
         AppendTurretMoveNotice(builder, stage);
         AppendTurretPositions(builder, stage);
         AppendNearestEnemyTerritory(builder, stage);
+        AppendReadyActionPanel(builder, stage);
         TurretControlLostReason.Remove(stage);
         TurretMoveNotice.Remove(stage);
 
@@ -251,12 +254,22 @@ public class InformGetter : MonoBehaviour
         for (int s = 0; s < area.Length; s++)
         {
             builder.AppendLine($"  [{s}]号阵营: {area[s]}");
+            ReadyActionManager.SetTerritory(s, area[s]);   // 预行动条件 territory 用（每轮刷一次，不每帧扫图）
         }
     }
     #endregion
 
 
     /// <summary>把请求方自己受到的伤害统计拼进 AI 上下文（阵营私有）。</summary>
+
+    /// <summary>预行动面板：每回合把挂着的预行动全列出来（条件是否满足、执行了几次、失败合并）。</summary>
+    private static void AppendReadyActionPanel(StringBuilder builder, int stage)
+    {
+        string text = ReadyActionManager.DescribeFor(stage);
+        if (string.IsNullOrEmpty(text)) return;
+        builder.AppendLine();
+        builder.Append(text);
+    }
 
     /// <summary>炮塔控制自动断开提示：每个阵营每次 GetInfo 最多输出一次。</summary>
     private static void AppendTurretControlNotice(StringBuilder builder, int stage)
@@ -555,6 +568,10 @@ public class InformGetter : MonoBehaviour
         float selfShieldR = self.shield != null ? self.shield.transform.lossyScale.x : 0f;
         bool shieldAlive = self.shield_value > 0 && selfShieldR > 0f;
 
+        // 预行动条件 warn--… 用的统计（也只在这里每轮刷一次）
+        int shellCount = 0, ballCount = 0;
+        float shellEta = 99f, ballEta = 99f;
+
         foreach (var kv in Oitems)
         {
             if (kv.Key == stage) continue;
@@ -596,8 +613,12 @@ public class InformGetter : MonoBehaviour
                     builder.Append((selfShieldR * 2).ToString("0.0")); builder.Append(")");
                 }
                 builder.AppendLine(); builder.Append("}");
+                if (isShell) { shellCount++; if (impactT < shellEta) shellEta = impactT; }
+                else { ballCount++; if (impactT < ballEta) ballEta = impactT; }
             }
         }
+
+        ReadyActionManager.SetWarnings(stage, shellCount, shellEta, ballCount, ballEta);
     }
 
     /// <summary>
@@ -731,6 +752,10 @@ public class InformGetter : MonoBehaviour
         builder.Append(bestWorld.x.ToString("0.00")); builder.Append(", ");
         builder.Append(bestWorld.y.ToString("0.00")); builder.Append(")，距离 ");
         builder.Append(dist.ToString("0.00"));
+        builder.Append("｜threatPos=("); builder.Append(bestWorld.x.ToString("0.00")); builder.Append(", ");
+        builder.Append(bestWorld.y.ToString("0.00")); builder.Append(")，threat="); builder.Append(dist.ToString("0.00"));
+        // 给预行动系统缓存一份（它在每帧评估威胁类条件；全图扫描太贵，只在这里每轮刷一次）
+        ReadyActionManager.SetThreat(stage, bestWorld, dist);
         if (dist <= EnemyTerritoryDangerDistance) builder.Append("【危险：距离3】");
         builder.Append("，相对方向 "); builder.Append(dirText);
         builder.AppendLine();
@@ -807,6 +832,7 @@ public class InformGetter : MonoBehaviour
             GuidToTransform.Remove(item.guid);
         }
         builder.AppendLine(); builder.Append("}");
+        ReadyActionManager.SetMarbleCount(key, items.Count);   // 预行动条件 marble 用
     }
 
 
@@ -814,8 +840,12 @@ public class InformGetter : MonoBehaviour
     {
         var props = MapConfig.Instance.teamProps[stage];
         if (props.Count <= 0) return;
+
+        int limit = MapConfig.Instance.propLimit;
+        bool full = props.Count >= limit;
+
         builder.AppendLine(); builder.Append("{");
-        builder.Append("当前己方道具栈(上限:"); builder.Append(MapConfig.Instance.propLimit); builder.Append("): ");
+        builder.Append("当前己方道具栈(上限:"); builder.Append(limit); builder.Append("): ");
         foreach (var p in props)
         {
             builder.AppendLine(); builder.Append("(");
@@ -823,6 +853,22 @@ public class InformGetter : MonoBehaviour
             builder.AppendLine(); builder.Append(")");
         }
         builder.AppendLine(); builder.Append("}");
+
+        // 满槽提醒：空槽才会积累升级值，而且满槽时新道具会溢出被立刻用掉。
+        // 这条只在满的时候出现，AI 很容易忽略"留一个空位"这件事，所以直接写进情报。
+        if (full)
+        {
+            builder.AppendLine();
+            builder.Append("⚠ 你的道具栏已经满了（" + props.Count + "/" + limit + "）：");
+            builder.AppendLine();
+            builder.Append("**空槽才会积累升级进度**（升级值只按空槽数量涨），满槽期间你**拿不到任何升级**；");
+            builder.AppendLine();
+            builder.Append("而且之后拿到的道具会**溢出并立刻被用掉**（用在哪由不得你）。所以至少要留 1 个空位：");
+            builder.AppendLine();
+            builder.Append("用掉一个不划算的道具，或者用 merge_prop 把两个同种道具并成一格腾空位——");
+            builder.AppendLine();
+            builder.Append("数值得留着的话就合并，数值小且用不上的就赶紧用掉。");
+        }
     }
 
     #endregion

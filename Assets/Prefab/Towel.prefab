@@ -216,9 +216,9 @@ MonoBehaviour:
         outWeight: 0.15719318
       - serializedVersion: 3
         time: 21
-        value: 0.0024060057
+        value: 0.004812012
         inSlope: -0.00035412874
-        outSlope: 2.5870072e-11
+        outSlope: -0.000267334
         tangentMode: 65
         weightedMode: 0
         inWeight: 0.33333334
@@ -226,7 +226,7 @@ MonoBehaviour:
       - serializedVersion: 3
         time: 30
         value: 0.002406006
-        inSlope: 2.5870072e-11
+        inSlope: -0.000267334
         outSlope: 0.000037360205
         tangentMode: 5
         weightedMode: 0
@@ -292,7 +292,7 @@ MonoBehaviour:
   aimController: {fileID: 7866295218095374167}
   turretUpgraded: 0
   shieldUpgradeOwned: 0
-  shieldBreakInvincibleTime: 7
+  shieldBreakInvincibleTime: 10
   upgradedBulletRadiusScale: 1.5
   upgradedBulletImpactScale: 1.5
   invincibleBlink: 1
@@ -359,7 +359,7 @@ MonoBehaviour:
   loop: 1
   active: 1
   guardMode: 1
-  guardRadius: 3
+  guardRadius: 4
   guardUpdateInterval: 0.2
   guardCompute: {fileID: 7200000, guid: b63ecda2ccb94b768325f38abd37093b, type: 3}
 --- !u!114 &7866295218095374167
