@@ -1876,6 +1876,53 @@ public class AIAgent : MonoBehaviour
                 sb.Append("\n    本轮重试原因：" + string.Join(" / ", retryReasons));
 
             Debug.Log(sb.ToString());
+            AppendTimingCsv(round, wallMs, all, sumSends, sumRequest, sumFormat, sumRetry, sumBehavior);
+        }
+
+        /// <summary>
+        /// Debug：把这一轮各家的耗时追加到 CSV（`persistentDataPath/Timing/timing.csv`）。
+        /// 只用来看"换架构前后"的平均耗时，不参与任何玩法；写失败只打一条 warning。
+        /// 列：time,round,who,wallMs,totalMs,requestMs,sends,formatRetries,retryMs,overflowRetries,behaviorMs,toolSumMs,tools
+        /// </summary>
+        private static void AppendTimingCsv(int round, double wallMs, List<RoundTiming> all,
+            int sumSends, double sumRequest, int sumFormat, double sumRetry, double sumBehavior)
+        {
+            try
+            {
+                string dir = System.IO.Path.Combine(Application.persistentDataPath, "Timing");
+                System.IO.Directory.CreateDirectory(dir);
+                string path = System.IO.Path.Combine(dir, "timing.csv");
+                bool isNew = !System.IO.File.Exists(path);
+
+                var sb = new StringBuilder();
+                if (isNew)
+                    sb.AppendLine("time,round,who,wallMs,totalMs,requestMs,sends,formatRetries,retryMs,overflowRetries,behaviorMs,toolSumMs,tools");
+
+                string stamp = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                sb.AppendLine($"{stamp},{round},ROUND,{wallMs:0},,,{sumSends},{sumFormat},{sumRetry:0},,{sumBehavior:0},,");
+
+                foreach (RoundTiming t in all)
+                {
+                    double toolSum = 0;
+                    var toolNames = new List<string>();
+                    foreach (string line in t.toolLines ?? new List<string>())
+                    {
+                        int sp = line.LastIndexOf(' ');
+                        if (sp <= 0) continue;
+                        string nm = line.Substring(0, sp);
+                        string msText = line.Substring(sp + 1).Replace("ms", "").Replace("（失败）", "");
+                        if (double.TryParse(msText, out double ms)) toolSum += ms;
+                        if (!toolNames.Contains(nm)) toolNames.Add(nm);
+                    }
+                    sb.AppendLine($"{stamp},{round},{t.who},{wallMs:0},{t.totalMs:0},{t.requestMs:0},{t.sends},{t.formatRetries},{t.retryMs:0},{t.overflowRetries},{t.behaviorMs:0},{toolSum:0},{string.Join("|", toolNames)}");
+                }
+
+                System.IO.File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[耗时统计] 写 CSV 失败：{e.Message}");
+            }
         }
 
         private System.Diagnostics.Stopwatch roundWatch;
