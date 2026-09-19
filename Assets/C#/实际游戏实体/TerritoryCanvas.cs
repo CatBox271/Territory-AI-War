@@ -26,6 +26,10 @@ public class TerritoryCanvas : MonoBehaviour
     public BorderDirectionSettings borderLeft = new BorderDirectionSettings { width = 2f, bright = 1f };
     public BorderDirectionSettings borderRight = new BorderDirectionSettings { width = 2f, bright = 1f };
 
+    [Header("地图显示：亮度 / 对比度（1 = 原样）")]
+    [Range(0f, 3f)] public float mapBrightness = 1f;
+    [Range(0f, 3f)] public float mapContrast = 1f;
+
     private RenderTexture dataRT;
     private RenderTexture displayRT;
     private RenderTexture flagRT;
@@ -137,6 +141,8 @@ public class TerritoryCanvas : MonoBehaviour
         paintCompute.SetInt("_Resolution", config.resolution);
         paintCompute.SetVector("_BorderWidths", new Vector4(borderUp.width, borderDown.width, borderLeft.width, borderRight.width));
         paintCompute.SetVector("_BorderBrightness", new Vector4(borderUp.bright, borderDown.bright, borderLeft.bright, borderRight.bright));
+        paintCompute.SetFloat("_MapBrightness", mapBrightness);
+        paintCompute.SetFloat("_MapContrast", mapContrast);
         SetColorArray(paintCompute);
         paintCompute.Dispatch(displayKernel, config.resolution / 8, config.resolution / 8, 1);
     }
