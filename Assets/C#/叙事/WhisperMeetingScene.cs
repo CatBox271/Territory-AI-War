@@ -113,7 +113,7 @@ public class WhisperMeetingScene : StoryScene
         yield return SlideOutAll(s,
             new[] { title, leftFace, leftPlate, rightFace, rightPlate, whisperBox, think, replyBox },
             StoryTeller.Direction.Botton, StageStyle.Distance);
-        yield return s.WaitStage(StageStyle.Short);
+        //yield return s.WaitStage(StageStyle.Short);
     }
 
     private static Color Accent(int owner)

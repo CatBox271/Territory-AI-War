@@ -2100,6 +2100,40 @@ public class AIAgent : MonoBehaviour
             "whisper"
         };
 
+        /// <summary>行为检查先走 JEV：超过这个秒数没给出判定就退回 ds-flash。</summary>
+        private const int BehaviorCheckJevTimeoutSeconds = 2;
+
+        /// <summary>
+        /// JEV 版要问的工具：全部 6 个（和 BehaviorCheckAllowedTools 一致）。
+        /// 用户 2026-09-21 拍板：这里比 ds-flash 那版更严 —— 那版提示词只允许输出
+        /// use_prop / control_turret / move_turret / whisper，merge_prop、ready_action
+        /// "说了没做"它不会报（真实案例氯蚀#20 就是这么漏的）。加进来之后这两类也能被抓出并触发补执行。
+        /// </summary>
+        private static readonly string[] BehaviorCheckJevTools = { "use_prop", "merge_prop", "ready_action", "control_turret", "move_turret", "whisper" };
+
+        /// <summary>JEV 行为检查的题：每个工具一道 noul 题（= 是否"说了要做、实际没调用"）。</summary>
+        private static Dictionary<string, JEVRequest.JEVQuestion> BuildBehaviorCheckJevQuestions()
+        {
+            var questions = new Dictionary<string, JEVRequest.JEVQuestion>();
+            foreach (string toolName in BehaviorCheckJevTools)
+            {
+                string what = toolName switch
+                {
+                    "use_prop" => "使用道具／武器（use_prop）",
+                    "merge_prop" => "把两个同种道具合并成一个（merge_prop）",
+                    "ready_action" => "登记／管理预行动（ready_action）",
+                    "control_turret" => "控制自己炮塔瞄准（control_turret）",
+                    "move_turret" => "移动自己的炮塔（move_turret）",
+                    _ => "给其他 AI 发悄悄话（whisper）",
+                };
+                questions[toolName] = JEVRequest.JEVQuestion.Noul(
+                    $"目标 AI 本轮是否声称要{what}，但上面的【本轮实际工具调用】里没有出现 {toolName}？" +
+                    "也就是“说了要做具体行动、却没有调用对应工具”。注意：情绪、嘲讽、喊口号、泛目标（比如“我要赢”）不算；" +
+                    "发言只是在描述或配合已经发生的工具调用，也不算。");
+            }
+            return questions;
+        }
+
         private bool openingRetryMode;
         private List<DeepSeekMessage> openingLastMessages;
 
@@ -2727,17 +2761,83 @@ public class AIAgent : MonoBehaviour
             return list;
         }
         /// <summary>
-        /// 行为检查：把本轮 content 与工具调用交给 thinking disabled 的 flash 模型判断。
+        /// 行为检查：先走 JEV（TypeSafe System One，只做判断、不生成文本），
+        /// 2 秒内拿不到判定（超时 / 网络失败 / 没读到 key / 服务端报错）就退回原来的 ds-flash 检查。
         /// 返回“说了要做但没调用”的工具名列表。
         /// </summary>
         private async Task<List<string>> RunBehaviorCheckAsync(int roundStartIndex)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
             string roundContents = CollectRoundAssistantContents(roundStartIndex);
 
             if (游戏关键词.TrueForAll(s => !roundContents.Contains(s))) return new();
 
             string roundToolCalls = CollectRoundToolCalls(roundStartIndex);
+
+            // ---------- 先试 JEV ----------
+            // state 放素材、questions 放判断（4 道题共用一份 state，输入只算一次）。
+            var jevState = new
+            {
+                角色 = name,
+                本轮公开发言 = roundContents,
+                本轮实际工具调用 = roundToolCalls,
+                可用工具 = new Dictionary<string, string>
+                {
+                    ["use_prop"] = "使用自己武器栏里的道具（护盾、霰弹、扫射、大球、穿甲等）",
+                    ["merge_prop"] = "把两个同种道具合并成一个（数值相加、省一个槽位，免费）",
+                    ["ready_action"] = "登记/管理预行动（等条件满足后自动替他执行某个工具）",
+                    ["control_turret"] = "控制自己炮塔瞄准",
+                    ["move_turret"] = "移动自己的炮塔（第一次调用只是预览、不会移动，确认后才会真的移动）",
+                    ["whisper"] = "给其他 AI 发悄悄话"
+                },
+                判定规则 = new[]
+                {
+                    "只有明确声称要做具体游戏行动、且对应工具没有出现在“实际工具调用”里时，才算缺失。",
+                    "情绪、嘲讽、喊口号、泛目标（如“我要赢”）不算缺失。",
+                    "发言只是在描述或配合已经发生的工具调用，不算缺失。",
+                    "道具的“合并”和“使用”是两件不同的事：说要把两个道具合并（merge_prop），只算合并、不算使用道具（use_prop）；" +
+                    "只有明确要把某个道具用出去／打出去（开火、打出、放出去），才算 use_prop。逐字提到某个道具的名字本身不算任何行动。"
+                }
+            };
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            JEVRequest.TimeoutSeconds = BehaviorCheckJevTimeoutSeconds;
+            JEVRequest.JEVResult jev = await JEVRequest.Ask(jevState, BuildBehaviorCheckJevQuestions());
+            sw.Stop();
+
+            if (jev.ok)
+            {
+                var jevMissing = new List<string>();
+                var probabilities = new List<string>();
+                foreach (string toolName in BehaviorCheckJevTools)
+                {
+                    double p = jev.Noul(toolName);
+                    probabilities.Add($"{toolName}={p:0.00}");
+                    if (p > 0.5) jevMissing.Add(toolName);
+                }
+
+                Debug.Log($"[AI行为检查] {name} 【JEV】判定完成，用时 {sw.Elapsed.TotalSeconds:F2}s（模型 {jev.model}，" +
+                          $"输入 {jev.inputTokens} token ≈ ${jev.CostUsd:F6}）。\n" +
+                          $"发言：{roundContents}\n工具调用：{roundToolCalls}\n概率：{string.Join("  ", probabilities)}\n" +
+                          $"缺失工具：{(jevMissing.Count > 0 ? string.Join(", ", jevMissing) : "无")}");
+                if (jevMissing.Count > 0)
+                    Debug.LogWarning($"[AI行为检查] {name} 检测到说做未做（JEV）：{string.Join(", ", jevMissing)}");
+
+                return jevMissing;
+            }
+
+            Debug.LogWarning($"[AI行为检查] {name} 【JEV】未给出判定，用时 {sw.Elapsed.TotalSeconds:F2}s，" +
+                             $"原因：{jev.error} → 退回 ds-flash 检查");
+
+            return await RunBehaviorCheckWithFlashAsync(roundContents, roundToolCalls);
+        }
+
+        /// <summary>
+        /// 行为检查的旧路径（ds-flash）：JEV 超时 / 失败时退回这里，判断逻辑与原来完全一致。
+        /// 返回“说了要做但没调用”的工具名列表。
+        /// </summary>
+        private async Task<List<string>> RunBehaviorCheckWithFlashAsync(string roundContents, string roundToolCalls)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
 
             DeepSeekRequest checkerRequest = new DeepSeekRequest
             {
@@ -2788,7 +2888,7 @@ public class AIAgent : MonoBehaviour
             sw.Stop();
 
             List<string> missingTools = ParseBehaviorCheckVerdict(checkerText);
-            Debug.Log($"[AI行为检查] {name} 检查完成，用时 {sw.Elapsed.TotalSeconds:F2}s。\n" +
+            Debug.Log($"[AI行为检查] {name} 【ds-flash·JEV 退回】检查完成，用时 {sw.Elapsed.TotalSeconds:F2}s。\n" +
                       $"发言：{roundContents}\n工具调用：{roundToolCalls}\n模型输出：\n{checkerText}\n" +
                       $"缺失工具：{(missingTools.Count > 0 ? string.Join(", ", missingTools) : "无")}");
             if (missingTools.Count > 0)
