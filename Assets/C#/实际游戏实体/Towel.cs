@@ -71,6 +71,12 @@ public class Towel : MonoBehaviour, IStageValue
     /// <summary>勾上则每座塔按自己的实例 ID 错开相位（不消耗 Random，不影响其它随机数）</summary>
     public bool invincibleBlinkRandomPhase = false;
 
+    [Header("地图炫光（MapGlow 组件挂在 prefab 上，这里只负责按阵营赋色）")]
+    [Tooltip("prefab 上的 MapGlow；留空会自动找本物体上的第一个")]
+    public MapGlow glow;
+    [Tooltip("用自己阵营的亮色当炫光颜色（MapConfig.GetColor(stage, Bright)）；关掉就不动颜色，用 MapGlow 自己填的那个")]
+    public bool glowUseTeamColor = true;
+
     private static readonly int InvincibleGlowID = Shader.PropertyToID("_InvincibleGlow");
     private MaterialPropertyBlock blinkBlock;
     private float blinkGlow = -1f;
@@ -217,6 +223,11 @@ public class Towel : MonoBehaviour, IStageValue
     {
         lastFireDirection = transform.up;
         sp.color = config.GetColor(stage, MapConfig.ColorStage.Towel);
+
+        // 塔身底下那圈炫光：组件挂在 prefab 上，这里只按阵营赋色（形状/半径/强度都在 prefab 的 MapGlow 上调）
+        if (glow == null) glow = GetComponent<MapGlow>();
+        if (glow != null && glowUseTeamColor)
+            glow.SetColor(config.GetColor(stage, MapConfig.ColorStage.Bright));
         value = config.TowelDefaultBullets;
         PaintInitialCircle();
         LookAt(Random.insideUnitCircle / 100f);

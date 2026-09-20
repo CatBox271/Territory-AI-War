@@ -63,6 +63,7 @@ GameObject:
   - component: {fileID: 525751960054713117}
   - component: {fileID: 618785998335546845}
   - component: {fileID: 7866295218095374167}
+  - component: {fileID: 931376183223066681}
   m_Layer: 0
   m_Name: Towel
   m_TagString: Towel
@@ -302,6 +303,8 @@ MonoBehaviour:
   invincibleBlinkSoftness: 0.15
   invincibleBlinkPhase: 0
   invincibleBlinkRandomPhase: 0
+  glow: {fileID: 0}
+  glowUseTeamColor: 1
   tipStackGap: 0.25
   tipFallbackHeight: 0.6
   isDead: 0
@@ -377,6 +380,87 @@ MonoBehaviour:
   auto: {fileID: 618785998335546845}
   towel: {fileID: 6080560076359578667}
   MaxDis: 5
+--- !u!114 &931376183223066681
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1997610200187619198}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7e2d5149a3f4c68a05e7b2d9c4318f6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shape: 0
+  radius: -7.74
+  thickness: 0.71
+  softness: 0.56
+  falloff:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0.25873455
+      value: 0.98068565
+      inSlope: 5.480218
+      outSlope: 5.480218
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.37434512
+    - serializedVersion: 3
+      time: 0.50067115
+      value: 2.6492088
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0.72292507
+      value: 1.2347988
+      inSlope: -6.7793007
+      outSlope: -6.7793007
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.2077753
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  color: {r: 1, g: 1, b: 1, a: 1}
+  intensity: 1.4
+  metal: 1
+  shade: 0.931
+  sheen: 0.69
+  sheenCount: 0
+  sheenSpeed: 3
+  rim: 0
+  rimWidth: 0.018
+  reflectOffset: 0.27
+  follow: 1
+  followScale: 0
+  visible: 1
+  playOnAwake: 1
 --- !u!1 &2721065759024970260
 GameObject:
   m_ObjectHideFlags: 0
@@ -390,6 +474,7 @@ GameObject:
   - component: {fileID: 4491979993208232202}
   - component: {fileID: 1050513759888372499}
   - component: {fileID: 5851494967785416457}
+  - component: {fileID: 5824628311948106012}
   m_Layer: 7
   m_Name: Shield
   m_TagString: Shield
@@ -488,6 +573,78 @@ MonoBehaviour:
   sp: {fileID: 2351046282652987540}
   intensityPerHit: 0.4
   decayDuration: 3
+--- !u!114 &5824628311948106012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2721065759024970260}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7e2d5149a3f4c68a05e7b2d9c4318f6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shape: 1
+  radius: 1.25
+  thickness: 0.4
+  softness: 0
+  falloff:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 2.0300865
+      outSlope: 2.0300865
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 0.29822415
+      value: 0.6054208
+      inSlope: 5.2996855
+      outSlope: 5.2996855
+      tangentMode: 1
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 0.5
+      value: 2
+      inSlope: 0.08246902
+      outSlope: -0.32317057
+      tangentMode: 1
+      weightedMode: 0
+      inWeight: 0.7783506
+      outWeight: 0.47689784
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: -4
+      outSlope: -4
+      tangentMode: 34
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  color: {r: 1, g: 1, b: 1, a: 1}
+  intensity: 4.11
+  metal: 1
+  shade: 0.552
+  sheen: 1.46
+  sheenCount: 1.7
+  sheenSpeed: 1.5
+  rim: 1.22
+  rimWidth: 0.299
+  reflectOffset: 1.11
+  follow: 1
+  followScale: 1
+  visible: 1
+  playOnAwake: 1
 --- !u!1 &4338203946166271588
 GameObject:
   m_ObjectHideFlags: 0

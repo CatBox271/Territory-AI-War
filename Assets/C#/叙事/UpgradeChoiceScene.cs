@@ -223,7 +223,7 @@ public class UpgradeChoiceScene : StoryScene
             if (o.icon != null) all.Add(o.icon);
         }
         yield return SlideOutAll(s, all, StoryTeller.Direction.Botton, StageStyle.Distance);
-        yield return s.WaitStage(StageStyle.Short);
+        //yield return s.WaitStage(StageStyle.Short);
     }
 
     private void BuildOptions(Color accent)

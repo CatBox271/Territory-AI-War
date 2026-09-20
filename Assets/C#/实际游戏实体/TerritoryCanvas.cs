@@ -30,6 +30,10 @@ public class TerritoryCanvas : MonoBehaviour
     [Range(0f, 3f)] public float mapBrightness = 1f;
     [Range(0f, 3f)] public float mapContrast = 1f;
 
+    [Header("地图炫光：整体强度（一个参数调所有 MapGlow 炫光）")]
+    [Range(0f, 8f)] public float glowGlobalIntensity = 1f;
+    float lastGlowGlobalIntensity = -1f;
+
     private RenderTexture dataRT;
     private RenderTexture displayRT;
     private RenderTexture flagRT;
@@ -122,6 +126,12 @@ public class TerritoryCanvas : MonoBehaviour
 
     void Update()
     {
+        // 炫光整体强度：只在滑条动过时才写，代码里直接改 MapGlow.GlobalIntensity 不会被这里覆盖
+        if (!Mathf.Approximately(glowGlobalIntensity, lastGlowGlobalIntensity))
+        {
+            lastGlowGlobalIntensity = glowGlobalIntensity;
+            MapGlow.GlobalIntensity = glowGlobalIntensity;
+        }
         if (displayKernel >= 0) RefreshDisplay();
     }
 
