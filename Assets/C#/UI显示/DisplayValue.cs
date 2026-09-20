@@ -66,7 +66,7 @@ public class DisplayValue : MonoBehaviour
             return;
         }
 
-        if (++skip < 15) return;
+        if (++skip < 5) return;
         skip = 0;
 
         if (stageValue == null || text == null) return;

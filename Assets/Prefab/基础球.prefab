@@ -167,6 +167,7 @@ GameObject:
   - component: {fileID: 3767908013893368130}
   - component: {fileID: 6264478398640388796}
   - component: {fileID: 2128266677755943854}
+  - component: {fileID: 3684220770750576345}
   m_Layer: 6
   m_Name: "\u57FA\u7840\u7403"
   m_TagString: Ball
@@ -358,6 +359,33 @@ MonoBehaviour:
   fastA: 2
   slowA: 4
   hurt_fast_pause: 0.3
+  Glow: {fileID: 0}
+  Brightness:
+    curve:
+      serializedVersion: 2
+      m_Curve:
+      - serializedVersion: 3
+        time: 0
+        value: 1
+        inSlope: 0.54688656
+        outSlope: 0.54688656
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0.058748465
+      - serializedVersion: 3
+        time: 40
+        value: 100
+        inSlope: 7.723765
+        outSlope: 7.723765
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0.042276002
+        outWeight: 0
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  BrightnessTimes: 1
 --- !u!114 &2128266677755943854
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -373,6 +401,69 @@ MonoBehaviour:
   stage: 2
   value: 1048576
   AutoDestroy: 1
+--- !u!114 &3684220770750576345
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2741485188931532298}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7e2d5149a3f4c68a05e7b2d9c4318f6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shape: 1
+  radius: 0.24
+  thickness: 2.3
+  softness: 0.25
+  falloff:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0.80308837
+      value: 0.9423462
+      inSlope: -8.848427
+      outSlope: -8.848427
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.07797214
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  color: {r: 1, g: 1, b: 1, a: 1}
+  intensity: 5.55
+  metal: 1
+  shade: 1
+  sheen: 0.255
+  sheenCount: 4.3
+  sheenSpeed: 5
+  rim: 0.381
+  rimWidth: 0.25
+  reflectOffset: 0.123
+  follow: 1
+  followScale: 1
+  visible: 1
+  playOnAwake: 1
 --- !u!1 &4278316083713829892
 GameObject:
   m_ObjectHideFlags: 0

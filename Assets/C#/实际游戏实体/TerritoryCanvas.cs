@@ -26,6 +26,14 @@ public class TerritoryCanvas : MonoBehaviour
     public BorderDirectionSettings borderLeft = new BorderDirectionSettings { width = 2f, bright = 1f };
     public BorderDirectionSettings borderRight = new BorderDirectionSettings { width = 2f, bright = 1f };
 
+    [Header("地图显示：亮度 / 对比度（1 = 原样）")]
+    [Range(0f, 3f)] public float mapBrightness = 1f;
+    [Range(0f, 3f)] public float mapContrast = 1f;
+
+    [Header("地图炫光：整体强度（一个参数调所有 MapGlow 炫光）")]
+    [Range(0f, 8f)] public float glowGlobalIntensity = 1f;
+    float lastGlowGlobalIntensity = -1f;
+
     private RenderTexture dataRT;
     private RenderTexture displayRT;
     private RenderTexture flagRT;
@@ -118,6 +126,12 @@ public class TerritoryCanvas : MonoBehaviour
 
     void Update()
     {
+        // 炫光整体强度：只在滑条动过时才写，代码里直接改 MapGlow.GlobalIntensity 不会被这里覆盖
+        if (!Mathf.Approximately(glowGlobalIntensity, lastGlowGlobalIntensity))
+        {
+            lastGlowGlobalIntensity = glowGlobalIntensity;
+            MapGlow.GlobalIntensity = glowGlobalIntensity;
+        }
         if (displayKernel >= 0) RefreshDisplay();
     }
 
@@ -137,6 +151,8 @@ public class TerritoryCanvas : MonoBehaviour
         paintCompute.SetInt("_Resolution", config.resolution);
         paintCompute.SetVector("_BorderWidths", new Vector4(borderUp.width, borderDown.width, borderLeft.width, borderRight.width));
         paintCompute.SetVector("_BorderBrightness", new Vector4(borderUp.bright, borderDown.bright, borderLeft.bright, borderRight.bright));
+        paintCompute.SetFloat("_MapBrightness", mapBrightness);
+        paintCompute.SetFloat("_MapContrast", mapContrast);
         SetColorArray(paintCompute);
         paintCompute.Dispatch(displayKernel, config.resolution / 8, config.resolution / 8, 1);
     }

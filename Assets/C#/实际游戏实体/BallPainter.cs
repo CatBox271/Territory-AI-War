@@ -31,6 +31,11 @@ public class BallPainter : MonoBehaviour, IStageValue
     [Tooltip("受击加速暂停")]
     public float hurt_fast_pause = 0.3f;
 
+    [Header("HDR")]
+    public MapGlow Glow;
+    public CurveTransform Brightness;
+    public float BrightnessTimes = 1;
+
     private TerritoryCanvas canvas;
     private MapConfig config;
     private Vector2 lastWorldPos;
@@ -44,6 +49,7 @@ public class BallPainter : MonoBehaviour, IStageValue
         canvas = FindObjectOfType<TerritoryCanvas>();
         if (sp == null) sp = GetComponent<SpriteRenderer>();
         rb = GetComponent<Rigidbody2D>();
+        if (Glow == null) Glow = GetComponent<MapGlow>();
         config = MapConfig.Instance;
     }
 
@@ -62,6 +68,7 @@ public class BallPainter : MonoBehaviour, IStageValue
         {
             lastValue = value;
             SetScaleMass();
+            SetHDRColor();
         }
 
         float ts = transform.localScale.x;
@@ -128,6 +135,12 @@ public class BallPainter : MonoBehaviour, IStageValue
         aimScale = s;
         TR.widthMultiplier = s;
         rb.mass = value / 81920000f;
+    }
+
+    void SetHDRColor()
+    {
+        if(Glow != null)
+        Glow.intensity = Brightness.Evaluate(value) * BrightnessTimes; 
     }
 
     void ColorSet()

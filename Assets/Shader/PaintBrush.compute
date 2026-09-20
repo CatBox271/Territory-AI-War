@@ -34,6 +34,8 @@ uint _HasTex3;
 uint _HasTex4;
 float4 _BorderWidths;
 float4 _BorderBrightness;
+float _MapBrightness;
+float _MapContrast;
 float PointToSegmentDistSq(float2 p, float2 a, float2 b)
 {
     float2 ab = b - a, ap = p - a;
@@ -144,6 +146,10 @@ void CSDisplay(uint3 id : SV_DispatchThreadID)
     col.rgb *= DirectionBorderBoost(coord, stage, 0, 1, (int)_BorderWidths.y, _BorderBrightness.y);
     col.rgb *= DirectionBorderBoost(coord, stage, 1, 0, (int)_BorderWidths.z, _BorderBrightness.z);
     col.rgb *= DirectionBorderBoost(coord, stage, -1, 0, (int)_BorderWidths.w, _BorderBrightness.w);
+
+    // 亮度 / 对比度（1 = 原样，对比度以 0.5 为中心）
+    col.rgb = (col.rgb - 0.5) * _MapContrast + 0.5;
+    col.rgb *= _MapBrightness;
 
     DisplayResult[coord] = col;
 }
