@@ -82,8 +82,10 @@ Material:
     - _UVSec: 0
     - _ZWrite: 1
     m_Colors:
+    - _ClipRect: {r: -1.9, g: -2.2075, b: 1.8999993, a: 2.2075}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _ContentRect: {r: -0.5, g: -0.5, b: 0.5, a: 0.5}
+    - _ContentShift: {r: 0, g: 0, b: 0, a: 0}
     - _EdgeBottom: {r: 0, g: 0, b: 1, a: 1}
     - _EdgeBottomMid: {r: 0.5, g: -1, b: 0, a: 0}
     - _EdgeLeft: {r: 0, g: 0, b: 1, a: 1}

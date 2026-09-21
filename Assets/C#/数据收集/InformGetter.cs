@@ -481,7 +481,7 @@ public class InformGetter : MonoBehaviour
     #endregion
 
     #region 终局提示
-    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球、穿甲弹和子弹清掉，再把领土刷到 98%，这局才会结束；别在最后被反杀。";
+    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球、穿甲弹和子弹清掉，再把全图领土刷到 100%（一个像素都别留给中立），这局才会结束；别在最后被反杀。";
 
     /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球或穿甲弹；判据同撞击预警（读 BallPainter.game_item_name）。</summary>
     public static bool HasEnemyBigBall(int stage)
@@ -501,7 +501,7 @@ public class InformGetter : MonoBehaviour
     }
 
     /// <summary>
-    /// 终局提示：只剩请求方一个阵营、且还有敌方大球或领土还没到 98% 时，在情报正文里多拼一行普通文本。
+    /// 终局提示：只剩请求方一个阵营、且还有敌方大球或领土还没到 100% 时，在情报正文里多拼一行普通文本。
     /// </summary>
     private static void AppendFinalRoundHint(StringBuilder builder, int stage)
     {
@@ -518,13 +518,13 @@ public class InformGetter : MonoBehaviour
         }
 
         bool needBall = HasEnemyBigBall(stage);
-        bool needMore = percent < 98f;
+        bool needMore = percent < 100f;   // 收官线已改成 100%（含中立地块），这里跟着走
         if (!needBall && !needMore) return;
 
         builder.AppendLine();
         builder.AppendLine(needBall
-            ? $"【终局提示】场上只剩你一个阵营了：先把还在飞的敌方大球和子弹清掉，再把领土刷到 98%（当前 {percent:0.#}%）就结束，别在最后被反杀。"
-            : $"【终局提示】场上只剩你一个阵营了：把领土刷到 98% 就结束（当前 {percent:0.#}%）。");
+            ? $"【终局提示】场上只剩你一个阵营了：先把还在飞的敌方大球和子弹清掉，再把全图领土刷到 100%（当前 {percent:0.#}%）就结束，别在最后被反杀。"
+            : $"【终局提示】场上只剩你一个阵营了：把全图领土刷到 100%（一个像素都别留给中立）就结束（当前 {percent:0.#}%）。");
     }
     #endregion
 

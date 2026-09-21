@@ -156,7 +156,6 @@ MonoBehaviour:
   _value: 0
   shield: {fileID: 2721065759024970260}
   _shield_value: 1048576
-  Radius: 1
   bulletSpeed: 3.6
   bigBallSpeed: 1
   bulletCount:
@@ -293,7 +292,7 @@ MonoBehaviour:
   aimController: {fileID: 7866295218095374167}
   turretUpgraded: 0
   shieldUpgradeOwned: 0
-  shieldBreakInvincibleTime: 10
+  shieldBreakInvincibleTime: 8
   upgradedBulletRadiusScale: 1.5
   upgradedBulletImpactScale: 1.5
   invincibleBlink: 1

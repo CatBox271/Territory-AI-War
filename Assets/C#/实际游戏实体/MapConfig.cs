@@ -103,6 +103,29 @@ public class MapConfig : MonoBehaviour
     [Tooltip("离开护盾时的随机偏转角（±度）")]
     public float PierceExitDeflectAngle = 30f;
 
+    [Header("子弹出膛环（Towel 的子弹从环形区域出膛，不从塔心出）")]
+    [Tooltip("出膛环半径（世界单位）：子弹沿瞄准方向、从塔心这个半径处出膛。0 = 关掉、恢复从塔心出膛")]
+    public float bulletSpawnRingRadius = 1f;
+    [Tooltip("环带厚度：出膛距离在这个厚度内随机（±一半），让出膛点落成一个环形区域而不是一条细线")]
+    public float bulletSpawnRingThickness = 0.15f;
+
+    [Header("子弹炫光（BulletGlowLayer：子弹位置发光 + 多段残影拖尾）")]
+    [Tooltip("总开关：关掉就不画（层仍然会自动创建，但一个光点都不提交）")]
+    public bool bulletGlowEnabled = true;
+    [Tooltip("光点半径（世界单位）。地图宽 worldSize=10 时，0.12 大约是一格涂色的十分之一")]
+    public float bulletGlowRadius = 0.12f;
+    [Tooltip("亮度：颜色取 GetColor(stage, ColorStage.Bullet)，再乘这个值")]
+    public float bulletGlowIntensity = 1f;
+    [Range(0.05f, 1f)]
+    [Tooltip("柔边：1 = 最柔（一大团光晕），越小核心越紧、外圈越淡")]
+    public float bulletGlowSoftness = 0.7f;
+    [Range(0, 16)]
+    [Tooltip("残影段数（环形缓冲记每颗子弹最近 N 帧的实际位置）：0 或 1 = 只画光点、不画拖尾")]
+    public int bulletGlowTrailSegments = 6;
+    [Range(0f, 1f)]
+    [Tooltip("残影每往后一段的亮度衰减：第 n 段亮度 = 强度 × (1 - 衰减)^n")]
+    public float bulletGlowTrailFade = 0.35f;
+
     [Header("Towel")]
     public int TowelDefaultBullets = 4096;
     public GameObject basicBallPrefab;

@@ -25,6 +25,9 @@ public class BulletManager : MonoBehaviour
     public int ActiveCount => activeCount;
     public static int MaxBullets => MAX_BULLETS;
 
+    /// <summary>子弹数据（只读用途：BulletGlowLayer 读位置/阵营/存活来画发光与残影；不要在外部改）。</summary>
+    public NativeArray<BulletData> Bullets => bullets;
+
     private NativeArray<BallCollider> ballColliders;
     private NativeArray<ShieldCollider> shieldColliders;
     private NativeArray<ShieldCollider> towelBodyColliders;

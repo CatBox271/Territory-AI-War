@@ -5,20 +5,22 @@ using UnityEngine;
 public class CrossEffectManager : MonoBehaviour
 {
     public static CrossEffectManager Instance;
+    public Queue<SlowSmall> inacive = new();
     public GameObject CE;
-
     private void Awake()
     {
         Instance = this;
+        AddItem(64);
     }
 
     public void Boom(Vector3 pos, Color col, int count = 15, float speed = 5f, float startSize = 0.5f, float DieSpeed = 1, Vector2 baseDir = default, float spreadDeg = 360f)
     {
         for (int i = 0; i < count; i++)
         {
-            GameObject go = Instantiate(CE, transform.parent);
+            var ss = GetItem();
+            var go = ss.gameObject;
+            go.SetActive(true);
             go.transform.position = pos;
-            SlowSmall ss = go.GetComponent<SlowSmall>();
 
             Vector2 dir;
             if (baseDir.sqrMagnitude > 0.0001f && spreadDeg < 360f)
@@ -31,8 +33,23 @@ public class CrossEffectManager : MonoBehaviour
             {
                 dir = Random.insideUnitCircle.normalized;
             }
-
             ss.SetVelocity(dir * speed, col, startSize, DieSpeed);
+        }
+    }
+
+    private SlowSmall GetItem()
+    {
+        if (inacive.Count == 0) AddItem();
+        return inacive.Dequeue();
+    }
+    private void AddItem(int times = 1)
+    {
+        for (int i = 0; i < times; i++)
+        {
+            GameObject go = Instantiate(CE, transform);
+            go.SetActive(false);
+            SlowSmall ss = go.GetComponent<SlowSmall>();
+            inacive.Enqueue(ss);
         }
     }
 }

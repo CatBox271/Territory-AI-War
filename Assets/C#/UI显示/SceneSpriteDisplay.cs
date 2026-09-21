@@ -83,7 +83,15 @@ public class SceneSpriteDisplay : MonoBehaviour
     private void OnEnable() { Rebuild(); }
     private void OnValidate() { Rebuild(); }
 
+    public bool keepRebuild = false;
+    private void LateUpdate()
+    {
+        if (keepRebuild) Rebuild();
+    }
+
     [ContextMenu("重建")]
+
+
     public void Rebuild()
     {
         rebuild = false;

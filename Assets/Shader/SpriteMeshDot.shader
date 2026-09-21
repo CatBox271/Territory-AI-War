@@ -29,6 +29,15 @@ Shader "Custom/SpriteMeshDot"
 
         [Toggle] _KeepDots ("圆点保留（0 = 圆孔挖空，1 = 保留圆点、其余挖空）", Float) = 0
 
+        // 可选裁切矩形 = (minX, minY, maxX, maxY)，**网格本地坐标**（1 单位 = 1 世界单位）。
+        // 默认全 0 = 空矩形 = **不裁切**（舞台上所有老用例行为完全不变）。
+        // 状态区那种"立绘超出面板的部分直接切断"就靠它：把面板矩形写进立绘的实例材质即可。
+        _ClipRect ("裁切矩形 minX,minY,maxX,maxY（空矩形 = 不裁）", Vector) = (0,0,0,0)
+
+        // 内容区平移 = (x, y)（**网格本地单位**）：把 sprite 在网格里滑动 —— 网格和物体都不动，只有图在动。
+        // 状态区那个"立绘偏移"就走它。默认 (0,0,0,0) = 不平移 → 舞台上老用例行为完全不变。
+        _ContentShift ("内容区平移 xy（本地单位）", Vector) = (0,0,0,0)
+
         _Alpha ("整体可见度 = 可见面积比例 0~1", Range(0,1)) = 1
 
         // 四条边各一个 Vector4 = (开始比例, 结束比例, 开始透明度, 结束透明度)
@@ -94,6 +103,8 @@ Shader "Custom/SpriteMeshDot"
             float _DotDensity;
             float _KeepDots;
             float _Alpha;
+            float4 _ClipRect;
+            float4 _ContentShift;
             float4 _EdgeTop;
             float4 _EdgeRight;
             float4 _EdgeBottom;
@@ -158,7 +169,9 @@ Shader "Custom/SpriteMeshDot"
             fixed4 frag (v2f i) : SV_Target
             {
                 float2 p = i.local;
-                float4 cr = _ContentRect;   // minX, minY, maxX, maxY（本地单位）
+                // 内容区（sprite 实际显示区）+ 可选平移：_ContentShift 让图在网格里滑动，网格/物体不动。
+                // 平移量同时作用到 xy 与 zw，于是内容掩码、uv 映射、四边渐变、网点中心一起跟着走。
+                float4 cr = _ContentRect + float4(_ContentShift.xy, _ContentShift.xy);
                 float aa = max(fwidth(p.x) + fwidth(p.y), 1e-5);
 
                 // 内容区（sprite 实际显示区）与贴图采样
@@ -192,6 +205,16 @@ Shader "Custom/SpriteMeshDot"
                 float t = 1.0 - vis;
                 float keep = step(0.5, _KeepDots);
                 float a = tex.a * insideContent;
+
+                // 可选裁切矩形：默认是空矩形（0,0,0,0）→ clipOn = 0、整段跳过，舞台上老用例行为完全不变。
+                // 非空时按**网格本地坐标**硬切（边缘同样走 aa 抗锯齿）：立绘超出面板的部分直接不显示。
+                float clipOn = step(1e-4, _ClipRect.z - _ClipRect.x) * step(1e-4, _ClipRect.w - _ClipRect.y);
+                if (clipOn > 0.5)
+                {
+                    float cx = saturate((p.x - _ClipRect.x) / aa) * saturate((_ClipRect.z - p.x) / aa);
+                    float cy = saturate((p.y - _ClipRect.y) / aa) * saturate((_ClipRect.w - p.y) / aa);
+                    a *= cx * cy;
+                }
 
                 if (_DotDensity > 0.0001)
                 {

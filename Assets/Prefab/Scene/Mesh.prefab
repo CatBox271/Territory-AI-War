@@ -194,3 +194,4 @@ MonoBehaviour:
   sortingLayer: Default
   sortingOrder: 3
   rebuild: 0
+  keepRebuild: 0

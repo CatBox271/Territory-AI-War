@@ -20,7 +20,7 @@ public class Towel : MonoBehaviour, IStageValue
     public long _shield_value = 1048576;
     public HugeInt shield_value { get => shieldSV.value; set => shieldSV.value = value; }
 
-    public float Radius;
+    private const float Radius = 0.35f;
     private SpriteRenderer sp;
     private MapConfig config;
     private TerritoryCanvas canvas;
@@ -602,15 +602,52 @@ public class Towel : MonoBehaviour, IStageValue
 
     public float BulletPosRandom = 0.05f;
 
+    /// <summary>
+    /// 子弹出膛位置。MapConfig.bulletSpawnRingRadius &lt;= 0 时**严格从塔的原点出膛**（连 BulletPosRandom 抖动都不加，
+    /// 完全等于没加这个功能之前）；半径 &gt; 0 时沿瞄准方向从塔心这个半径处出膛（再叠环带厚度随机 + BulletPosRandom 抖动）。
+    /// 每次读到的半径值一变就在 Console 打一行（不刷屏），方便直接看代码到底读到了几。
+    /// </summary>
+    Vector2 BulletSpawnPos(Vector2 dir)
+    {
+        Vector2 center = transform.position;
+        float radius = config != null ? config.bulletSpawnRingRadius : 0f;
+
+        if (radius <= 0f)
+        {
+            LogSpawnRingOnce(radius, center);
+            return center;
+        }
+
+        float thickness = config != null ? config.bulletSpawnRingThickness : 0f;
+        float distance = radius + (thickness > 0f ? Random.Range(-0.5f, 0.5f) * thickness : 0f);
+        Vector2 outward = dir.sqrMagnitude > 0.0001f ? dir.normalized : (Vector2)transform.up;
+        Vector2 pos = center + outward * distance + Random.insideUnitCircle * BulletPosRandom;
+
+        LogSpawnRingOnce(radius, pos);
+        return pos;
+    }
+
+    // 只在"读到的半径"变化时打一行，不刷屏；用来确认 MapConfig 里那个值到底有没有被代码读到。
+    private static float loggedSpawnRingRadius = float.NaN;
+
+    private void LogSpawnRingOnce(float radius, Vector2 spawnPos)
+    {
+        if (!float.IsNaN(loggedSpawnRingRadius) && Mathf.Approximately(loggedSpawnRingRadius, radius)) return;
+        loggedSpawnRingRadius = radius;
+        Debug.Log($"[子弹出膛] {name} 代码读到的出膛环半径 = {radius}；塔原点 = {transform.position}；这次出膛点 = {spawnPos}；" +
+                  $"MapConfig 实例 {config.GetInstanceID()}" +
+                  (MapConfig.Instance != null ? $"（Instance {MapConfig.Instance.GetInstanceID()}）" : "（Instance 为空）"));
+    }
+
     void FireWithDir(Vector2 dir)
     {
         if (value <= 0) return;
         int bv = (int)bulletCount.Evaluate(value);
         if (bv > value) bv = (int)value.ToLong();
         value -= bv;
-        var pos = (Vector2)transform.position + Random.insideUnitCircle * BulletPosRandom;
         float maxAngle = bulletRandomSpeed.Evaluate(value);
         var finalDir = (Vector2)(Quaternion.AngleAxis(Random.Range(-maxAngle, maxAngle), Vector3.forward) * dir);
+        var pos = BulletSpawnPos(finalDir);
 
         float displayRadius = -1f;
         float impactScale = 1f;
@@ -754,7 +791,7 @@ public class Towel : MonoBehaviour, IStageValue
                 displayRadius = (BulletManager.Instance != null ? BulletManager.Instance.bulletDisplayRadius : 2f) * CurrentBulletRadiusScale;
                 impactScale = CurrentBulletImpactScale;
             }
-            BulletManager.Instance.Fire(transform.position, dir, stage, bv, config != null ? config.ShotGunBulletSpeed : bulletSpeed, displayRadius, impactScale);
+            BulletManager.Instance.Fire(BulletSpawnPos(dir), (Vector2)dir, stage, bv, config != null ? config.ShotGunBulletSpeed : bulletSpeed, displayRadius, impactScale);
         }
     }
 }

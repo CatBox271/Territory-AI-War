@@ -17,6 +17,7 @@ public class SlowSmall : MonoBehaviour
         c = col;
         this.DieSpeed = DieSpeed;
         transform.localScale = Vector3.one * size;
+        M = 1;
     }
     private void Start()
     {
@@ -34,8 +35,14 @@ public class SlowSmall : MonoBehaviour
             if (M > 0) velocity = M * velocity.normalized;
         }
         c.a -= DieSpeed * Time.deltaTime;
-        if (c.a <= 0) Destroy(gameObject);
+        if (c.a <= 0) Die();
         sp.color = c;
         transform.localScale = Vector3.one * c.a * size;
+    }
+
+    private void Die()
+    {
+        transform.gameObject.SetActive(false);
+        CrossEffectManager.Instance.inacive.Enqueue(this);
     }
 }

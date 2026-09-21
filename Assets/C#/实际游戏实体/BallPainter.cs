@@ -74,7 +74,7 @@ public class BallPainter : MonoBehaviour, IStageValue
         float ts = transform.localScale.x;
         if (aimScale != -1 && ts != aimScale)
         {
-            if (Mathf.Abs(ts - aimScale) <= 0.05f)
+            if (Mathf.Abs(ts - aimScale) <= 0.01f)
             {
                 transform.localScale = Vector3.one * aimScale;
             }

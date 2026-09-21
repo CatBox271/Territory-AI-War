@@ -185,7 +185,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 1.3510144, y: -0.85236096, z: 0}
-  m_LocalScale: {x: 0.25, y: 0.25, z: 0.25}
+  m_LocalScale: {x: 0.05, y: 0.05, z: 0.05}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 4222657619570340843}
@@ -275,7 +275,7 @@ MonoBehaviour:
   game_item_name: "\u5927\u7403"
   baseWorldRadius: 0.5
   attackPower: 1
-  ScaleSmoothSpeed: 3
+  ScaleSmoothSpeed: 2
   ScaleCurve:
     curve:
       serializedVersion: 2
@@ -300,18 +300,18 @@ MonoBehaviour:
         outWeight: 0.11699104
       - serializedVersion: 3
         time: 30
-        value: 2
-        inSlope: 0.05875
-        outSlope: 0.05875
+        value: 2.75
+        inSlope: 0.10875
+        outSlope: 0.10875
         tangentMode: 34
         weightedMode: 3
         inWeight: 0.33333334
         outWeight: 0.33333334
       - serializedVersion: 3
         time: 50
-        value: 2.75
-        inSlope: 0.0375
-        outSlope: 0.0375
+        value: 4
+        inSlope: 0.0625
+        outSlope: 0.0625
         tangentMode: 34
         weightedMode: 3
         inWeight: 0.33333334
@@ -335,16 +335,16 @@ MonoBehaviour:
         outWeight: 0.12361144
       - serializedVersion: 3
         time: 20.095497
-        value: 0.5
-        inSlope: -0.04500001
-        outSlope: -0.04500001
+        value: 0.4
+        inSlope: -0.0375
+        outSlope: -0.0375
         tangentMode: 136
         weightedMode: 0
         inWeight: 0.33333334
         outWeight: 0.33333334
       - serializedVersion: 3
         time: 40
-        value: 0.05
+        value: 0.025
         inSlope: 0
         outSlope: 0
         tangentMode: 136

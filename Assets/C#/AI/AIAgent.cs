@@ -133,7 +133,7 @@ public class AIAgent : MonoBehaviour
 
     // ==================== 三段格式：内容写在【分析：…】【我要：…】【我说：…】里面 ====================
     // 思考（reasoning）已经全部关掉，模型的"想"写在 content 的第一段里。三段各有去处：
-    //   分析 → 舞台的思考条（也是它的内心独白，带（我想：…））
+    //   分析 → 舞台的思考条（第一人称内心独白，不许带括号）
     //   我要 → 这一轮打算做什么（给行为检查用，不当台词）
     //   我说 → 唯一会被当众播出去的那一句（飘字、发言列表、给对手读的【上一轮发言】）
 
@@ -195,7 +195,7 @@ public class AIAgent : MonoBehaviour
     /// <summary>
     /// 三段格式校验（本轮回复）：
     /// 必须有【分析：…】和【我说：…】；三段都要写全（带收尾的 】）；
-    /// 【分析】里要有（我想：…）；【我说】不许有括号。
+    /// 【分析】是纯内心独白，不许带括号（中英文都不行）；【我说】也不许有括号。
     /// allowEmptySay = 允许【我说】为空（开局那句长期规划就是只想不说）。
     /// </summary>
     public static bool IsThreeSegmentReply(DeepSeekMessage message, bool allowEmptySay = false)
@@ -209,7 +209,7 @@ public class AIAgent : MonoBehaviour
 
         string analysis = Segment(content, "分析");
         if (string.IsNullOrWhiteSpace(analysis)) return false;
-        if (!analysis.Contains("（我想：")) return false;
+        if (ContainsAnyParenthesis(analysis)) return false;   // 新的分析规则：内心独白直接写，不许用括号
 
         string say = Segment(content, "我说");
         bool hasTools = message.tool_calls != null && message.tool_calls.Count > 0;
@@ -368,7 +368,7 @@ public class AIAgent : MonoBehaviour
             _isWaiting = true;
             _round++;
             CurrentRound = _round;
-            if (_round == 1) ReadyActionManager.ResetAll();   // 新一局：预行动与缓存全部清空
+            if (_round == 1) { ReadyActionManager.ResetAll(); GameMemory.ResetForNewGame(); }   // 新一局：预行动、缓存、上局的出局记录全部清空
 
 
             CapturePause.Pause();
@@ -678,12 +678,12 @@ public class AIAgent : MonoBehaviour
 
     /// <summary>升级选择「思考」步的格式修正提示（与普通行动轮同一套口径：不合格就一直重试）。</summary>
     private const string UpgradeThinkingRetryPrompt =
-        "[格式修正] 你上一条回复不合格。请重新输出三段格式：【分析：……】里用（我想：……）写内心独白；" +
+        "[格式修正] 你上一条回复不合格。请重新输出三段格式：【分析：……】里用第一人称直接写内心独白（不要括号）；" +
         "【我要：……】写这一轮打算做什么；【我说：……】写当众那句（没有就不写内容）；" +
         "然后必须调用 choose_upgrade 工具给出 1 / 2 / 3 的选择，不要用文字解释。";
 
     /// <summary>
-    /// 升级选择「思考」步的回复校验：必须有【分析：…】且里面带（我想：……），【我说】不许带括号。
+    /// 升级选择「思考」步的回复校验：必须有【分析：…】且里面不带括号，【我说】不许带括号。
     /// 这里**不豁免工具调用**——升级演出要把这段分析播给观众看，所以哪怕模型第一步就调用了
     /// choose_upgrade，也要求它带上这三段。
     /// </summary>
@@ -691,7 +691,7 @@ public class AIAgent : MonoBehaviour
     {
         if (msg == null) return false;
         string analysis = Segment(msg.content, "分析");
-        if (string.IsNullOrWhiteSpace(analysis) || !analysis.Contains("（我想：")) return false;
+        if (string.IsNullOrWhiteSpace(analysis) || ContainsAnyParenthesis(analysis)) return false;
         string say = Segment(msg.content, "我说");
         if (say != null && ContainsAnyParenthesis(say)) return false;
         return true;
@@ -940,7 +940,7 @@ public class AIAgent : MonoBehaviour
         sb.AppendLine($"2. 炮塔强化：子弹显示半径 ×{bulletRadius:0.##}、打大球动量 ×{bulletImpact:0.##}（霰弹这类散射子弹同样受益）、自动护卫极限转速 ×{Towel.GuardSpeedPerLevel:0.##}（常态转速不变）、最大移动距离 +{movePerLevel:0.##}（当前 {maxMove:0.00}）、**移动速度 +{moveSpeedPerLevel:0.##}（当前 {moveSpeedNow:0.00}/秒）**、道具瞄准误差 {ReactionSystem.BaseAimAngleError:0.#}° 每级减半。可叠加。");
         sb.AppendLine($"3. 护盾强化：护盾破碎后炮塔无敌时间 +{shieldInvincible:0.#} 秒，期间受到的伤害全部归零。可叠加。**它挡不住穿甲弹**：穿甲只按比例啃盾、不会打破护盾，开不了这个窗口——这个无敌只在被子弹或大球打破盾的瞬间才生效。");
         sb.AppendLine("输出要求：必须写成三段（内容写在【】里面、段名与冒号照抄）——");
-        sb.AppendLine("【分析：……】先用（我想：……）写内心独白，说清你为什么选它（格式硬要求，不合格会被打回重写）；");
+        sb.AppendLine("【分析：……】用第一人称直接写内心独白、不要括号，说清你为什么选它（格式硬要求，不合格会被打回重写）；");
         sb.AppendLine("【我要：……】写你这次的升级选择；【我说：……】当众那句（15 字以内、不许括号，没有就留空）；");
         sb.AppendLine("然后调用 choose_upgrade 工具，choice 只能填 1、2 或 3，不要解释。");
         return sb.ToString();
@@ -955,6 +955,8 @@ public class AIAgent : MonoBehaviour
     {
         if (stage <= 0 || deadStages.Contains(stage)) return Task.FromResult("");
         deadStages.Add(stage);
+        // 终局记忆要用的客观事件：谁在第几轮被谁用什么杀的（去重之后才记）
+        GameMemory.NoteDeath(stage, killerStage, killerWeapon);
         WhisperManager.SetDead(stage);
 
         CharacterCard card = cards.Find(c => c.position == stage);
@@ -1004,7 +1006,7 @@ public class AIAgent : MonoBehaviour
     public static bool IsStageEliminated(int stage) => Instance != null && Instance.deadStages.Contains(stage);
 
     /// <summary>
-    /// 结束录制/结束游戏的完整判据（全部 &&）：98% 占地由 GameEndMonitor 判完再把 owner 传进来，
+    /// 结束录制/结束游戏的完整判据（全部 &&）：占地达标由 GameEndMonitor 判完再把 owner 传进来（现在是 100%），
     /// 这里要求：只剩一个阵营 && 就是 owner && 成为唯一阵营后已过 3 轮 && 场上没有敌方游离道具（大球/子弹）
     /// && 赢家的终局感言已播出。reason 输出第一条不满足的原因，便于日志定位。
     /// </summary>
@@ -1014,7 +1016,7 @@ public class AIAgent : MonoBehaviour
         int solo = SoloWinnerStage();
 
         if (solo <= 0) { reason = "场上不止一个阵营"; return false; }
-        if (solo != owner) { reason = $"达到 98% 的是 {owner} 号阵营，场上唯一存活的是 {solo} 号阵营"; return false; }
+        if (solo != owner) { reason = $"达到占地达标线的是 {owner} 号阵营，场上唯一存活的是 {solo} 号阵营"; return false; }
         if (soloSinceRound < 0 || _round - soloSinceRound < 3) { reason = "成为唯一阵营后还没过 3 轮"; return false; }
         if (InformGetter.HasEnemyBigBall(solo)) { reason = "场上还有敌方大球在飞"; return false; }
         if (BulletManager.Instance != null && BulletManager.Instance.CountAliveBulletsExcept(solo) > 0)
@@ -1371,7 +1373,7 @@ public class AIAgent : MonoBehaviour
   - 目标点靠近某人的初始位置、或落在撞击情报指出的方位上时，**换方向或缩短距离**，别赌对方已经走了。两个炮塔重叠时你不会被弹开、也不会自动停下（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——所以「撞上去」没有任何安全网。
   - **移动途中不能改道**：炮塔一旦开始移动就会一直走到底（到达目标 / 撞到地图边界 / 超时才停），中途再给方向和距离会被拒绝。想换方向只能等它停下再走一次；如果现在就得停住，用 distance=0 做一次预览 + confirm 让它原地停下。所以方向和距离必须一次想清楚——也正因为不能改道，「一次走短一点」才更安全。
   - **别傻乎乎地往地图中央冲：** 地图中央没有任何额外收益，却是四家距离最近的地方——你冲过去等于自己走进别人的视野，一停就被拼出坐标。移动是为了**躲定位、抢关键点、配合行动**，不是为了「往中间挤」；没有明确目标时，守着自己的半场往外扩地更划算。
-- **胜负：** 成为最后存活的一方、并把领土推到 98% 才算赢；只剩你一个阵营后，还要把场上敌方游离的大球、穿甲弹和子弹清掉。
+- **胜负：** 成为最后存活的一方、并把全图领土刷到 100%（一个像素都不留给别人和中立）才算赢；只剩你一个阵营后，还要把场上敌方游离的大球、穿甲弹和子弹清掉。
 - **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、{(MapConfig.Instance != null && MapConfig.Instance.moveSightRadiusFactor >= 0.999f ? "半径就等于你当前的最大移动距离（整张图里就是你能走到的全部范围）" : "半径约为你当前最大移动距离的 " + (MapConfig.Instance != null ? MapConfig.Instance.moveSightRadiusFactor.ToString("0.##") : "1") + " 倍")} 的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见；截图边缘的**黑色环带是圆形视野之外、暗红色区域是地图之外**，那两种地方没有信息。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，情报里会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
 - **一直停在同一个地方 = 被穿甲弹直接秒杀：** 这是**最容易送命的一条**。炮塔**不动就不会换坐标**：对手用几次撞击情报、或者一张视野截图，就能把你钉死在一个点上；位置一旦被摸清，他只要朝那个坐标打一发**穿甲弹**——穿甲弹会**穿过护盾**直取炮塔本体，**碰到本体即秒杀**，护盾再厚也拦不住。**别指望护盾强化能防它**：穿甲弹穿过护盾时只是**按比例啃盾**（每秒啃当前盾值的两成多，还受它自身数值封顶），一次穿越掉不了几个百分点、**根本啃不到 0**，所以**它永远触发不了「破盾无敌」**——那个 2 秒无敌是**子弹或大球把盾打碎**时才开的窗口，穿甲自己打不开。也就是说：**对付穿甲只有一条路——移动换位，别让人钉住你的坐标**（被撞击情报报过坐标、被别人的视野截图拍到过、或者连续几轮待在同一个地方，都算「可能被定位」）。**实在躲不掉时还有一手：用大球去撞它**——穿甲是物理弹体，被大球撞到会偏转，偏一点就可能打不到你的本体（见上面「穿甲」那条）。同理，你也可以这样对付别人——把你的撞击情报和视野截图拼起来，找出谁的坐标没变过，给他一发穿甲弹。
 
@@ -1443,9 +1445,9 @@ public class AIAgent : MonoBehaviour
 【角色沉浸要求】你的每一轮回复都必须严格写成三段，内容写在【】里面，段名与冒号照抄：
 
 在你的分析过程【分析：】中，请遵守以下规则：
-1. 请以角色第一人称进行内心独白，用括号包裹内心活动，必须用“（我想：……）”
-2. 用第一人称描写角色的内心感受。
-3. 思考内容应沉浸在角色中，通过内心独白分析情况。
+1. 请以角色第一人称进行内心独白，
+2. 思考内容应沉浸在角色中，通过内心独白分析情况。
+3. 不使用括号（）（）！
 
 在你的行动说明【我要：】中，请遵守以下规则：
 1. 用一句话写清楚这一轮你打算做什么：调用哪个工具、对谁、朝哪个方向。
@@ -1507,7 +1509,7 @@ public class AIAgent : MonoBehaviour
         private string BuildSystemPrompt()
         {
             string initialPositions = InitialPositionsText();
-            return $"{world}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n{(initialPositions.Length > 0 ? "开局各炮塔位置（开局坐标，之后不会再更新）：" + initialPositions + "\n" : "")}与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。\n\n**你的每一轮回复都必须严格写成三段，内容写在【】里面，段名与冒号照抄：**\n【分析：……】你的内心独白，必须以「（我想：……」开头——这一层只有你自己看得到，不会被播出去，用来判断局势、算数值、定策略。\n【我要：……】一句话写清这一轮打算做什么（调用哪个工具、对谁、朝哪；什么都不做就写“什么都不做”）。这一段是给系统看的行动说明，不是台词。\n【我说：……】你要**当众说出口**的那一句（会飘到战场上给所有人看、也会写进对手情报）：纯文本 + emoji、15 字以内、不许括号；**调用工具时不要顺手解说自己在做什么**（不要写“我要移动了”“我挪过去啦”这类自我播报）——不想说话就留空，只写【分析】和【我要】。";
+            return $"{world}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n{(initialPositions.Length > 0 ? "开局各炮塔位置（开局坐标，之后不会再更新）：" + initialPositions + "\n" : "")}与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。\n\n**你的每一轮回复都必须严格写成三段，内容写在【】里面，段名与冒号照抄：**\n【分析：……】你的内心独白：用第一人称直接写、沉浸在角色里，**不要用括号**——这一层只有你自己看得到，不会被播出去，用来判断局势、算数值、定策略。\n【我要：……】一句话写清这一轮打算做什么（调用哪个工具、对谁、朝哪；什么都不做就写“什么都不做”）。这一段是给系统看的行动说明，不是台词。\n【我说：……】你要**当众说出口**的那一句（会飘到战场上给所有人看、也会写进对手情报）：纯文本 + emoji、15 字以内、不许括号；**调用工具时不要顺手解说自己在做什么**（不要写“我要移动了”“我挪过去啦”这类自我播报）——不想说话就留空，只写【分析】和【我要】。";
         }
 
         /// <summary>
@@ -2006,7 +2008,7 @@ public class AIAgent : MonoBehaviour
         /// <summary>兜底用的通用 [格式修正]（说不上具体原因时发它）。正常走 BuildThinkingRetryPrompt。</summary>
         private const string ThinkingRetryPrompt =
             "[格式修正] 你上一条回复不合格。请严格按三段格式重发（内容写在【】里面）：\n" +
-            "【分析：……】用（我想：……）写内心独白\n" +
+            "【分析：……】用第一人称直接写内心独白（不要括号）\n" +
             "【我要：……】这一轮打算做什么\n" +
             "【我说：……】当众说出口的那一句（15 字以内、不许括号、禁止 [skip]；没有就留空）";
 
@@ -2032,7 +2034,7 @@ public class AIAgent : MonoBehaviour
 
             if (analysis == null) { /* 上面已经报过"缺这一段" */ }
             else if (string.IsNullOrWhiteSpace(analysis)) reasons.Add("【分析：】是空的：里面要写你的内心独白");
-            else if (!analysis.Contains("（我想：")) reasons.Add("【分析：】里没有「（我想：」——内心独白必须写成（我想：……）");
+            else if (ContainsAnyParenthesis(analysis)) reasons.Add("【分析：】里出现了括号（中英文都不行）——内心独白直接写，不要用括号包起来");
 
             if (want != null && string.IsNullOrWhiteSpace(want)) reasons.Add("【我要：】是空的：写清这一轮做什么，没有就写「什么都不做」");
 
@@ -2041,7 +2043,7 @@ public class AIAgent : MonoBehaviour
                 if (!allowEmptySay && !hasTools && string.IsNullOrWhiteSpace(say))
                     reasons.Add("【我说：】是空的、又没有调用任何工具：要么写一句当众说的话（15 字以内），要么调工具行动");
                 if (ContainsAnyParenthesis(say)) reasons.Add("【我说：】里出现了括号（中英文都不行）");
-                if (say.Contains("我想：") || say.Contains("我想:")) reasons.Add("【我说：】里出现了「我想：」——那是【分析】里才写的");
+                if (say.Contains("我想：") || say.Contains("我想:")) reasons.Add("【我说：】里出现了「我想：」——内心戏要写在【分析】里，别放进当众台词");
                 if (say.Contains("[skip]")) reasons.Add("【我说：】里出现了 [skip]");
             }
 
@@ -2061,7 +2063,7 @@ public class AIAgent : MonoBehaviour
             sb.AppendLine("[格式修正]你上一条回复不合格，**具体原因**：");
             foreach (string r in reasons) sb.AppendLine("· " + r);
             sb.AppendLine("请严格按三段格式重发，内容写在【】里面：");
-            sb.AppendLine("【分析：……】（用（我想：……）写内心独白）");
+            sb.AppendLine("【分析：……】（第一人称内心独白，不要括号）");
             sb.AppendLine("【我要：……】（这一轮打算做什么）");
             sb.AppendLine("【我说：……】（当众说出口的那一句，15 字以内、不许括号；不说话就留空）");
             sb.Append("不要解释这条提醒、也不要猜原因，直接重发。");
@@ -2302,7 +2304,7 @@ public class AIAgent : MonoBehaviour
         public async Task UntilGreatRequest(int roundStartIndex, bool allowEmptySay = false)
         {
             // 上下文超长自救：最多重发这么多次，别让一回合被卡死
-            const int maxOverflowRetry = 3;
+            const int maxOverflowRetry = 10;
             int overflowRetry = 0;
 
             while (true)
@@ -2388,8 +2390,7 @@ public class AIAgent : MonoBehaviour
                     openingSpeech = roundContent;
                     openingThinking = GetLastAssistantReasoning(out _) ?? "";
                 }
-                if (SpeechPass == 0)
-                    Say(position, roundContent);
+                // 台词已经在这一轮每条合格回复到达时逐条播过了（SayRoundReply），这里不再补一次拼接
             }
         }
 
@@ -2400,6 +2401,7 @@ public class AIAgent : MonoBehaviour
             if (IsThreeSegmentReply(msg, allowEmptySay))
             {
                 RemoveRoundRetryReminder();
+                Say(position, msg.content);
                 return true;
             }
 
@@ -2478,16 +2480,22 @@ public class AIAgent : MonoBehaviour
         }
         private void Say(int position,string content)
         {
+            string said = SayOf(ColorizeAINames(content));
+            string want = WantOf(ColorizeAINames(content));
+            string reasion = AnalysisOf(ColorizeAINames(content));
+
             // 只剩他一个阵营之后，露的就是赢家的脸：强制盖掉模型自己写的 [emo:xxx]
             bool soloWinner = AIAgent.Instance != null && AIAgent.Instance.IsSoloWinner(position);
-            if (Towel.AllTowel.TryGetValue(position, out Towel towel)) towel.Say(content, true);
+            if (Towel.AllTowel.TryGetValue(position, out Towel towel)) towel.Say(said, true);
             UIMessageManager.Instance?.AddMessage(new UIMInfo
             {
                 stage = position,
-                content = content,
+                content = said,
                 emo = soloWinner ? SpriteEmotion.win : SpriteEmotion.origin,   // 没写 [emo:xxx] 时的默认表情（Deal 里以标记为准）
                 forceEmo = soloWinner
             });
+            // 角色状态区（每阵营一块）：走同一个出口推过去，表情口径也和上面一致
+            CharacterStatusArea.Push(position, said, reasion , soloWinner ? SpriteEmotion.win : SpriteEmotion.origin, soloWinner);
         }
         public async Task FirstRequest(string inform, string extra)
         {
@@ -2515,16 +2523,7 @@ public class AIAgent : MonoBehaviour
                 history.Add(cachedSpeech);
                 history.Add(cachedAnalysis);   // 规划也放回历史，这一局它一直看得见
 
-                // 缓存的这条也必须喂给开场演出：它是从 UntilGreatRequest 的早退路径回来的，
-                // 那两个字段本来就只在那里赋值 —— 不补的话舞台上永远是「……」+「没有留下思考过程」，
-                // 整场戏等于一个字的 AI 内容都没有。同时照旧走飘字 + 中央消息列表。
-                bool openingHandled = AIAgent.Instance != null && AIAgent.Instance.OpeningRoundActive;
-                if (openingHandled)
-                {
-                    openingSpeech = SayOf(cachedSpeech.content);       // 只取【我说】当台词
-                    openingThinking = AnalysisOf(cachedSpeech.content); // 【分析】上思考条
-                }
-                Say(position, SayOf(cachedSpeech.content));
+                Say(position, cachedSpeech.content);
 
                 EndRoundTiming();   // Debug：走缓存的开局也统计一下
                 return;
@@ -3039,7 +3038,7 @@ public class AIAgent : MonoBehaviour
             "1. 纯文本 + emoji，禁用 markdown，不使用括号，不要动作描写。\n" +
             "2. 别露内心戏，别露你的情报。\n" +
             "3. 夸张化地沉浸在角色中，字数限制在 15 字。\n" +
-            "（括号只允许出现在【分析：】那一段里。）";
+            "注意：三段里都不要用括号（中英文都不行）。";
 
         private static readonly char[] ParenthesisChars = { '（', '）', '(', ')' };
 
@@ -3055,7 +3054,7 @@ public class AIAgent : MonoBehaviour
             foreach (DeepSeekMessage message in messages)
             {
                 if (message == null || message.role != "assistant") continue;
-                // 只看【我说】：【分析】里必然有括号（内心独白），那不是违规
+                // 只看【我说】：这里的括号提醒只管台词；【分析】的括号由三段校验单独拦
                 string say = SayOf(message.content);
                 if (!ContainsParenthesis(say)) continue;
 
