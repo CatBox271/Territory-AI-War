@@ -236,6 +236,9 @@ public class Marble : MonoBehaviour
 
     void OnDestroy()
     {
+        // 对局数据：弹珠销毁（只在对局还在记录时写）
+        GameStats.NoteMarbleRemove(stage, valueExponent);
+
         if (enchantInstance != null)
         {
             if (Application.isPlaying) Destroy(enchantInstance);

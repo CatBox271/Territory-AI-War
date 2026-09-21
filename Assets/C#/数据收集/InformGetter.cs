@@ -81,6 +81,8 @@ public class InformGetter : MonoBehaviour
         var mt = new MarbleType(m);
         MarbleItems[stage].Add(mt);
         GuidToTransform[mt.guid] = mt.item;
+        // 对局数据：弹珠是注册式的，出生这一笔就是"弹珠数目"的原始数据
+        GameStats.NoteMarbleAdd(stage, m);
     }
 
     //有两种调用  1.初始化的调用√  2.新增加的大球的调用√
@@ -113,6 +115,8 @@ public class InformGetter : MonoBehaviour
             list.Add(entry);
         }
         entry.damage += damage;
+        // 对局数据：每一次命中都记一行原始数据（攻击方/受击方/来源单位/数值），聚合留给事后
+        GameStats.NoteDamage(sourceStage, targetStage, sourceDesc, damage);
     }
 
     /// <summary>记录一次炮塔控制自动断开（供下一轮 GetInfo 提示 AI）。</summary>

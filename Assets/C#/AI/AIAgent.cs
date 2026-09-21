@@ -368,7 +368,7 @@ public class AIAgent : MonoBehaviour
             _isWaiting = true;
             _round++;
             CurrentRound = _round;
-            if (_round == 1) { ReadyActionManager.ResetAll(); GameMemory.ResetForNewGame(); }   // 新一局：预行动、缓存、上局的出局记录全部清空
+            if (_round == 1) { ReadyActionManager.ResetAll(); GameMemory.ResetForNewGame(); GameStats.BeginGame(); }   // 新一局：预行动、缓存、上局的出局记录、对局数据全部重开
 
 
             CapturePause.Pause();
@@ -957,6 +957,7 @@ public class AIAgent : MonoBehaviour
         deadStages.Add(stage);
         // 终局记忆要用的客观事件：谁在第几轮被谁用什么杀的（去重之后才记）
         GameMemory.NoteDeath(stage, killerStage, killerWeapon);
+        GameStats.NoteDeath(stage, killerStage, killerWeapon);   // 对局数据：出局事件
         WhisperManager.SetDead(stage);
 
         CharacterCard card = cards.Find(c => c.position == stage);
@@ -1917,6 +1918,8 @@ public class AIAgent : MonoBehaviour
                         if (!toolNames.Contains(nm)) toolNames.Add(nm);
                     }
                     sb.AppendLine($"{stamp},{round},{t.who},{wallMs:0},{t.totalMs:0},{t.requestMs:0},{t.sends},{t.formatRetries},{t.retryMs:0},{t.overflowRetries},{t.behaviorMs:0},{toolSum:0},{string.Join("|", toolNames)}");
+                    // 对局数据：每卡每轮的 AI 耗时（总耗时/请求耗时/行为检查/格式重试/发数）
+                    GameStats.NoteAiTiming(round, t.stage, t.totalMs, t.requestMs, t.behaviorMs, t.formatRetries, t.sends, string.Join("|", toolNames));
                 }
 
                 System.IO.File.AppendAllText(path, sb.ToString(), Encoding.UTF8);

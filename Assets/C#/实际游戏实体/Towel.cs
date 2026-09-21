@@ -173,6 +173,8 @@ public class Towel : MonoBehaviour, IStageValue
         moveTarget = (Vector2)transform.position + dir * d;
         moveStartTime = Time.time;
         moving = true;
+        // 对局数据：移动记录（起点 → 目标 + 计划距离）
+        GameStats.NoteMoveStart(stage, transform.position, moveTarget, d);
 
         if (d <= 0f) StopMove("原地停下");
     }
@@ -181,6 +183,8 @@ public class Towel : MonoBehaviour, IStageValue
     public void StopMove(string reason = null)
     {
         moving = false;
+        // 对局数据：移动结束（落点 + 耗时 + 结束原因）
+        GameStats.NoteMoveEnd(stage, transform.position, reason);
         if (!string.IsNullOrEmpty(reason)) InformGetter.NotifyTurretMoveDone(stage, reason);
     }
 

@@ -212,6 +212,9 @@ public class GameEndMonitor : MonoBehaviour
         //    只在这里发请求，不阻塞停止录制；真的要退出应用时再等它写完（见 FinishShutdown）。
         _memoryTask = GameMemory.GenerateAllAsync(winner);
 
+        // 3.5 对局数据：补一行 end（终局领土/赢家/总轮数/总时长）并收掉本局 CSV
+        GameStats.EndGame(winner, pretendWin);
+
         StartCoroutine(FinishShutdown());
     }
 
