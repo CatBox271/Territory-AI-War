@@ -40,6 +40,14 @@ public class CharacterStatusArea : MonoBehaviour
              "只换 RGB，**Alpha 保持 prefab 里调好的值**")]
     public SpriteRenderer tint;
 
+    [Header("升级次数（显示这个阵营**实际**升过几次）")]
+    [Tooltip("「升级1」组里的数字文本 = 额外弹珠次数。留空 = 自动找 升级1/MonoSentence")]
+    public TextMeshPro upgradeMarbleText;
+    [Tooltip("「升级2」组里的数字文本 = 炮塔强化次数。留空 = 自动找 升级2/MonoSentence")]
+    public TextMeshPro upgradeTurretText;
+    [Tooltip("「升级3」组里的数字文本 = 护盾强化次数。留空 = 自动找 升级3/MonoSentence")]
+    public TextMeshPro upgradeShieldText;
+
     [Header("裁切（超出面板的立绘直接切断）")]
     [Tooltip("裁切矩形尺寸（世界单位；面板缩放保持 1）。留 0 = 自动取 panel 的尺寸。运行时可实时改")]
     public Vector2 clipSize = Vector2.zero;
@@ -107,6 +115,8 @@ public class CharacterStatusArea : MonoBehaviour
         // 阵营号在运行时被改也要跟着换色（只换 RGB，Alpha 不动）
         if (appliedStage != stage) ApplyStageColor();
 
+        UpdateUpgradeCounts();
+
         if (currentSprite == null) return;
         // 参数被改了就重新应用；没改一帧什么都不做（只是几次比较）
         if (appliedOffset == portraitOffset && appliedClip == clipSize
@@ -128,6 +138,21 @@ public class CharacterStatusArea : MonoBehaviour
         }
     }
 
+    /// <summary>状态区「思考」框的兜底裁切字数。这个框很小，而 AI 的思考（尤其开局那份规划）
+    /// 可能上千字，整段丢进来会糊成一整块、看不出在说什么。320 和舞台思考条一个口径。</summary>
+    private const int ThinkingClampChars = 320;
+
+    /// <summary>把过长的思考收到 320 字：尽量切在句末标点，切不动就硬切。</summary>
+    private static string ClampThinking(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= ThinkingClampChars) return text;
+
+        int limit = Mathf.Min(ThinkingClampChars, text.Length - 1);
+        int cut = text.LastIndexOfAny(new[] { '。', '！', '？', '；', '\n' }, limit);
+        if (cut < ThinkingClampChars / 2) cut = limit;
+        return text.Substring(0, cut + 1) + "…";
+    }
+
     /// <summary>把一句公开发言贴到状态区：文本 + 立绘（表情从 [emo:xxx] 解析）。</summary>
     public void Apply(string content,string _thinking, SpriteEmotion fallbackEmo = SpriteEmotion.origin, bool forceEmo = false)
     {
@@ -140,7 +165,7 @@ public class CharacterStatusArea : MonoBehaviour
         // 文本：和 UIMessageBar 一样，[emo:xxx] 抠掉、连续空行折成一个
         string shown = AIAgent.ExtractEmotion(lastContent, out bool hasEmo, out SpriteEmotion emo);
         if (speech != null) speech.PlayWithText(UIMessageBar.CollapseBlankLines(shown));
-        if (thinking != null) thinking.PlayWithText(UIMessageBar.CollapseBlankLines(_thinking));
+        if (thinking != null) thinking.PlayWithText(UIMessageBar.CollapseBlankLines(ClampThinking(_thinking)));
 
         if (portrait == null)
         {
@@ -332,7 +357,48 @@ public class CharacterStatusArea : MonoBehaviour
 
         c = cfg != null ? cfg.GetColor(stage,MapConfig.ColorStage.Bright) : Color.white;
         var textMesh = thinking.GetComponent<TextMeshPro>();
+        c.a = textMesh.color.a;
         textMesh.color = c;
+    }
+
+    /// <summary>
+    /// 三个「升级」组里的数字：从 MarbleManager 取这个阵营**实际**升过几次 ——
+    /// 升级1 = 额外弹珠、升级2 = 炮塔强化、升级3 = 护盾强化（和 AIAgent 写进提示词的口径是同一个）。
+    /// 数字没变就一个字都不写（TextMeshPro 赋值会重建网格）。
+    /// </summary>
+    private void UpdateUpgradeCounts()
+    {
+        MarbleManager mm = MarbleManager.Instance;
+        int marble = 0, turret = 0, shield = 0;
+        if (mm != null) mm.TryGetUpgradeCounts(stage, out marble, out turret, out shield);
+
+        SetCount(UpgradeText(ref upgradeMarbleText, "升级1"), marble);
+        SetCount(UpgradeText(ref upgradeTurretText, "升级2"), turret);
+        SetCount(UpgradeText(ref upgradeShieldText, "升级3"), shield);
+    }
+
+    private static void SetCount(TextMeshPro t, int value)
+    {
+        if (t == null) return;
+        string s = value.ToString();
+        if (t.text != s) t.text = s;
+    }
+
+    /// <summary>
+    /// 没在 Inspector 里拖数字文本时：去「升级N」组里找叫 MonoSentence 的那个 TMP，找不到就退回组里第一个 TMP。
+    /// 组本身不存在就直接返回 null（不报错、也不刷日志）。
+    /// </summary>
+    private TextMeshPro UpgradeText(ref TextMeshPro slot, string groupName)
+    {
+        if (slot != null) return slot;
+
+        Transform group = transform.Find(groupName);
+        if (group == null) return null;
+
+        Transform t = group.Find("MonoSentence");
+        TextMeshPro tmp = t != null ? t.GetComponent<TextMeshPro>() : null;
+        if (tmp == null) tmp = group.GetComponentInChildren<TextMeshPro>(true);
+        return slot = tmp;
     }
 
     /// <summary>没手动指定 tint 时：先找子孙里叫「底」的那个渲染器（prefab 里就是它），再退回 panel。</summary>
@@ -349,8 +415,9 @@ public class CharacterStatusArea : MonoBehaviour
     private Sprite LoadPortrait(SpriteEmotion emo)
     {
         string name = AIAgent.GetStageName(stage);
-        Sprite sp = Resources.Load<Sprite>(name + "_" + emo);
-        if (sp == null) sp = Resources.Load<Sprite>(name + "_" + SpriteEmotion.origin);
+        // 立绘统一放在 Assets/Resources/Sprite/ 下（StoryTeller.PortraitFolder），文件名还是「名字_表情」
+        Sprite sp = Resources.Load<Sprite>(StoryTeller.PortraitFolder + name + "_" + emo);
+        if (sp == null) sp = Resources.Load<Sprite>(StoryTeller.PortraitFolder + name + "_" + SpriteEmotion.origin);
         return sp;
     }
 

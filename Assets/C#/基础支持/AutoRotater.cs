@@ -100,6 +100,87 @@ public class AutoRotater : MonoBehaviour
         hasGuardTarget = false; // 下次更新立即按新半径重新扫描
     }
 
+    // ==================== 禁射扇区（结盟时避开某一段角度） ====================
+    // 待机旋转与自动护卫都**不朝扇区里的方向**：待机旋转转到边界就掉头，
+    // 自动护卫遇到"目标在扇区里 / 转过去要横穿扇区"就放弃这次护卫转向。
+    // 手动接管（AimController 持续瞄准）不受它限制 —— 那是明确要打这个方向。
+
+    /// <summary>禁射扇区中心（**内部角**口径 = currentAngle，0 = 炮口朝上）。</summary>
+    public float avoidCenter;
+    /// <summary>禁射扇区半宽（度）。&lt;= 0 = 没设。</summary>
+    public float avoidHalf;
+    /// <summary>是否设了禁射扇区。</summary>
+    public bool AvoidEnabled => avoidHalf > 0f;
+    /// <summary>禁射扇区中心的世界方向角（度）：0 = 地图右(+X)，逆时针为正。</summary>
+    public float AvoidCenterWorld => NormalizeAngle(avoidCenter + 90f);
+
+    /// <summary>
+    /// 设置禁射扇区。centerMath = 世界方向角（度，0 = 地图右(+X)、逆时针为正，和 move_turret 的 angle 同一口径）；
+    /// half = 半宽（度，0 = 取消）。只记一个扇区，再设一次就覆盖。
+    /// </summary>
+    public void SetAvoidSector(float centerMath, float half)
+    {
+        if (half <= 0f) { ClearAvoidSector(); return; }
+
+        avoidCenter = NormalizeAngle(centerMath - 90f);   // 世界角 -> 内部角（炮口方向是 transform.up）
+        avoidHalf = Mathf.Clamp(half, 0f, 179f);
+        if (IsAvoided(currentAngle)) currentAngle = CloserAvoidEdge(currentAngle);   // 别停在禁射方向
+    }
+
+    /// <summary>取消禁射扇区（恢复整圈都能转）。</summary>
+    public void ClearAvoidSector()
+    {
+        avoidHalf = 0f;
+    }
+
+    /// <summary>这个内部角（currentAngle 口径）是不是落在禁射扇区里。</summary>
+    public bool IsAvoided(float angle)
+    {
+        if (!AvoidEnabled) return false;
+        return Mathf.Abs(Mathf.DeltaAngle(angle, avoidCenter)) <= avoidHalf;
+    }
+
+    /// <summary>禁射扇区的文字描述（世界口径）；没设返回 null。情报与工具回执共用。</summary>
+    public string DescribeAvoid()
+    {
+        if (!AvoidEnabled) return null;
+        float rad = AvoidCenterWorld * Mathf.Deg2Rad;
+        Vector2 dir = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
+        return $"中心 {AvoidCenterWorld:0}°（{InformGetter.CardinalDirection(dir)}）±{avoidHalf:0}°";
+    }
+
+    /// <summary>离这个内部角最近的那个扇区边界。</summary>
+    float CloserAvoidEdge(float angle)
+    {
+        float a = NormalizeAngle(avoidCenter - avoidHalf);
+        float b = NormalizeAngle(avoidCenter + avoidHalf);
+        return Mathf.Abs(Mathf.DeltaAngle(angle, a)) <= Mathf.Abs(Mathf.DeltaAngle(angle, b)) ? a : b;
+    }
+
+    /// <summary>从 from 转到 to（内部角）走最短路径，中途会不会横穿禁射扇区。</summary>
+    bool PathCrossesAvoid(float from, float to)
+    {
+        if (!AvoidEnabled) return false;
+        if (IsAvoided(to)) return true;
+
+        const int steps = 32;
+        float delta = Mathf.DeltaAngle(from, to);
+        for (int i = 1; i <= steps; i++)
+            if (IsAvoided(NormalizeAngle(from + delta * i / steps))) return true;
+        return false;
+    }
+
+    /// <summary>护卫目标是不是被禁射扇区挡着（目标就在扇区里，或转过去要横穿扇区）。</summary>
+    bool GuardTargetAvoided(Vector2 target)
+    {
+        if (!AvoidEnabled) return false;
+        Vector2 dir = target - (Vector2)transform.position;
+        if (dir.sqrMagnitude < 1e-8f) return false;
+
+        float to = NormalizeAngle(currentAngle + Vector2.SignedAngle(transform.up, dir));
+        return PathCrossesAvoid(currentAngle, to);
+    }
+
     private string last_state;
     private void RandomWay(string state)
     {
@@ -115,7 +196,7 @@ public class AutoRotater : MonoBehaviour
         if (!active) return;
 
         bool rotated;
-        if (guardMode && TryGetGuardTarget(out Vector2 target))
+        if (guardMode && TryGetGuardTarget(out Vector2 target) && !GuardTargetAvoided(target))
         {
             // 新目标：先用 guard_speed 快速面对它
             if (!hasLastGuardTarget || target != lastGuardTarget)
@@ -165,6 +246,7 @@ public class AutoRotater : MonoBehaviour
         float min = angleRange.x;
         float max = angleRange.y;
 
+        float prev = currentAngle;
         currentAngle += speed * Time.deltaTime * direction;
 
         if (loop)
@@ -186,6 +268,13 @@ public class AutoRotater : MonoBehaviour
                 currentAngle = min;
                 direction = 1;
             }
+        }
+
+        // 禁射扇区：不进去，贴着刚越过的那个边界掉头
+        if (IsAvoided(currentAngle))
+        {
+            direction = -direction;
+            currentAngle = CloserAvoidEdge(prev);
         }
         return true;
     }

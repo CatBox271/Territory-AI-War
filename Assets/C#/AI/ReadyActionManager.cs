@@ -14,7 +14,8 @@ using UnityEngine;
 ///
 /// 规则（已和需求方定死的口径）：
 ///   · 每帧轮询；允许与 AI 本轮的普通行动**同时**发生；
-///   · 一个阵营最多 5 条；`reuse`：0=执行一次后自动取消（默认）、-1=永久、N=存活 N 个 AI 轮次；
+///   · 一个阵营最多 <see cref="MaxPerStage"/> 条（= 10，够把清槽 / 补盾 / 挪窝整套自动化）；
+///     `reuse`：0=执行一次后自动取消（默认）、-1=永久、N=存活 N 个 AI 轮次；
 ///   · 触发失败（能量不足/参数非法/格号越界…）→ 这次不执行、这条保留，
 ///     失败**按原因合并计数**（防止刷屏），每回合在情报里显示；
 ///   · 触发成功**不给玩家侧飘自定义文字**（执行本身在场上看得见，不给对手额外情报）。
@@ -22,7 +23,7 @@ using UnityEngine;
 public static class ReadyActionManager
 {
     public const string ToolName = "ready_action";
-    public const int MaxPerStage = 5;
+    public const int MaxPerStage = 10;
 
     /// <summary>一条预行动。</summary>
     public class Action
@@ -51,6 +52,8 @@ public static class ReadyActionManager
     private static readonly Dictionary<int, float> threatDist = new();     // 最近敌方领土距离
     private static readonly Dictionary<int, int> warnShellCount = new();   // 朝我来的穿甲弹数
     private static readonly Dictionary<int, float> warnShellEta = new();   // 其中最近的一发还有几秒
+    private static readonly Dictionary<int, Vector2> warnShellFrom = new();// 最近那一发**相对我的方位向量**
+    private static readonly Dictionary<int, Vector2> warnShellVel = new(); // 最近那一发的速度（航线方向）
     private static readonly Dictionary<int, int> warnBallCount = new();    // 朝我来的大球数
     private static readonly Dictionary<int, float> warnBallEta = new();
 
@@ -64,12 +67,32 @@ public static class ReadyActionManager
         threatDist[stage] = dist;
     }
 
-    public static void SetWarnings(int stage, int shellCount, float shellEta, int ballCount, float ballEta)
+    public static void SetWarnings(int stage, int shellCount, float shellEta, int ballCount, float ballEta,
+        Vector2 shellFrom = default, Vector2 shellVel = default)
     {
         warnShellCount[stage] = shellCount;
         warnShellEta[stage] = shellEta;
+        warnShellFrom[stage] = shellFrom;
+        warnShellVel[stage] = shellVel;
         warnBallCount[stage] = ballCount;
         warnBallEta[stage] = ballEta;
+    }
+
+    /// <summary>
+    /// 「垂直于最近那发穿甲弹的航线」的逃生角度（度）：给预行动的 `para--angle--垂直` 用。
+    /// 预行动没法自己看那一发从哪来 —— 没有这个现算，它只能拿一个固定角度硬走，
+    /// 顺着航线走就等于把自己摆到弹道上（用户反馈："AI 自己向穿甲上送"）。
+    /// 取不到来袭信息时返回 null（调用方就别触发这次移动）。
+    /// </summary>
+    public static float? PerpendicularEscapeAngle(int stage)
+    {
+        if (!warnShellVel.TryGetValue(stage, out Vector2 v) || v.sqrMagnitude < 0.000001f) return null;
+        if (!warnShellFrom.TryGetValue(stage, out Vector2 fromMyPos)) return null;
+
+        // 航线方向 = 弹速方向；垂直于它的两个方向里，挑"离这一发现在的位置更远"的那边
+        Vector2 perp = new Vector2(-v.y, v.x).normalized;
+        if (Vector2.Dot(perp, -fromMyPos) < 0f) perp = -perp;
+        return Mathf.Atan2(perp.y, perp.x) * Mathf.Rad2Deg;
     }
 
     public static int RoundOf(int stage) => roundOf.TryGetValue(stage, out int r) ? r : 0;
@@ -80,7 +103,8 @@ public static class ReadyActionManager
         byStage.Clear();
         roundOf.Clear(); marbleCount.Clear(); territory.Clear();
         threatPos.Clear(); threatDist.Clear();
-        warnShellCount.Clear(); warnShellEta.Clear(); warnBallCount.Clear(); warnBallEta.Clear();
+        warnShellCount.Clear(); warnShellEta.Clear(); warnShellFrom.Clear(); warnShellVel.Clear();
+        warnBallCount.Clear(); warnBallEta.Clear();
         nextId = 1;
     }
 
@@ -250,6 +274,16 @@ public static class ReadyActionManager
             if (t.Length < 3) continue;
             string key = t[1];
             string val = string.Join("--", t, 2, t.Length - 2);
+
+            // para--angle--垂直 / 躲避：按「垂直于最近那发穿甲弹的航线」现算角度。
+            // 预行动看不见弹道，固定角度会把它顺着航线送出去（"自己向穿甲上送"）。
+            if (key == "angle" && (val == "垂直" || val == "躲避" || val == "perpendicular"))
+            {
+                float? evade = PerpendicularEscapeAngle(a.stage);
+                if (evade == null) return null;              // 没有来袭信息 → 这次不触发，等下一次
+                val = evade.Value.ToString("0.#", CultureInfo.InvariantCulture);
+            }
+
             if (key == "index") { hasIndex = true; }
             if (IsNumber(val)) parts.Add($"\"{key}\":{val}");
             else parts.Add($"\"{key}\":\"{val.Replace("\"", "")}\"");

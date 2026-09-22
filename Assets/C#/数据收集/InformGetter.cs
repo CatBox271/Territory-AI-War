@@ -283,10 +283,20 @@ public class InformGetter : MonoBehaviour
         builder.AppendLine(); builder.AppendLine($"炮塔控制已断开：{reason}。炮塔已恢复自动旋转自动防御；除非目标进入 4 格内，不必再调用 control_turret start。");
     }
 
-    /// <summary>手动接管中时提示：这一期间炮塔不会自动防御。</summary>
+    /// <summary>炮塔状态：手动接管提示（这一期间不会自动防御）+ 当前的禁射扇区（阵营私有）。</summary>
     private static void AppendTurretControlState(StringBuilder builder, int stage)
     {
         if (!Towel.AllTowel.TryGetValue(stage, out Towel self) || self == null) return;
+
+        AutoRotater rot = self.aimController != null ? self.aimController.auto : null;
+        if (rot == null) rot = self.GetComponentInChildren<AutoRotater>();
+        string avoid = rot != null ? rot.DescribeAvoid() : null;
+        if (!string.IsNullOrEmpty(avoid))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"你的炮塔禁射扇区：{avoid}（待机旋转转到边界就掉头、自动护卫不会朝扇区里的目标转；手动 start 接管不受限制；control_turret action=avoid half=0 取消）。");
+        }
+
         AimController controller = self.aimController;
         if (controller == null || !controller.IsControlling) return;
 
@@ -485,7 +495,7 @@ public class InformGetter : MonoBehaviour
     #endregion
 
     #region 终局提示
-    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球、穿甲弹和子弹清掉，再把全图领土刷到 100%（一个像素都别留给中立），这局才会结束；别在最后被反杀。";
+    public const string FinalRoundHint = "【终局提示】场上只剩你一个阵营了：把还在飞的敌方大球、穿甲弹和子弹清掉——**这三样清完、再过 3 轮，系统就会停掉你的决策与升级**（之后不用再指挥）；你的炮塔会继续自动开火，把全图领土刷到 100%（一个像素都别留给中立）这一局才结束。别在最后被反杀。";
 
     /// <summary>场上是否还有敌方（非 stage 的）未被摧毁的大球或穿甲弹；判据同撞击预警（读 BallPainter.game_item_name）。</summary>
     public static bool HasEnemyBigBall(int stage)
@@ -533,9 +543,22 @@ public class InformGetter : MonoBehaviour
     #endregion
 
     #region 弹体撞击预警（大球 / 穿甲弹）
-    // 轨迹推演参数：最多预测 12 秒、步长 0.02 秒。“几秒后撞上”按近似计算。
-    private const float BallWarningMaxPredictTime = 12f;
+    // 轨迹推演参数：最多预测**两个回合**的时间（= 2 × AIAgent.RoundInterval，即面板上的 _cycleInterval）、步长 0.02 秒。
+    // 一个回合 = 一个决策周期：只报一个回合内的威胁，等于「看到就已经来不及动」；
+    // 报两个回合，它才来得及在这一轮决定、下一轮执行（移动/补盾都要花能量和一次行动）。
+    /// <summary>预测窗口拿不到回合间隔时的兜底秒数（正常情况都用 2 × 回合间隔）。</summary>
+    private const float BallWarningFallbackSeconds = 16f;
     private const float BallWarningStep = 0.02f;
+
+    /// <summary>预测窗口：2 × 回合间隔（秒）。</summary>
+    private static float BallWarningMaxPredictTime
+    {
+        get
+        {
+            float round = AIAgent.RoundInterval;
+            return round > 0f ? round * 2f : BallWarningFallbackSeconds;
+        }
+    }
     /// <summary>炮塔本体判定半径，与 BulletManager 里算撞击用的是同一个口径。</summary>
     private const float TurretBodyRadius = 0.4f;
 
@@ -575,6 +598,7 @@ public class InformGetter : MonoBehaviour
         // 预行动条件 warn--… 用的统计（也只在这里每轮刷一次）
         int shellCount = 0, ballCount = 0;
         float shellEta = 99f, ballEta = 99f;
+        Vector2 shellFrom = Vector2.zero, shellVel = Vector2.zero;   // 最近那发穿甲弹：相对我的方位 + 航线方向
 
         foreach (var kv in Oitems)
         {
@@ -598,6 +622,11 @@ public class InformGetter : MonoBehaviour
                     : PredictShieldImpact(item.item.position, vel, bodyR, mapCenter, mapHalf, stage, selfPos, selfShieldR);
                 if (impactT < 0f) continue;
 
+                // 它从哪来、朝哪飞：没有这两样，AI 的"躲"就只能瞎挑方向 ——
+                // 顺着航线挪 = 自己送上去（用户反馈："AI 在乱移动、自己向穿甲上送"）。
+                Vector2 fromVec = (Vector2)item.item.position - selfPos;
+                string flightDir = CardinalDirection(vel);
+
                 builder.AppendLine(); builder.Append("{");
                 builder.Append(isShell ? "穿甲弹撞击预警: " : "大球撞击预警: ");
                 builder.Append(AIAgent.GetStageName(kv.Key));
@@ -616,13 +645,39 @@ public class InformGetter : MonoBehaviour
                     builder.Append(" 秒后第一次撞上你的护盾(护盾当前直径 ");
                     builder.Append((selfShieldR * 2).ToString("0.0")); builder.Append(")");
                 }
+                builder.Append("；它现在在「"); builder.Append(CardinalDirection(fromVec)); builder.Append("」");
+                if (fromVec.magnitude > 0.05f)
+                {
+                    builder.Append(" "); builder.Append(fromVec.magnitude.ToString("0.0")); builder.Append(" 格处");
+                }
+                builder.Append("，正朝「"); builder.Append(flightDir); builder.Append("」飞（速度 ");
+                builder.Append(vel.magnitude.ToString("0.0")); builder.Append(" 格/秒）。");
+                builder.Append(isShell
+                    ? "它在两次反弹之间走直线、不受你移动影响；**撞到地图边界会像子弹一样反弹**（上面这个时间是**算上边界反弹之后**的第一次命中时间；它穿过护盾时的减速与离盾随机偏转没有算进来）：**垂直于它当前这一段航线挪开**，落点离航线越远越安全；顺着它的航线往前或往后挪等于把自己摆在航线上。"
+                    : "它会被地图边界与护盾反弹（上面的时间是算上反弹之后的结果）：**垂直于它当前这一段航线挪开**最稳，顺着航线挪等于把自己摆在航线上。");
+
+                // 落在本轮之内（小于一个回合间隔）的，必须当轮处理：情报滞后一轮，
+                // 拖到下一轮再动的时候这一发早就到了。
+                if (impactT < AIAgent.RoundInterval)
+                {
+                    builder.Append("——**预计时间小于一个回合，也就是本轮结束前就会撞上**：");
+                    builder.Append(isShell ? "这一发会在本轮之内打到你" : "这一发会在本轮之内撞到你的护盾");
+                    builder.Append("，**不能拖到下一轮再处理（情报本身就滞后一轮，下一轮才动就来不及了）**，");
+                    builder.Append(isShell ? "这一轮就得换位躲开、或者用大球把它撞偏" : "这一轮就得补盾、换位、或者用子弹/大球把它顶开");
+                    builder.Append("。");
+                }
                 builder.AppendLine(); builder.Append("}");
-                if (isShell) { shellCount++; if (impactT < shellEta) shellEta = impactT; }
+                if (isShell)
+                {
+                    shellCount++;
+                    if (impactT < shellEta) { shellEta = impactT; shellFrom = fromVec; shellVel = vel; }
+                }
                 else { ballCount++; if (impactT < ballEta) ballEta = impactT; }
             }
         }
 
-        ReadyActionManager.SetWarnings(stage, shellCount, shellEta, ballCount, ballEta);
+        // shellFrom / shellVel 给预行动的 `para--angle--垂直` 用（它自己看不见弹道）
+        ReadyActionManager.SetWarnings(stage, shellCount, shellEta, ballCount, ballEta, shellFrom, shellVel);
     }
 
     /// <summary>
@@ -640,8 +695,9 @@ public class InformGetter : MonoBehaviour
         float minX = mapCenter.x - mapHalf + shellR, maxX = mapCenter.x + mapHalf - shellR;
         float minY = mapCenter.y - mapHalf + shellR, maxY = mapCenter.y + mapHalf - shellR;
         Vector2 v = vel;
+        float maxT = BallWarningMaxPredictTime;   // 循环外取一次：窗口是 2 × 回合间隔，别每步都算
 
-        for (float t = BallWarningStep; t <= BallWarningMaxPredictTime; t += BallWarningStep)
+        for (float t = BallWarningStep; t <= maxT; t += BallWarningStep)
         {
             pos += v * BallWarningStep;
 
@@ -670,8 +726,9 @@ public class InformGetter : MonoBehaviour
         float minX = mapCenter.x - mapHalf + ballR, maxX = mapCenter.x + mapHalf - ballR;
         float minY = mapCenter.y - mapHalf + ballR, maxY = mapCenter.y + mapHalf - ballR;
         Vector2 v = vel;
+        float maxT = BallWarningMaxPredictTime;   // 循环外取一次：窗口是 2 × 回合间隔，别每步都算
 
-        for (float t = BallWarningStep; t <= BallWarningMaxPredictTime; t += BallWarningStep)
+        for (float t = BallWarningStep; t <= maxT; t += BallWarningStep)
         {
             pos += v * BallWarningStep;
 

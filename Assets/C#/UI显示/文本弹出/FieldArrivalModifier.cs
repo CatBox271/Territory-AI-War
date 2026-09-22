@@ -28,6 +28,12 @@ public class FieldArrivalModifier : MonoBehaviour
     [Range(0, 360)] public float randomRotationMax = 60f;
 
 
+    // ====== 颜色 ======
+    [Header("颜色")]
+    [Tooltip("这条文本的透明度：Play 时把它的 a 写进 TMP 的 alpha（不再硬写 1）。" +
+             "RGB 不写 —— 阵营色 / 舞台配色是外面写进 TMP 的")]
+    public Color color = Color.white;
+
     [Header("是否消失")]
     public bool fadable = true;
     // ====== 消失 ======
@@ -108,7 +114,7 @@ public class FieldArrivalModifier : MonoBehaviour
         _state = State.Entering;
         _timer = 0f;
         _stageFrame = int.MinValue;   // 舞台时钟：下一帧只记基准，不把中间停的时间补进来
-        _text.alpha = 1f;
+        ApplyColorAlpha();
         CacheTargetVertices();
     }
 
@@ -145,6 +151,18 @@ public class FieldArrivalModifier : MonoBehaviour
     public void Stop()
     {
         _state = State.Idle;
+    }
+
+    /// <summary>
+    /// 把 color 的 a 写进文本的透明度。**RGB 一个字节都不动**：阵营色（CharacterStatusArea / MessageDisplayer）
+    /// 和舞台配色（SceneTextDisplay）是外面写进 TMP 的，这里只接管「这条字有多透」。
+    /// </summary>
+    private void ApplyColorAlpha()
+    {
+        if (_text == null) return;
+        Color c = _text.color;
+        c.a = color.a;
+        _text.color = c;
     }
 
     // ====== 缓存 ======
@@ -427,7 +445,7 @@ public class FieldArrivalModifier : MonoBehaviour
     {
         _timer += dt;
         float alpha = 1f - Mathf.Clamp01(_timer / fallFadeTime);
-        _text.alpha = alpha;
+        _text.alpha = color.a * alpha;
 
         if (_timer >= fallFadeTime)
         {

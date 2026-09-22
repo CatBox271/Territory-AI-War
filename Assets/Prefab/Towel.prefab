@@ -292,7 +292,7 @@ MonoBehaviour:
   aimController: {fileID: 7866295218095374167}
   turretUpgraded: 0
   shieldUpgradeOwned: 0
-  shieldBreakInvincibleTime: 8
+  shieldBreakInvincibleTime: 10
   upgradedBulletRadiusScale: 1.5
   upgradedBulletImpactScale: 1.5
   invincibleBlink: 1
@@ -447,7 +447,7 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   color: {r: 1, g: 1, b: 1, a: 1}
-  intensity: 1.4
+  intensity: 12
   metal: 1
   shade: 0.931
   sheen: 0.69

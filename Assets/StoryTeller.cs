@@ -412,13 +412,16 @@ public class StoryTeller : MonoBehaviour
         return item;
     }
 
-    /// <summary>按阵营取一张立绘（Resources 根目录下的「名字_表情」），拿不到就退回 origin。</summary>
+    /// <summary>立绘所在的 Resources 子目录（立绘资源都在 Assets/Resources/Sprite/ 下，文件名仍是「名字_表情」）。</summary>
+    public const string PortraitFolder = "Sprite/";
+
+    /// <summary>按阵营取一张立绘（Resources/Sprite/ 下的「名字_表情」），拿不到就退回 origin。</summary>
     public static Sprite LoadPortrait(int stage, SpriteEmotion emo)
     {
         string name = AIAgent.GetStageName(stage);
         if (string.IsNullOrEmpty(name)) return null;
-        Sprite sp = Resources.Load<Sprite>(name + "_" + emo.ToString());
-        if (sp == null) sp = Resources.Load<Sprite>(name + "_" + SpriteEmotion.origin.ToString());
+        Sprite sp = Resources.Load<Sprite>(PortraitFolder + name + "_" + emo.ToString());
+        if (sp == null) sp = Resources.Load<Sprite>(PortraitFolder + name + "_" + SpriteEmotion.origin.ToString());
         return sp;
     }
 

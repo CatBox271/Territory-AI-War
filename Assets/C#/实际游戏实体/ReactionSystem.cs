@@ -28,7 +28,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = UsePropToolName,
-                description = "使用自己阵营武器栏中指定格子的道具。index 从 1 开始：1=第 1 格，2=第 2 格，以此类推。需要朝目标射击时，优先传 target_guid（场上信息里的 guid）；没有 guid 时传 aim_x 和 aim_y 指定地图世界坐标。使用成功后道具立即消耗并生效。没有道具或 index 超过当前持有数量时不要调用。如果该道具是【任意】，可以传 weapon 从 " + string.Join("、", MapConfig.ConcreteWeaponNames()) + " 里指定实际触发的武器；不传则随机。一次使用多个道具时，请按武器栈从后往前（高 index  低 index）依次调用，减少槽位反复移动。",
+                description = "使用自己阵营武器栏中指定格子的道具。index 从 1 开始：1=第 1 格，2=第 2 格，以此类推。需要朝目标射击时，优先传 target_guid（场上信息里的 guid）；没有 guid 时传 aim_x 和 aim_y 指定地图世界坐标。**带瞄准的这一发只会让炮塔转过去打出去（lookAt），不会接管炮塔**：自动旋转、自动拦截照常开着；想要持续锁定某个目标请用 control_turret。使用成功后道具立即消耗并生效。没有道具或 index 超过当前持有数量时不要调用。如果该道具是【任意】，可以传 weapon 从 " + string.Join("、", MapConfig.ConcreteWeaponNames()) + " 里指定实际触发的武器；不传则随机。一次使用多个道具时，请按武器栈从后往前（高 index  低 index）依次调用，减少槽位反复移动。",
                 parameters = new
                 {
                     type = "object",
@@ -121,7 +121,8 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = ControlTurretToolName,
-                description = "控制自己炮塔的持续瞄准。action=start 开始控制并让炮塔持续转向目标；必须传 target_guid（场上信息里的 guid），或 aim_x+aim_y（世界坐标）。action=stop 停止控制，炮塔立即恢复自动旋转。这个工具不消耗道具、不发射子弹，只控制炮塔朝向；开始控制后最多持续12秒，目标距离超过4也会自动断开；需要继续保持时再次调用 start。",
+                description = "控制自己炮塔的持续瞄准。action=start 开始控制并让炮塔持续转向目标；必须传 target_guid（场上信息里的 guid），或 aim_x+aim_y（世界坐标）。action=stop 停止控制，炮塔立即恢复自动旋转。这个工具不消耗道具、不发射子弹，只控制炮塔朝向；开始控制后最多持续12秒，目标距离超过4也会自动断开；需要继续保持时再次调用 start。"
+                    + "action=avoid 设置**禁射扇区**（让自己炮塔不朝某一段角度开火）：给 angle（扇区中心方向角，0=地图右(+X)、逆时针为正，和 move_turret 的 angle 同一口径）与 half（半宽，0~179 度）；half=0 取消。设了以后**待机旋转转到扇区边界就掉头**、**自动护卫不会朝扇区里的目标转**（两者都不进扇区）；手动 start 接管期间不受它限制。只记一个扇区，再设一次就覆盖，不消耗道具与能量。",
                 parameters = new
                 {
                     type = "object",
@@ -133,8 +134,8 @@ public class ReactionSystem : MonoBehaviour, Itool
                             new
                             {
                                 type = "string",
-                                @enum = new List<string> { "start", "stop" },
-                                description = "start=开始控制炮塔瞄准目标；stop=停止控制并恢复自动旋转。"
+                                @enum = new List<string> { "start", "stop", "avoid" },
+                                description = "start=开始控制炮塔瞄准目标；stop=停止控制并恢复自动旋转；avoid=设置/取消禁射扇区（需要 angle+half，half=0 取消）。"
                             }
                         },
                         {
@@ -160,6 +161,22 @@ public class ReactionSystem : MonoBehaviour, Itool
                                 type = "number",
                                 description = "start 时瞄准点的世界坐标 y，与 aim_x 必须同时提供；stop 不需要。"
                             }
+                        },
+                        {
+                            "angle",
+                            new
+                            {
+                                type = "number",
+                                description = "avoid 时禁射扇区的中心方向角（度）：0=地图右(+X)，逆时针为正，90=上；和 move_turret 的 angle 同一口径。"
+                            }
+                        },
+                        {
+                            "half",
+                            new
+                            {
+                                type = "number",
+                                description = "avoid 时禁射扇区的半宽（度，0~179）：扇区覆盖 中心±half；half=0 取消禁射扇区。"
+                            }
                         }
                     },
                     required = new List<string> { "action" }
@@ -173,7 +190,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = MoveTurretToolName,
-                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动消耗升级能量（与距离无关，具体数值见预览返回；同一个动作每用一次价格 ×涨价倍率，越移越贵），能量不足则**连预览都不给**，也就不会附带视野截图。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。**移动途中不能改道**：一旦开始走就会走到底，想换方向只能等它停下再走一次（途中想立刻停住，可以用 distance=0 做一次预览+确认）。移动本身不会主动广播你的新位置（对方要么靠大球/子弹撞上你护盾或炮塔本体时的撞击情报反推，要么你正好落进他 move_turret 预览附带的视野截图里被看到）。距离由你自己定：最大移动距离是上限、不是必须走满；确认前先核对目标点是否靠近各炮塔初始位置或撞击情报推测出的敌方方位，炮塔重叠不会被弹开、也不会自动停下，停到别人身上等于把命送出去。预览时还会附一张以你炮塔为圆心、半径等于你最大移动距离的圆形俯视截图（整个可移动范围都在图里，黑色环带 = 圆形视野之外，暗红色 = 地图之外），图上会直接标出周围每个球的位置、朝向和数值；先看图再决定方向和距离。",
+                description = "移动自己的炮塔（两步确认）：第一次只预览、不会移动——给方向（angle 角度，或 dir_x+dir_y 向量，会自动归一化）与 distance 距离，工具算出目标点并返回；看清返回里的目标点和警告后，第二次调用不再给方向距离，只传 confirm=true 才会真正开始移动。每次移动消耗升级能量（与距离无关，具体数值见预览返回；同一个动作每用一次价格 ×涨价倍率，越移越贵），能量不足则**连预览都不给**，也就不会附带视野截图。炮塔按固定速度直线移动，到达目标、撞到地图边界或超时会停下并通知你；distance=0 表示原地不动（用来停下）。**移动途中可以改道**：再发一次预览 + confirm 就会立刻朝新方向走（改道同样按当前价格扣一次能量）。移动本身不会主动广播你的新位置（对方要么靠大球/子弹撞上你护盾或炮塔本体时的撞击情报反推，要么你正好落进他 move_turret 预览附带的视野截图里被看到）。距离由你自己定：最大移动距离是上限、不是必须走满；确认前先核对目标点是否靠近各炮塔初始位置或撞击情报推测出的敌方方位，炮塔重叠不会被弹开、也不会自动停下，停到别人身上等于把命送出去。预览时还会附一张以你炮塔为圆心、半径等于你最大移动距离的圆形俯视截图（整个可移动范围都在图里），**图例：圆环 = 大球（环的大小就是球的实际大小）、叉 = 穿甲弹、圆点 = 炮塔、标记上方的数字 = 它的数值、带箭头的粗线 = 它正在飞的方向；绿 = 你的、红 = 对手的、白 = 中立，正中心套绿圈的那台就是你自己（所有炮塔都只画位置、不标数值）；黑色环带 = 圆形视野之外、暗红色 = 地图之外**；**图里看得见的东西另外还会用文字列一份坐标**（谁的什么、在哪个方位几格、世界坐标约多少），要用道具打谁就直接照那份文字里的坐标瞄；先看图再决定方向和距离。",
                 parameters = new
                 {
                     type = "object",
@@ -196,7 +213,7 @@ public class ReactionSystem : MonoBehaviour, Itool
             function = new Function
             {
                 name = WhisperToolName,
-                  description = "给另一个AI发送悄悄话并等待对方回复。to=对方阵营编号(1-4，不能是自己)；content=悄悄话内容，请用对方的名字称呼对方（玩家名单见系统提示）。对方空闲时立即回复；对方忙碌时会等对方忙完再单独回复。**要消耗升级能量、并且有回合冷却（具体数值见每轮情报），能量与移动共用同一个池子**。如果出现互相等待或环形等待，系统会自动调配，返回结果里会说明；被系统调配终止的会退还这次冷却与能量。",
+                  description = "给另一个AI发送悄悄话并等待对方回复。to=对方阵营编号(1-4，不能是自己)；content=悄悄话内容，请用对方的名字称呼对方（玩家名单见系统提示）。对方空闲时立即回复；对方忙碌时会等对方忙完再单独回复。**要消耗升级能量、并且有回合冷却（具体数值见每轮情报），能量与移动共用同一个池子**。如果出现互相等待或环形等待，系统会自动调配，返回结果里会说明；被系统调配终止的会退还这次冷却与能量。结盟时可以在 content 里报自己（或你确认过的第三方）的**大致位置**，用**地图绝对坐标**说（如「我大致在(1.5,0.5)一带」；不要用「我在你的东北方向」这类相对方位——别人的位置只有他自己知道），对方才能算出避开你这个方向的禁射扇区（control_turret action=avoid）中心角。",
                 parameters = new
                 {
                     type = "object",
@@ -237,10 +254,10 @@ public class ReactionSystem : MonoBehaviour, Itool
                     + "ready 的写法（每条字符串用 -- 分词）："
                     + "① 条件：all--对象--比较--值（any-- 任一满足、not-- 取反）；对象有 upgrade(升级能量) left(空槽数) slot(槽位上限) shield(护盾值) bullet(子弹量) marble(弹珠数) territory(领土像素) threat(最近敌方领土距离) threatPos--x/y(最近敌方领土坐标) round(回合数) enemyNum(存活敌人数) moveCost/whisperCost(本次价格) pos--x/y(自己坐标) moving--is--true/false prop--contain--种类--value--比较--值 prop--count--比较--值 warn--count--比较--值 warn--type--穿甲/大球--eta--比较--秒；比较 = more/less/moreEqual/lessEqual/equal。"
                     + "② select--prop--…：触发时挑哪一格道具（contain--种类--value--比较--值 / smallest / biggest / index--N），结果自动填进 index。"
-                    + "③ para--参数名--值：触发时覆盖/补充这次工具调用的参数（如 para--aim_x--0、para--angle--0、para--distance--1.5、para--weapon--大球、para--to--3、para--content--……）。"
+                    + "③ para--参数名--值：触发时覆盖/补充这次工具调用的参数（如 para--aim_x--0、para--angle--0、para--distance--1.5、para--weapon--大球、para--to--3、para--content--正文）。**给 move_turret 用 `para--angle--垂直` 时，角度会按「垂直于最近那发穿甲弹的航线」现算**（专给『穿甲预警就换位』这类条目用；只写 distance 不给方向，这次移动会直接失败）。"
                     + "④ reuse--0/-1/N：0=执行一次后自动取消（默认）、-1=永久、N=存活 N 个 AI 轮次。"
                     + "例：想「槽满时自动把最小的一颗大球打向(0,0)腾格子」就 add → tool_name=use_prop，ready=[\"all--left--less--1\",\"all--prop--contain--大球--value--less--1048576\",\"select--prop--contain--大球--value--less--1048576\",\"para--aim_x--0\",\"para--aim_y--0\"]。"
-                    + "每个阵营最多 5 条；执行失败会保留并在每轮情报里合并显示失败原因。",
+                    + "每个阵营最多 10 条；执行失败会保留并在每轮情报里合并显示失败原因。",
                 parameters = new
                 {
                     type = "object",
@@ -318,11 +335,6 @@ public class ReactionSystem : MonoBehaviour, Itool
     private static readonly Dictionary<int, MovePreview> pendingMoves = new();
     /// <summary>预览有效期（秒）：过期后 confirm 会被拒绝，要求重新预览。</summary>
     private const float MovePreviewValidSeconds = 60f;
-
-    /// <summary>移动途中不许改道（这条机制已经去掉）时统一返回的说明。</summary>
-    private const string MovingNoRedirectText =
-        "移动炮塔失败：炮塔正在移动中，不能改道——移动一旦开始就会一直走到底（到达目标 / 撞到地图边界 / 超时才停）。"
-        + "想换方向请等它停下再走一次；如果现在就想让它停住，可以用 distance=0 做一次预览 + confirm 让它原地停下。";
 
     private class MovePreview
     {
@@ -478,9 +490,10 @@ public class ReactionSystem : MonoBehaviour, Itool
         string text =
             $"【移动视野】这是以你的炮塔为圆心、半径 {shot.radius:0.00} 的俯视截图" +
             $"（半径 = 你当前最大移动距离 {shot.maxMove:0.00} 的 {MoveSightCapture.RadiusFactor:0.##} 倍）。" +
-            "圆心就是你炮塔的当前位置；图片上方 = +y（北），右方 = +x（东）。" +
-            "图中黑色环带是圆形视野之外、暗红色区域是地图之外——那两种地方没有信息，也去不了。" +
-            "先看清附近有没有别的炮塔 / 护盾 / 大球，再决定方向和距离（不必走满最大距离）。";
+            "**图例：圆环 = 大球（环的大小就是球的实际大小）、叉 = 穿甲弹、圆点 = 炮塔；每个标记上方的数字就是它的数值；从标记伸出的带箭头粗线 = 它正在飞的方向；绿 = 你的、红 = 对手的、白 = 中立，正中心那台套绿环的就是你自己的炮塔（所有炮塔都只画位置、不标数值）；黑色环带 = 圆形视野之外、暗红色 = 地图之外——这两处没有信息、也去不了。**" +
+            "图片上方 = +y（北），右方 = +x（东），圆心就是你炮塔的当前位置。" +
+            "先看清附近有没有别的炮塔 / 护盾 / 大球，再决定方向和距离（不必走满最大距离）。" +
+            MoveSightCapture.DescribeVisible(towel.transform.position, shot.radius, callStage);
 
         var msg = new DeepSeekMessage { role = "user", content = text };
         msg.contentBlocks = new List<DeepSeekContentBlock>
@@ -765,13 +778,45 @@ public class ReactionSystem : MonoBehaviour, Itool
             return new ToolOutcome($"炮塔控制失败：{callStage} 号阵营没有挂 AimController。");
 
         string action = (args.action ?? "").Trim().ToLower();
+
+        // 禁射扇区：不接管炮塔，只给自动旋转/自动护卫划一段不朝的方向
+        if (action == "avoid")
+        {
+            AutoRotater rot = aimController.auto != null ? aimController.auto : towel.GetComponentInChildren<AutoRotater>();
+            if (rot == null)
+                return new ToolOutcome($"炮塔禁射扇区设置失败：{callStage} 号阵营的炮塔上没有 AutoRotater。");
+
+            if (!args.half.HasValue)
+                return new ToolOutcome("炮塔禁射扇区设置失败：要传 half（半宽，度，0~179；0 = 取消）。");
+
+            float half = (float)args.half.Value;
+            if (half < 0f || half >= 180f)
+                return new ToolOutcome($"炮塔禁射扇区设置失败：half 必须在 0~179 之间（现在是 {half:0.#}）。");
+
+            if (half <= 0f)
+            {
+                rot.ClearAvoidSector();
+                return new ToolOutcome("已取消炮塔禁射扇区：待机旋转与自动护卫恢复整圈。", "取消禁射扇区");
+            }
+
+            if (!args.angle.HasValue)
+                return new ToolOutcome("炮塔禁射扇区设置失败：要传 angle（扇区中心方向角：0=地图右(+X)，逆时针为正）。");
+
+            rot.SetAvoidSector((float)args.angle.Value, half);
+            string desc = rot.DescribeAvoid();
+            return new ToolOutcome(
+                $"炮塔禁射扇区已设为 {desc}：待机旋转转到扇区边界就掉头，自动护卫不会朝扇区里的目标转（手动 start 接管不受限制）。"
+                + "control_turret action=avoid half=0 可取消。",
+                $"禁射扇区\n{desc}");
+        }
+
         if (action == "stop")
         {
             aimController.StopControl();
             return new ToolOutcome("已停止炮塔控制，炮塔恢复自动旋转自动防御。", "停止炮塔控制");
         }
         if (action != "start")
-            return new ToolOutcome($"炮塔控制失败：action 无效：{args.action}。可选值：start、stop。");
+            return new ToolOutcome($"炮塔控制失败：action 无效：{args.action}。可选值：start、stop、avoid。");
 
         ItemType aim = ResolveAim(args.target_guid, args.aim_x, args.aim_y, out string aimError);
         if (aim == null)
@@ -877,12 +922,7 @@ public class ReactionSystem : MonoBehaviour, Itool
                 return new ToolOutcome("移动炮塔失败：没有待确认的移动预览（或者已超过 60 秒过期）。请先给方向和距离做一次预览，再传 confirm=true。");
             }
 
-            // 移动途中不许改道（这条机制已经去掉）：正在移动时只接受「原地停下」（distance=0）那一种确认
-            if (towel.IsMoving && preview.distance > 0f)
-            {
-                pendingMoves.Remove(callStage);
-                return new ToolOutcome(MovingNoRedirectText);
-            }
+            // 移动途中允许改道（2026-09-22 用户要求）：confirm 时不管是否正在移动，都按新预览重新开始走。
 
             // 扣除能量（按现价），然后才开始移动
             if (mm != null && !mm.TrySpendActionEnergy(callStage, MarbleManager.EnergyAction.Move, out cost))
@@ -893,6 +933,10 @@ public class ReactionSystem : MonoBehaviour, Itool
 
             pendingMoves.Remove(callStage);
             Vector2 from = towel.transform.position;
+
+            // 移动消耗直接弹在炮塔上（和「炮塔升级 / 护盾升级」同一条飘字通道）
+            if (mm != null) towel.ShowTip($"移动消耗 {cost:0.#}");
+
             towel.StartMove(preview.dir, preview.distance);
             float eta = preview.distance / Mathf.Max(towel.moveSpeed, 0.0001f);
             string dirText = InformGetter.CardinalDirection(preview.dir);
@@ -933,10 +977,6 @@ public class ReactionSystem : MonoBehaviour, Itool
 
         if (!args.distance.HasValue)
             return new ToolOutcome("移动炮塔失败：请给出 distance（移动距离，世界单位）。");
-
-        // 移动途中不许改道（这条机制已经去掉）：正在移动时只给「原地停下」（distance=0）的预览
-        if (towel.IsMoving && args.distance.Value > 0f)
-            return new ToolOutcome(MovingNoRedirectText);
 
         Vector2 selfPos = towel.transform.position;
         if (!ResolveMovePreview(selfPos, dir, (float)args.distance.Value, towel.MaxMoveDistance, towel.MoveBound,
@@ -1139,6 +1179,8 @@ public class ReactionSystem : MonoBehaviour, Itool
         public string target_guid = "";
         public double? aim_x = null;
         public double? aim_y = null;
+        public double? angle = null;
+        public double? half = null;
     }
 
     [System.Serializable]

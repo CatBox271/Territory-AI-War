@@ -392,13 +392,25 @@ public class Towel : MonoBehaviour, IStageValue
         clone.localScale -= Vector3.one * (0.15f * shieldUpgradeOwned);
     }
 
+    /// <summary>
+    /// 第 level 级护盾强化的**破盾无敌时长**（秒）：`shieldBreakInvincibleTime / 4^(level-1)`
+    /// —— 1 级 = 基准值、2 级 = 基准/4、3 级 = 基准/16…（2026-09-22 用户要求改成这个口径；
+    /// 基准值在 Towel.prefab 上是 10，也就是 10 / 2.5 / 0.625 / 0.156…）。
+    /// level &lt;= 0 = 没升过护盾强化，没有无敌窗口。
+    /// </summary>
+    public float ShieldInvincibleTimeAt(int level)
+    {
+        if (level <= 0) return 0f;
+        return shieldBreakInvincibleTime / Mathf.Pow(4f, level - 1);
+    }
+
     /// <summary>护盾被击碎（或检测到已碎）时调用，立即开启无敌窗口与发光。</summary>
     public void OnShieldBroken()
     {
         if (shield != null && shield.activeSelf) shield.SetActive(false);
         if (shieldUpgradeOwned <= 0) return;
 
-        invincibleUntil = Time.time + shieldBreakInvincibleTime * shieldUpgradeOwned;
+        invincibleUntil = Time.time + ShieldInvincibleTimeAt(shieldUpgradeOwned);
     }
 
     void CreateExplosionEffect()

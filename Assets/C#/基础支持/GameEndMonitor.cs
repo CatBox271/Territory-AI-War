@@ -3,10 +3,12 @@ using RenderHeads.Media.AVProMovieCapture;
 using UnityEngine;
 
 /// <summary>
-/// 占地达标自动结束组件：
-/// 定期扫描 TerritoryCanvas 的领地网格，当某个非 0 阵营的占地面积达到 endThresholdPercent（默认 100%），
-/// 并且【全部 &&】：只剩一个阵营（且就是它）、场上没有敌方游离道具（大球/子弹）、赢家终局感言已播出时，
-/// 自动停止 AI 循环、停止录制并结束游戏（冻结全局时间）。
+/// 终局流程（两个阶段，2026-09-22 用户定）：
+/// **阶段一 · 收尾**：只剩一个阵营 + 场上没有威胁（无敌方大球/穿甲弹、无敌方子弹）+ 成为唯一阵营后已过 3 轮
+/// → 停 AI 决策与升级（AIAgent.TickSoloWrapUp），游戏继续跑、赢家的炮塔继续自动开火涂地。
+/// **阶段二 · 停游戏**：
+/// · 有阵营存活 → 某阵营占地达到 endThresholdPercent（默认 100%）就结束（冻结全局时间）；
+/// · 没有阵营存活（全死）→ 场上大球涂到 NoAlivePaintedPercent（默认 95%），或者场上什么物体都没了，也结束。
 /// 终止时顺便让 GameMemory 把各阵营这一局的记忆追加写盘（每阵营一个文件）。
 /// 录制不归它管：要么自己开 CaptureBase 的 _captureOnStart，要么用本组件的右键菜单「启动录制」。
 /// 提供测试按钮（OnGUI 游戏视口左上角）与右键菜单入口，可直接结束录制并结束游戏。
@@ -27,6 +29,10 @@ public class GameEndMonitor : MonoBehaviour
     [Tooltip("某阵营占地比例达到该百分比即判定其获胜并结束（0-100）。100 = 全图每一个像素都归它")]
     [Range(0f, 100f)]
     public float endThresholdPercent = 100f;
+
+    [Tooltip("**没有阵营存活**（全死）时的结束线：场上大球涂到这个百分比就可以停游戏（0-100）。默认 95")]
+    [Range(0f, 100f)]
+    public float NoAlivePaintedPercent = 95f;
 
     /// <summary>是否已经结束过（幂等保护）。</summary>
     public bool GameEnded { get; private set; }
@@ -54,23 +60,107 @@ public class GameEndMonitor : MonoBehaviour
         if (_timer < checkInterval) return;
         _timer = 0f;
 
-        int owner = FindOwnerOverThreshold();
-        if (owner <= 0) return;
+        // ---------- 阶段一：收尾（停 AI + 停升级）----------
+        // 只剩一个阵营 + 场上没有威胁（无敌方大球/穿甲弹、无敌方子弹）+ 成为唯一阵营后已过 3 轮
+        // → AIAgent 内部停掉决策循环与升级；游戏继续跑，让赢家的炮塔把地刷满。
+        if (AIAgent.Instance != null) AIAgent.Instance.TickSoloWrapUp();
 
-        // 完整结束判据（全部 &&）：占地达标（上面已过，默认 100%）&& 只剩一个阵营 && 无敌方游离道具（大球/子弹）&& 赢家终局感言已播出
-        if (AIAgent.Instance == null) return;
-        if (!AIAgent.Instance.IsEndgameReady(owner, out string reason))
+        // ---------- 阶段二：停游戏 ----------
+        if (!TryGetGameOver(out int winner, out string reason))
         {
             if (_lastWaitReason != reason)
             {
                 _lastWaitReason = reason;
-                Debug.Log($"[GameEndMonitor] 阵营 {owner} 占地已过 {endThresholdPercent:0.#}%，但还不满足结束条件：{reason}");
+                Debug.Log($"[GameEndMonitor] 还不能结束：{reason}");
             }
             return;
         }
 
-        Debug.Log($"[GameEndMonitor] 阵营 {owner} 占地 {endThresholdPercent:0.#}% 且场上已无敌方游离道具，结束录制并结束游戏");
-        EndGame(owner);
+        Debug.Log($"[GameEndMonitor] 满足结束条件（winner={winner}），结束录制并结束游戏");
+        EndGame(winner);
+    }
+
+    /// <summary>
+    /// 停游戏判据（2026-09-22 用户定的终局流程）：
+    /// · **有阵营存活**：某阵营占地达到 endThresholdPercent（默认 100%，整张网格一个中立像素都不剩）→ 停游戏；
+    /// · **没有阵营存活**（全死）：场上大球已经把 ≥NoAlivePaintedPercent（默认 95%）的地涂掉了，
+    ///   **或者**场上什么物体都没了（没有大球/穿甲弹/子弹）→ 停游戏（没有赢家，winner = 0）。
+    /// 「收尾（停 AI 停升级）」是另一件事，见 AIAgent.TickSoloWrapUp。
+    /// </summary>
+    public bool TryGetGameOver(out int winner, out string reason)
+    {
+        winner = 0;
+        reason = null;
+
+        // 对局还没起来（地图没就绪 / 一个像素都还没涂）：什么都不判，
+        // 否则开局那一瞬"没有阵营存活 + 场上没物体"会直接把游戏判结束。
+        if (!TerritoryReady()) { reason = "领地地图还没就绪"; return false; }
+
+        if (AnyStageAlive())
+        {
+            int owner = FindOwnerOverThreshold();
+            if (owner <= 0)
+            {
+                reason = $"还有阵营存活，但还没有人占地达到 {endThresholdPercent:0.#}%";
+                return false;
+            }
+            winner = owner;
+            return true;
+        }
+
+        // 没有阵营存活：只能靠场上游离的大球/子弹继续涂地
+        float painted = PaintedPercent();
+        if (painted <= 0f) { reason = "四家全死，但地上还一个像素都没涂上"; return false; }
+        if (painted >= NoAlivePaintedPercent) return true;
+        if (!AnyObjectLeft()) return true;
+
+        reason = $"没有阵营存活：已涂地 {painted:0.#}%（要到 {NoAlivePaintedPercent:0.#}%），而且场上还有物体在动";
+        return false;
+    }
+
+    /// <summary>领地网格是否可用（画布在、纹理建好、且已涂过至少一个像素 —— 四个炮塔开局各涂一圈）。</summary>
+    private static bool TerritoryReady()
+    {
+        var canvas = TerritoryCanvas.Instance;
+        if (canvas == null || !canvas.territoryMap.IsCreated) return false;
+
+        var map = canvas.territoryMap;
+        for (int i = 0; i < map.Length; i++)
+            if (map[i] != 0) return true;
+
+        return false;
+    }
+
+    /// <summary>场上还有活着的阵营吗（1~4 号炮塔里任意一个没死）。</summary>
+    public static bool AnyStageAlive()
+    {
+        foreach (var kv in Towel.AllTowel)
+            if (kv.Value != null && !kv.Value.isDead) return true;
+        return false;
+    }
+
+    /// <summary>整张网格里「已经不是中立 0」的像素占比（0-100）：大球/子弹涂过的地都算。</summary>
+    public float PaintedPercent()
+    {
+        var canvas = TerritoryCanvas.Instance;
+        if (canvas == null || !canvas.territoryMap.IsCreated) return 0f;
+
+        var map = canvas.territoryMap;
+        int total = map.Length;
+        if (total == 0) return 0f;
+
+        int painted = 0;
+        for (int i = 0; i < total; i++)
+            if (map[i] != 0) painted++;
+        return painted * 100f / total;
+    }
+
+    /// <summary>场上还有没有任何物体（大球/穿甲弹/子弹）。全死之后用来判「场上已经什么都没了」。</summary>
+    public static bool AnyObjectLeft()
+    {
+        if (InformGetter.HasEnemyBigBall(-1)) return true;      // stage = -1 → 谁的都算
+        if (BulletManager.Instance != null && BulletManager.Instance.CountAliveBulletsExcept(-1) > 0) return true;
+        return false;
     }
 
     /// <summary>

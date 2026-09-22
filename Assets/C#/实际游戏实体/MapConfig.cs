@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -56,6 +57,13 @@ public class MapConfig : MonoBehaviour
 
     [Header("AI")]
     public bool useAIDecision = false;
+    [Tooltip("台词拟人化：把 AI 的【我说】再交给 DeepSeek 官方 API 的 deepseek-flash 过一遍（更贴人设、更像人说的话）。" +
+             "key 和主 API 共用 persistentDataPath\\Key.txt；关掉 = 完全走原流程（不额外发请求）")]
+    public bool humanizeSpeech = true;
+    [Tooltip("拟人化优化间隔：每 N 次拟人化请求真正做 1 次（1 = 每次都做；2 = 「1010」优化一次跳过一次；" +
+             "0 或负数 = 整层不做）。计数按角色各算各的，用来砍掉一半的拟人化等待时间；" +
+             "秘密会晤里的每一条「说」不受间隔影响、全都优化（也不参与计数）。")]
+    public int humanizeInterval = 2;
 
     [Header("Map")]
     public float worldSize = 10f;
@@ -249,6 +257,59 @@ public class MapConfig : MonoBehaviour
         return AllConcreteWeapons[Random.Range(0, AllConcreteWeapons.Length)];
     }
 
+    // ==================== 六个道具区的落点概率（现算，别在提示词里手抄） ====================
+
+    private static string propOddsText;
+
+    /// <summary>
+    /// 道具区的落点概率（例如「大球 约 24%、护盾 约 24%、穿甲 约 8%」）。
+    /// 按场景里每个 PropTrigger 的**触发宽度**现算 —— 弹珠落在那一条上的概率 ≈ 它占全部宽度的比例。
+    /// 改了道具区的布局/宽度，开局（MapConfig.RefreshPropZoneOdds）重新算一遍就行，不用改提示词。
+    /// 拿不到（还没进 Play、或者场景里没有道具区）返回 null。
+    /// </summary>
+    public static string PropZoneOddsText
+    {
+        get
+        {
+            if (propOddsText == null) propOddsText = BuildPropZoneOdds();
+            return propOddsText;
+        }
+    }
+
+    public static void RefreshPropZoneOdds() => propOddsText = null;
+
+    private static string BuildPropZoneOdds()
+    {
+        PropTrigger[] zones = FindObjectsOfType<PropTrigger>(true);
+        if (zones == null || zones.Length == 0) return null;
+
+        var width = new Dictionary<WeaponKind, float>();
+        float total = 0f;
+        foreach (PropTrigger z in zones)
+        {
+            if (z == null) continue;
+            float w;
+            BoxCollider2D box = z.GetComponent<BoxCollider2D>();
+            w = box != null
+                ? box.size.x * Mathf.Abs(z.transform.lossyScale.x)
+                : Mathf.Abs(z.transform.lossyScale.x);
+            if (w <= 0f) continue;
+            width[z.itemName] = (width.TryGetValue(z.itemName, out float old) ? old : 0f) + w;
+            total += w;
+        }
+        if (total <= 0.01f || width.Count == 0) return null;
+
+        var list = new List<KeyValuePair<WeaponKind, float>>(width);
+        list.Sort((a, b) => b.Value.CompareTo(a.Value));
+        var sb = new StringBuilder();
+        foreach (var kv in list)
+        {
+            if (sb.Length > 0) sb.Append('、');
+            sb.Append(kv.Key).Append(" 约 ").Append((kv.Value / total * 100f).ToString("0")).Append('%');
+        }
+        return sb.ToString();
+    }
+
     /// <summary>实体武器的名字列表（工具的 @enum 与提示文案用，跟着枚举走）。</summary>
     public static List<string> ConcreteWeaponNames()
     {
@@ -268,8 +329,11 @@ public class MapConfig : MonoBehaviour
 
         if (aim_pos != null && aim_pos.item != null)
         {
-            towel.LookAt(aim_pos.pos); //转向,炮塔默认会自动顺时针转向
-            towel.aimController.ChangeAim(aim_pos);
+            // 只「转过去打这一发」：LookAt 立即把炮塔转到位，武器沿 transform.up 出膛。
+            // 这里**不再调 aimController.ChangeAim** —— 那是「持续瞄准」接管：会让 AimController
+            // 每帧锁着这个目标、并把 auto.active 关掉（自动旋转/自动拦截停摆，最长 12 秒）。
+            // 用户要求：道具里的瞄只是个 lookAt，不许接管炮塔。
+            towel.LookAt(aim_pos.pos);
 
             // AI 调用道具的初始瞄准误差：在转向后立刻随机偏转，发射方向按误差后的朝向执行。
             if (aimAngleError > 0f)

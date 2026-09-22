@@ -57,6 +57,7 @@ public class UIWeaponItem : MonoBehaviour
         Burn
     }
 
+    private static readonly HugeInt Pow2_14 = HugeInt.Pow(2, 14);
     private static readonly HugeInt Pow2_20 = HugeInt.Pow(2, 20);
     private static readonly HugeInt Pow2_30 = HugeInt.Pow(2, 30);
 
@@ -95,27 +96,33 @@ public class UIWeaponItem : MonoBehaviour
     }
 
     /// <summary>
-    /// 判定特效等级。
-    /// 游戏实际产生的武器值都是 2^指数，因此：
-    ///   2^0~2^13 暗；2^14~2^19 普通；2^20~2^29 附魔；2^30+ 燃烧。
-    /// 对小于等于 8192 的非 2 次方预览值，按字面区间兜底：0~19 普通、20~29 附魔、30+ 燃烧，
-    /// 方便用 previewValue 直接验证。
+    /// 判定特效等级（**真实数值**）：只看大小，2^0~2^13 暗；2^14~2^19 普通；2^20~2^29 附魔；2^30+ 燃烧。
+    /// 注意：游戏里产生的武器值大多是 2 的指数，但 **merge_prop 会把两个同种道具相加**，
+    /// 合出来的值可能不是 2 的幂（比如 512+511=1023）。这种小值一律按"小"处理（暗），
+    /// **绝不能拿字面区间去套** —— 否则 1023 会被判成"燃烧"，槽里就是 1.0K 却在着火。
+    /// 编辑器预览要的"字面区间"（20~29 附魔、30+ 燃烧）在 <see cref="GetPreviewEffectLevel"/> 里。
     /// </summary>
     public static EffectLevel GetEffectLevel(HugeInt value)
     {
         if (value <= HugeInt.Zero) return EffectLevel.Normal;
+        if (value < Pow2_14) return EffectLevel.Dark;      // 2^0 ~ 2^13（含合并出来的非 2 次幂小值）
+        if (value < Pow2_20) return EffectLevel.Normal;    // 2^14 ~ 2^19
+        if (value < Pow2_30) return EffectLevel.Enchant;   // 2^20 ~ 2^29
+        return EffectLevel.Burn;                           // 2^30+ ≈ 1.07B
+    }
 
-        if (value <= (HugeInt)8192)
-        {
-            if (IsPowerOfTwoSmall(value)) return EffectLevel.Dark;
-            if (value < (HugeInt)20) return EffectLevel.Normal;
-            if (value < (HugeInt)30) return EffectLevel.Enchant;
-            return EffectLevel.Burn;
-        }
-
-        if (value < Pow2_20) return EffectLevel.Normal;   // 2^14 ~ 2^19
-        if (value < Pow2_30) return EffectLevel.Enchant;  // 2^20 ~ 2^29
-        return EffectLevel.Burn;                          // 2^30+
+    /// <summary>
+    /// **编辑器预览专用**：按字面区间给等级（0~19 普通、20~29 附魔、30+ 燃烧，2 的幂仍是暗），
+    /// 方便在 Inspector 里填 previewValue 直接验证三种特效。只给 previewValue / PreviewOverride 用，
+    /// 真实数值请走 <see cref="GetEffectLevel"/>。
+    /// </summary>
+    public static EffectLevel GetPreviewEffectLevel(int previewValue)
+    {
+        if (previewValue <= 0) return EffectLevel.Normal;
+        if (previewValue <= 8192 && IsPowerOfTwoSmall((HugeInt)previewValue)) return EffectLevel.Dark;
+        if (previewValue < 20) return EffectLevel.Normal;
+        if (previewValue < 30) return EffectLevel.Enchant;
+        return EffectLevel.Burn;
     }
 
     private static bool IsPowerOfTwoSmall(HugeInt value)
@@ -142,7 +149,7 @@ public class UIWeaponItem : MonoBehaviour
             normalTintSet = true;
         }
 
-        EffectLevel level = PreviewOverride ? GetEffectLevel(PreviewOverrideValue) : GetEffectLevel(val);
+        EffectLevel level = PreviewOverride ? GetPreviewEffectLevel(PreviewOverrideValue) : GetEffectLevel(val);
         ApplyEffect(level, tint);
         Show();
     }
@@ -265,7 +272,7 @@ public class UIWeaponItem : MonoBehaviour
 
     private void ApplyPreviewEffect()
     {
-        EffectLevel level = GetEffectLevel(previewValue);
+        EffectLevel level = GetPreviewEffectLevel(previewValue);
 
         Material mat = normalMaterial;
         if (level == EffectLevel.Enchant) mat = enchantMaterial;

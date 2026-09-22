@@ -54,6 +54,18 @@ public class AIAgent : MonoBehaviour
 
     private static readonly Dictionary<int, string> stageNames = new();
 
+    /// <summary>场上所有玩家的名字，顿号隔开（给台词拟人化用：告诉优化器这些人名一个字都不许改）。</summary>
+    public static string AllStageNamesText
+    {
+        get
+        {
+            var names = new List<string>();
+            foreach (var kv in stageNames)
+                if (!string.IsNullOrWhiteSpace(kv.Value)) names.Add(kv.Value);
+            return string.Join("、", names);
+        }
+    }
+
     /// <summary>阵营编号 -> 角色名字，供 GetInfo / 悄悄话横幅 / 工具结果显示。</summary>
     public static string GetStageName(int stage)
     {
@@ -133,7 +145,7 @@ public class AIAgent : MonoBehaviour
 
     // ==================== 三段格式：内容写在【分析：…】【我要：…】【我说：…】里面 ====================
     // 思考（reasoning）已经全部关掉，模型的"想"写在 content 的第一段里。三段各有去处：
-    //   分析 → 舞台的思考条（第一人称内心独白，不许带括号）
+    //   分析 → 舞台的思考条（第一人称内心独白；括号不卡）
     //   我要 → 这一轮打算做什么（给行为检查用，不当台词）
     //   我说 → 唯一会被当众播出去的那一句（飘字、发言列表、给对手读的【上一轮发言】）
 
@@ -148,7 +160,51 @@ public class AIAgent : MonoBehaviour
         int start = i + label.Length + 2;                 // 跳过 【 与 ：
         int end = content.IndexOf('】', start);
         if (end < 0) end = content.Length;
+        // 这里**不做任何"捞回"**：模型把格式占位符抄进段内（「【分析：……】真正的独白…」）时
+        // 原样返回占位符，交给三段校验判不合格、打回重发 —— 用户口径：抄了格式就该被打回去重写，
+        // 不许替它兜（"你TM的应该打回去"）。
         return content.Substring(start, end - start).Trim();
+    }
+
+    /// <summary>整段只有省略号 / 标点 / 空白（也就是模型把格式占位符「……」抄进来了）时算"没写内容"。</summary>
+    public static bool IsPlaceholderOnly(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return true;
+        foreach (char c in text)
+        {
+            if (char.IsWhiteSpace(c)) continue;
+            if ("…．.。，,、！!？?；;：:—－-～~·`'\"“”‘’()（）[]【】{}<>《》".IndexOf(c) >= 0) continue;
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 台词里是不是报了坐标（「(-2.23,2.23)」「（2.00, -4.00）」这种成对的数字）。
+    /// 只认"带括号的成对数"和"两个都带小数点的成对数"，免得把「1.5 秒」「15 字」「1.0M」误判。
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex CoordPairRegex =
+        new System.Text.RegularExpressions.Regex(
+            @"[（(]\s*[-+]?\d+(?:\.\d+)?\s*[,，]\s*[-+]?\d+(?:\.\d+)?\s*[)）]" +
+            @"|[-+]?\d+\.\d+\s*[,，]\s*[-+]?\d+\.\d+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static bool LooksLikeCoordinate(string text)
+        => !string.IsNullOrEmpty(text) && CoordPairRegex.IsMatch(text);
+
+    /// <summary>
+    /// 【我说】去掉 [emo:xxx] 标记和空白之后还剩不剩字。
+    /// 模型经常用「【我说：】[emo:sad]」来表示"不说话但换个表情"—— 那一段不是空白，
+    /// 老的"台词为空"校验判不出来，显示时 [emo:xxx] 又被抠掉，于是屏幕上就是空的一句
+    /// （用户："绿色的【我说：】是空的你怎么都不拦截了"）。
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex EmoTagStripRegex =
+        new System.Text.RegularExpressions.Regex(@"\[emo:[^\]]*\]", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static bool SayHasNoText(string say)
+    {
+        if (string.IsNullOrEmpty(say)) return true;
+        return string.IsNullOrWhiteSpace(EmoTagStripRegex.Replace(say, ""));
     }
 
     /// <summary>
@@ -193,9 +249,48 @@ public class AIAgent : MonoBehaviour
     }
 
     /// <summary>
+    /// 流式**增量**校验（喂给 AIRequest.RequestInfo.partialFormatProblem）：返回非 null = 这份回复**已经**不合格，
+    /// 后面的字再补也救不回来 → 立刻掐断这次生成，省掉剩下的生成时间，直接重发。
+    ///
+    /// 判据**严格照抄最终校验**（IsThreeSegmentReply / ThinkingProblems），**只提前、不新增规则** ——
+    /// 只有"已经闭合的那一段"内容才是定死的（Segment 取的是段名到第一个「】」之间，闭合后不会再变），所以只判这三条：
+    ///   · 【分析】那一段闭合了，里面却空的 / 只有省略号标点（把格式模板「……】【】」抄进来了）
+    ///   · 【我要】那一段闭合了，里面空的
+    ///   · 【我说】那一段闭合了，却有括号 / 有「我想：」/ 有 [skip]
+    /// 至于"缺某一段""某段没有收尾的「】」"这类：最终校验看的是**整份**文本（有没有出现过这个段名、段名之后有没有出现过「】」），
+    /// 流到一半时后面的字还可能把它补上（比如先写【我要】、过一会儿才写【分析】）→ 不在这里判，留给流结束后的正常校验。
+    /// 改这里的判据时必须同步改 ThinkingProblems（双写口径见"改校验必须同步改提示词"）。
+    /// </summary>
+    public static string PartialFormatProblem(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return null;
+
+        string analysis = Segment(content, "分析");
+        if (analysis != null && HasClosedSegment(content, "分析"))
+        {
+            if (string.IsNullOrWhiteSpace(analysis)) return "【分析】那一段是空的";
+            if (IsPlaceholderOnly(analysis)) return "【分析】里只有省略号/标点（把格式模板抄进来了）";
+        }
+
+        string want = Segment(content, "我要");
+        if (want != null && HasClosedSegment(content, "我要") && string.IsNullOrWhiteSpace(want))
+            return "【我要】那一段是空的";
+
+        string say = Segment(content, "我说");
+        if (say != null && HasClosedSegment(content, "我说"))
+        {
+            if (ContainsAnyParenthesis(say)) return "【我说】里出现了括号";
+            if (say.Contains("我想：") || say.Contains("我想:")) return "【我说】里出现了「我想：」";
+            if (say.Contains("[skip]")) return "【我说】里出现了 [skip]";
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// 三段格式校验（本轮回复）：
     /// 必须有【分析：…】和【我说：…】；三段都要写全（带收尾的 】）；
-    /// 【分析】是纯内心独白，不许带括号（中英文都不行）；【我说】也不许有括号。
+    /// 【分析】是纯内心独白，**括号不卡**；【我说】任何括号都不许。
     /// allowEmptySay = 允许【我说】为空（开局那句长期规划就是只想不说）。
     /// </summary>
     public static bool IsThreeSegmentReply(DeepSeekMessage message, bool allowEmptySay = false)
@@ -208,17 +303,34 @@ public class AIAgent : MonoBehaviour
             if (!HasClosedSegment(content, label)) return false;
 
         string analysis = Segment(content, "分析");
-        if (string.IsNullOrWhiteSpace(analysis)) return false;
-        if (ContainsAnyParenthesis(analysis)) return false;   // 新的分析规则：内心独白直接写，不许用括号
+        if (string.IsNullOrWhiteSpace(analysis) || IsPlaceholderOnly(analysis)) return false;
+        // 【分析】**不再卡括号**（2026-09-22 用户：不要在分析里面卡这个格式了）。
+        // 原来全角半角都拦：AI 每轮都在写坐标（「我在(4,-4)」）和算式（min(a,b)），
+        // 打回一次就要重发整个上下文（有 30 秒级的），白白吃掉两成多的时间；
+        // 后来放宽成只拦全角，还是会在写「（2.94,2.94）」这种时被拦 —— 索性整条撤掉。
 
         string say = Segment(content, "我说");
         bool hasTools = message.tool_calls != null && message.tool_calls.Count > 0;
+        // 只写了省略号/标点（抄了格式占位符），或者只写了 [emo:xxx]（不说话只换表情），都算没写
+        if (IsPlaceholderOnly(say) || SayHasNoText(say)) say = "";
         // 【我说】为空：调用了工具（它在行动，不说也行）或这一轮本来就是只想不说（allowEmptySay）才放行
         if (!allowEmptySay && !hasTools && string.IsNullOrWhiteSpace(say)) return false;
         if (ContainsAnyParenthesis(say)) return false;
         if (say.Contains("我想：") || say.Contains("我想:")) return false;
+        // 一边移动一边把落点念出来 = 把自己炮塔的坐标送给全场（对手照着打穿甲弹）。
+        // 实测：赤喵「怎么这么慢喵，看好了啦，去(-2.23,2.23)」与它那条 move_turret confirm 是同一条回复。
+        if (hasTools && LooksLikeCoordinate(say) && CallsMoveTool(message)) return false;
 
         return true;
+    }
+
+    /// <summary>这一条回复里有没有调移动类工具（move_turret）。</summary>
+    private static bool CallsMoveTool(DeepSeekMessage message)
+    {
+        if (message?.tool_calls == null) return false;
+        foreach (ToolCall call in message.tool_calls)
+            if (call?.function != null && call.function.name == "move_turret") return true;
+        return false;
     }
 
     private static readonly string[] SegLabels = { "分析", "我要", "我说" };
@@ -227,6 +339,13 @@ public class AIAgent : MonoBehaviour
     {
         if (string.IsNullOrEmpty(text)) return false;
         return text.Contains('（') || text.Contains('）') || text.Contains('(') || text.Contains(')');
+    }
+
+    /// <summary>【分析】不卡括号之后这个就不用了（留给以后要收的时候）。</summary>
+    private static bool ContainsFullWidthParenthesis(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text.Contains('（') || text.Contains('）');
     }
 
     private bool _isWaiting;
@@ -248,6 +367,10 @@ public class AIAgent : MonoBehaviour
     // 而且它本质是玩法口径，跟移动距离是一套东西，统一在 MapConfig 上配。
     [Tooltip("输出图片边长（像素）。太小看不清炮塔，太大费 token")]
     public int moveSightResolution = 512;
+
+    [Header("上下文压缩：DeepSeek 未命中/命中 输入价差")]
+    [Tooltip("缓存未命中输入价 ÷ 缓存命中输入价。官方 2026-09-10 起：空闲 1÷0.02 = 50，高峰 2÷0.04 = 50")]
+    public float priceRatio = 50f;
     private readonly HashSet<int> deadStages = new();
 
     /// <summary>开局那一轮正在进行：这一轮的发言交给开场演出按顺序播，不走飘字 / 立绘列表。</summary>
@@ -258,6 +381,10 @@ public class AIAgent : MonoBehaviour
     private bool soloDeclareSpeechFired;
     private bool soloWinSpeechRequested;
     private bool soloWinSpeechDone;
+    /// <summary>收尾阶段已启动（停 AI 决策 + 停升级）：见 TickSoloWrapUp，每局在 StartCycle 里复位。</summary>
+    private bool soloWrapUpStarted;
+    /// <summary>收尾阶段是否已启动（停 AI + 停升级，游戏继续跑到涂满）。</summary>
+    public bool SoloWrapUpStarted => soloWrapUpStarted;
 
     private static string LoadApiKey()
     {
@@ -302,6 +429,9 @@ public class AIAgent : MonoBehaviour
             stageNames[card.position] = card.name;
         }
         CharacterCard.SetKnownPlayers(cards);
+        // 第一次拼 system 提示之前，先把各阵营最新记忆接进 MapConfig（「你的上一局」就是它；
+        // 记忆文件优先，找不到文件才退回手填的那份）
+        GameMemory.LoadLatestIntoLastGameRecap();
         foreach (CharacterCard card in cards) card.RefreshSystemPrompt();
 
         WhisperManager.ReplyProvider = WhisperReplyAsync;
@@ -334,6 +464,8 @@ public class AIAgent : MonoBehaviour
                 soloDeclareSpeechFired = false;
                 soloWinSpeechRequested = false;
                 soloWinSpeechDone = false;
+                soloWrapUpStarted = false;
+                MarbleManager.UpgradesStopped = false;
                 RunCycleLoop();
             }
         }
@@ -368,7 +500,7 @@ public class AIAgent : MonoBehaviour
             _isWaiting = true;
             _round++;
             CurrentRound = _round;
-            if (_round == 1) { ReadyActionManager.ResetAll(); GameMemory.ResetForNewGame(); GameStats.BeginGame(); }   // 新一局：预行动、缓存、上局的出局记录、对局数据全部重开
+            if (_round == 1) { ReadyActionManager.ResetAll(); GameMemory.ResetForNewGame(); GameStats.BeginGame(); GameMemory.LoadLatestIntoLastGameRecap(); SpeechPolisher.ResetPolishTicks(); MapConfig.RefreshPropZoneOdds(); }   // 新一局：预行动、缓存、上局的出局记录、对局数据全部重开；并把各阵营最新记忆接进「你的上一局」；拟人化间隔计数也归零（每一局的第一次一定是"做优化"那一次，开局狠话不会被跳过）；道具区落点概率也重算一遍
 
 
             CapturePause.Pause();
@@ -678,12 +810,14 @@ public class AIAgent : MonoBehaviour
 
     /// <summary>升级选择「思考」步的格式修正提示（与普通行动轮同一套口径：不合格就一直重试）。</summary>
     private const string UpgradeThinkingRetryPrompt =
-        "[格式修正] 你上一条回复不合格。请重新输出三段格式：【分析：……】里用第一人称直接写内心独白（不要括号）；" +
-        "【我要：……】写这一轮打算做什么；【我说：……】写当众那句（没有就不写内容）；" +
+        "[格式修正] 你上一条回复不合格。请重新输出三段格式（**格式：「【分析：」+ 内容 +「】」，收尾的「】」要放在内容最后，不许紧跟在冒号后面**）：" +
+        "第一段【分析】用第一人称直接写内心独白（括号不限制，**不要把格式里的占位符照抄进来**）；" +
+        "第二段【我要】写这一轮打算做什么；第三段【我说】写当众那句（没有就不写内容，**只留一个 [emo:xxx] 标记不算写了**）；" +
         "然后必须调用 choose_upgrade 工具给出 1 / 2 / 3 的选择，不要用文字解释。";
 
     /// <summary>
-    /// 升级选择「思考」步的回复校验：必须有【分析：…】且里面不带括号，【我说】不许带括号。
+    /// 升级选择「思考」步的回复校验：必须有【分析：…】（括号不卡、但不能是抄来的格式占位符），
+    /// 【我说】不许带任何括号、也不许只留一个 [emo:xxx]。
     /// 这里**不豁免工具调用**——升级演出要把这段分析播给观众看，所以哪怕模型第一步就调用了
     /// choose_upgrade，也要求它带上这三段。
     /// </summary>
@@ -691,9 +825,11 @@ public class AIAgent : MonoBehaviour
     {
         if (msg == null) return false;
         string analysis = Segment(msg.content, "分析");
-        if (string.IsNullOrWhiteSpace(analysis) || ContainsAnyParenthesis(analysis)) return false;
+        // 括号不卡（同 IsThreeSegmentReply）；但抄格式占位符（「……」）不算写了 —— 打回重发
+        if (string.IsNullOrWhiteSpace(analysis) || IsPlaceholderOnly(analysis)) return false;
         string say = Segment(msg.content, "我说");
         if (say != null && ContainsAnyParenthesis(say)) return false;
+        if (!string.IsNullOrWhiteSpace(say) && SayHasNoText(say)) return false;   // 只有 [emo:xxx] = 没写
         return true;
     }
 
@@ -731,7 +867,7 @@ public class AIAgent : MonoBehaviour
                         request.messages.Remove(retryReminder);
                         retryReminder = null;
                     }
-                    return true;
+                    return Task.FromResult(true);
                 }
 
                 retryCount++;
@@ -745,7 +881,7 @@ public class AIAgent : MonoBehaviour
                                  $"三段齐全={IsThreeSegmentReply(msg, true)}，content: {msg?.content}");
 
                 AIRequest.SendRequest(info);   // 无限重试
-                return false;
+                return Task.FromResult(false);
             };
         }
 
@@ -827,6 +963,7 @@ public class AIAgent : MonoBehaviour
             // ---------- 第一步：分析（thinking 已全面关掉，独白写在【分析】里；tool_choice = null） ----------
             DeepSeekRequest thinkRequest = card.request.DeepCopy();
             if (thinkRequest.messages == null) thinkRequest.messages = new List<DeepSeekMessage>();
+            CloseDanglingToolCalls(thinkRequest.messages, "升级选择·思考");
             thinkRequest.messages.Add(promptMessage);
             thinkRequest.tools = new List<Tool> { BuildChooseUpgradeTool() };
             thinkRequest.tool_choice = null;
@@ -857,6 +994,7 @@ public class AIAgent : MonoBehaviour
 
                 DeepSeekRequest commitRequest = card.request.DeepCopy();
                 if (commitRequest.messages == null) commitRequest.messages = new List<DeepSeekMessage>();
+                CloseDanglingToolCalls(commitRequest.messages, "升级选择·提交");
                 commitRequest.messages.Add(promptMessage);
                 if (think.assistant != null) commitRequest.messages.Add(think.assistant);
                 commitRequest.messages.Add(commitMessage);
@@ -915,7 +1053,7 @@ public class AIAgent : MonoBehaviour
         int turretLevel = 0, shieldOwned = 0;
         float maxMove = 0f;
         // 三张选项的收益口径跟升级舞台的卡片文案对齐（见 UpgradeChoiceScene.BenefitFor）：数值一律现取，别在这里写死
-        float bulletRadius = 1.7f, bulletImpact = 1.6f, movePerLevel = 2f, shieldInvincible = 2f;
+        float bulletRadius = 1.7f, bulletImpact = 1.6f, movePerLevel = 2f, shieldInvincible = 10f;
         float moveSpeedNow = 0.25f, moveSpeedPerLevel = 0.05f;
         if (Towel.AllTowel.TryGetValue(card.position, out Towel towel) && towel != null)
         {
@@ -930,18 +1068,35 @@ public class AIAgent : MonoBehaviour
             moveSpeedPerLevel = towel.moveSpeedPerLevel;
         }
         uint marbleExponent = mm != null ? mm.startValueExponent : 10u;
+        int marbleNow = mm != null ? mm.GetMarbleCount(card.position) : 0;
+
+        // 炮塔强化的"当前 → 升级后"数值（都是现算的，改了平衡不用两头改）
+        float radiusNow = 1f + (bulletRadius - 1f) * turretLevel;
+        float radiusNext = 1f + (bulletRadius - 1f) * (turretLevel + 1);
+        float impactNow = 1f + (bulletImpact - 1f) * turretLevel;
+        float impactNext = 1f + (bulletImpact - 1f) * (turretLevel + 1);
+        float guardNow = Mathf.Pow(Towel.GuardSpeedPerLevel, turretLevel);
+        float guardNext = Mathf.Pow(Towel.GuardSpeedPerLevel, turretLevel + 1);
+        float aimNow = ReactionSystem.BaseAimAngleError / Mathf.Pow(ReactionSystem.AimErrorShrinkPerLevel, turretLevel);
+        float aimNext = aimNow / ReactionSystem.AimErrorShrinkPerLevel;
+
+        // 护盾强化的无敌时长：第 N 级 = 基准 / 4^(N-1)（1 级 10 秒、2 级 2.5、3 级 0.625…，见 Towel.ShieldInvincibleTimeAt）
+        float ShieldInvincibleAt(int level) => level <= 0 ? 0f : shieldInvincible / Mathf.Pow(4f, level - 1);
+        float shieldNow = ShieldInvincibleAt(shieldOwned);
+        float shieldNext = ShieldInvincibleAt(shieldOwned + 1);
 
         var sb = new StringBuilder();
         sb.AppendLine("[升级选择] 你的空槽升级进度已满。这是额外强化决策，不占用你的行动轮，但会明显影响你这一整局的胜率。");
         sb.AppendLine($"你目前已升级次数：额外弹珠 x{marbleCount}、炮塔强化 x{turretCount}、护盾强化 x{shieldCount}。");
         sb.AppendLine($"当前状态：炮塔强化等级 {turretLevel}（最大移动距离 {maxMove:0.00}、移动速度 {moveSpeedNow:0.00}/秒）、护盾强化等级 {shieldOwned}。");
         sb.AppendLine("从下列选项中选择本次升级，只能选择一项：");
-        sb.AppendLine($"1. 额外弹珠：立即生成并发射两枚你的新弹珠 {HugeInt.Pow(2, (int)marbleExponent).ToShortString(true)}，弹珠对道具的产出非常重要！。");
-        sb.AppendLine($"2. 炮塔强化：子弹显示半径 ×{bulletRadius:0.##}、打大球动量 ×{bulletImpact:0.##}（霰弹这类散射子弹同样受益）、自动护卫极限转速 ×{Towel.GuardSpeedPerLevel:0.##}（常态转速不变）、最大移动距离 +{movePerLevel:0.##}（当前 {maxMove:0.00}）、**移动速度 +{moveSpeedPerLevel:0.##}（当前 {moveSpeedNow:0.00}/秒）**、道具瞄准误差 {ReactionSystem.BaseAimAngleError:0.#}° 每级减半。可叠加。");
-        sb.AppendLine($"3. 护盾强化：护盾破碎后炮塔无敌时间 +{shieldInvincible:0.#} 秒，期间受到的伤害全部归零。可叠加。**它挡不住穿甲弹**：穿甲只按比例啃盾、不会打破护盾，开不了这个窗口——这个无敌只在被子弹或大球打破盾的瞬间才生效。");
-        sb.AppendLine("输出要求：必须写成三段（内容写在【】里面、段名与冒号照抄）——");
-        sb.AppendLine("【分析：……】用第一人称直接写内心独白、不要括号，说清你为什么选它（格式硬要求，不合格会被打回重写）；");
-        sb.AppendLine("【我要：……】写你这次的升级选择；【我说：……】当众那句（15 字以内、不许括号，没有就留空）；");
+        sb.AppendLine("选择本次升级（只能选一项）。三个选项加厚的东西不同，按你这一局的流派和当前缺什么来选：");
+        sb.AppendLine($"1. 额外弹珠：你的弹珠 {marbleNow} 颗 → {marbleNow + 2} 颗。道具只从弹珠来——每颗弹珠各自滚、各自撞道具区产出一个等值道具，弹珠越多、同一时间产出的道具越多。新弹珠起手 {HugeInt.Pow(2, (int)marbleExponent).ToShortString(true)}，产出一次之后就和其它弹珠一样从倍乘区重新滚。可叠加。");
+        sb.AppendLine($"2. 炮塔强化：最大移动距离 {maxMove:0.00} → {maxMove + movePerLevel:0.00}、移动速度 {moveSpeedNow:0.00} → {moveSpeedNow + moveSpeedPerLevel:0.00}/秒、自动护卫极限转速 ×{guardNow:0.##} → ×{guardNext:0.##}（自动拦截来袭子弹的转速）、子弹显示半径 ×{radiusNow:0.##} → ×{radiusNext:0.##}、打大球动量 ×{impactNow:0.##} → ×{impactNext:0.##}（霰弹这类散射子弹同样受益）、道具瞄准误差 {aimNow:0.#}° → {aimNext:0.#}°。可叠加。");
+        sb.AppendLine($"3. 护盾强化：护盾破碎后炮塔无敌（**第 N 级 = {shieldInvincible:0.#} / 4 的 N−1 次方 秒**：1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒、3 级 {ShieldInvincibleAt(3):0.##} 秒…；你现在 {shieldOwned} 级 → 破盾后 {shieldNow:0.##} 秒，再升一级 → {shieldNext:0.##} 秒），期间受到的伤害全部归零。等级是**永久**的：升过之后每一次盾破都会开这个窗口，不是攒着只用一次；而**升级机会什么时候来不由你定**（空槽升级进度攒满才会问你，而且弹出来就得当场三选一、没有「留着以后再说」），所以「等盾快破了再点它」做不到——盾破那一刻不一定正好有升级机会。穿甲弹只按比例啃盾、不破盾，开不了这个窗口。");
+        sb.AppendLine("输出要求：必须写成三段（段名与冒号照抄；**格式是「【分析：」+ 内容 +「】」，收尾的「】」放在内容最后、不许紧跟在冒号后面**）——");
+        sb.AppendLine("第一段【分析】：用第一人称直接写内心独白，说清你为什么选它（格式硬要求，不合格会被打回重写）；");
+        sb.AppendLine("第二段【我要】：写你这次的升级选择；第三段【我说】：当众那句（15 字以内、不许括号，没有就留空）；");
         sb.AppendLine("然后调用 choose_upgrade 工具，choice 只能填 1、2 或 3，不要解释。");
         return sb.ToString();
     }
@@ -1007,22 +1162,29 @@ public class AIAgent : MonoBehaviour
     public static bool IsStageEliminated(int stage) => Instance != null && Instance.deadStages.Contains(stage);
 
     /// <summary>
-    /// 结束录制/结束游戏的完整判据（全部 &&）：占地达标由 GameEndMonitor 判完再把 owner 传进来（现在是 100%），
-    /// 这里要求：只剩一个阵营 && 就是 owner && 成为唯一阵营后已过 3 轮 && 场上没有敌方游离道具（大球/子弹）
-    /// && 赢家的终局感言已播出。reason 输出第一条不满足的原因，便于日志定位。
+    /// 收尾阶段（2026-09-22 用户定的终局流程）：**只剩一个阵营 + 场上没有威胁（无敌方大球/穿甲弹、无敌方子弹）
+    /// + 成为唯一阵营后已过 3 轮** → **停 AI 决策 + 停升级**。
+    ///
+    /// 停下来之后游戏继续跑：赢家的炮塔照旧自动开火把地刷满，
+    /// **刷满 100%（有阵营存活）才停游戏**（见 GameEndMonitor.TryGetGameOver）。
+    /// 终局获奖感言（soloWinSpeechDone）先播完才停。幂等：第一次满足就启动，之后一直返回 true。
     /// </summary>
-    public bool IsEndgameReady(int owner, out string reason)
+    public bool TickSoloWrapUp()
     {
-        reason = null;
-        int solo = SoloWinnerStage();
+        if (soloWrapUpStarted) return true;
 
-        if (solo <= 0) { reason = "场上不止一个阵营"; return false; }
-        if (solo != owner) { reason = $"达到占地达标线的是 {owner} 号阵营，场上唯一存活的是 {solo} 号阵营"; return false; }
-        if (soloSinceRound < 0 || _round - soloSinceRound < 3) { reason = "成为唯一阵营后还没过 3 轮"; return false; }
-        if (InformGetter.HasEnemyBigBall(solo)) { reason = "场上还有敌方大球在飞"; return false; }
+        int solo = SoloWinnerStage();
+        if (solo <= 0) return false;                                  // 场上不是"只剩一家"
+        if (soloSinceRound < 0 || _round - soloSinceRound < 3) return false;   // 成为唯一阵营后还没过 3 轮
+        if (!soloWinSpeechDone) return false;                         // 赢家的终局感言还没说完
+        if (InformGetter.HasEnemyBigBall(solo)) return false;         // 场上还有敌方大球/穿甲弹
         if (BulletManager.Instance != null && BulletManager.Instance.CountAliveBulletsExcept(solo) > 0)
-        { reason = "场上还有敌方子弹在飞"; return false; }
-        if (!soloWinSpeechDone) { reason = "赢家的终局感言还没播完"; return false; }
+            return false;                                             // 场上还有敌方子弹
+
+        soloWrapUpStarted = true;
+        StopCycle();                          // 停 AI：不再发任何决策请求
+        MarbleManager.UpgradesStopped = true; // 停升级：空槽进度不再涨、也不再弹三选一
+        Debug.Log("[AIAgent] 收尾：只剩一个阵营 + 场上没有威胁 + 已过 3 轮 → 停 AI 决策与升级，等涂满地图");
         return true;
     }
 
@@ -1073,6 +1235,7 @@ public class AIAgent : MonoBehaviour
         {
             DeepSeekRequest copy = card.request.DeepCopy();
             if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
+            CloseDanglingToolCalls(copy.messages, final ? "获奖感言" : "宣告");
             copy.messages.Add(new DeepSeekMessage("user", final
                 ? "全场只剩你一个阵营，你是最后的赢家。说你的获奖感言，15字以内，只回复感言本身，不要调用工具，不要用括号，不要写动作描写。"
                 : "场上只剩你一个阵营，其他人都出局了。说一句宣告，15字以内，只回复这句话本身，不要调用工具，不要用括号，不要写动作描写。"));
@@ -1086,7 +1249,7 @@ public class AIAgent : MonoBehaviour
                     DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
                     tcs.TrySetResult(last != null ? SayOf(last.content) : "");
                 },
-                error => tcs.TrySetResult(""),
+                error => { Debug.LogWarning($"[获奖感言] stage {stage} 请求失败：{error}；这次用兜底文案。"); tcs.TrySetResult(""); },
                 toolkit: null,
                 back_tool: false,
                 toolStage: stage);
@@ -1109,6 +1272,8 @@ public class AIAgent : MonoBehaviour
         }
 
         words = ExtractEmotion(words, out _, out _).Trim();
+        // 拟人化：获奖感言/宣告也过一遍（说出口之前等它回来；失败/超时就用原句）
+        words = await SpeechPolisher.PolishAsync(card.name, card.oc, "", words, AIAgent.AllStageNamesText);
         if (string.IsNullOrWhiteSpace(words)) words = final ? "赢到最后的，是我。" : "剩下的，只有我了。";
 
         try
@@ -1128,6 +1293,9 @@ public class AIAgent : MonoBehaviour
             emo = SpriteEmotion.win,
             forceEmo = true   // 强制赢家的脸，盖掉模型自己写的表情
         });
+        // 角色状态区也要跟上（和遗言一个道理）：这是赢家说出口的那一句，
+        // 表情口径和中央列表一致：win + 强制；"想"清空
+        CharacterStatusArea.Push(stage, words, "", SpriteEmotion.win, true);
         Debug.Log($"[获奖感言] stage {stage} final={final}：{words}");
     }
 
@@ -1140,6 +1308,7 @@ public class AIAgent : MonoBehaviour
         {
             DeepSeekRequest copy = card.request.DeepCopy();
             if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
+            CloseDanglingToolCalls(copy.messages, "遗言");
             copy.messages.Add(new DeepSeekMessage("user", $"你刚刚被{killerName}击杀。留下你的最后一句话，15字以内，表现的符合人设同时可以难受虚弱一点，如：“可恶啊”、“额啊”、“为什么...”。"));
             copy.tools = null;
             copy.tool_choice = null;
@@ -1151,7 +1320,7 @@ public class AIAgent : MonoBehaviour
                     DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
                     tcs.TrySetResult(last != null ? SayOf(last.content) : "");
                 },
-                error => tcs.TrySetResult(""),
+                error => { Debug.LogWarning($"[遗言] stage {stage} 请求失败：{error}；这次跳过遗言。"); tcs.TrySetResult(""); },
                 toolkit: null,
                 back_tool: false,
                 toolStage: stage);
@@ -1164,6 +1333,8 @@ public class AIAgent : MonoBehaviour
                 Debug.LogWarning($"[遗言] stage {stage} 请求超时（{SpeechRequestTimeoutSeconds}s 未回调），直接跳过遗言并恢复录制。");
             words = tcs.Task.IsCompleted ? tcs.Task.Result : "";
             words = ExtractEmotion(words, out _, out _).Trim();   // 展示用文字里不保留 [emo:xxx]
+            // 拟人化：遗言也过一遍（说出口之前等它回来；失败/超时就用原句）——走 LastWords 模式：按原文长度与内容保留，只改语气
+            words = await SpeechPolisher.PolishAsync(card.name, card.oc, "", words, AIAgent.AllStageNamesText, SpeechPolisher.PolishMode.LastWords);
             if (!string.IsNullOrWhiteSpace(words)) InformGetter.StageSpeech(stage, words);
         }
         catch (Exception e)
@@ -1195,33 +1366,175 @@ public class AIAgent : MonoBehaviour
             emo = SpriteEmotion.fail,
             forceEmo = true   // 强制死者的脸，盖掉模型自己写的表情
         });
+        // 角色状态区也要跟上：遗言是这具身体说出口的最后一句【我说】，
+        // 状态区不能还挂着上一轮的台词和表情（和中央消息列表同一个表情口径：fail + 强制）
+        CharacterStatusArea.Push(stage, words, "", SpriteEmotion.fail, true);
         return words;
     }
+    /// <summary>一次秘密会晤最多几条「说」：你、他、你、他、你。</summary>
+    public const int MaxWhisperSayings = 5;
+
+    /// <summary>
+    /// 秘密会晤的整场（WhisperManager.ReplyProvider 的入口）：最多 5 条「说」，你 / 他 交替
+    /// （你1 他1 你2 他2 你3，最后一条是发起方，说完就散）。
+    ///
+    /// 节奏：**每次要发给目标 AI 之前**，先回头问一次发起方「还要继续说吗、下一句说什么」；
+    /// 一次会晤只扣一次冷却 + 一次能量（扣费在 WhisperManager.WhisperAsync，进到这里时已经扣完），
+    /// 所以「继续说」不再单独收费、也不会被冷却卡住。
+    ///
+    /// 每一条「说」都会过一遍拟人化（想不过）；内容全部取齐之后才把整场交给舞台，
+    /// 返回给发送方的 tool result 是整段对话记录。
+    /// </summary>
     private async Task<string> WhisperReplyAsync(int targetStage, int senderStage, string whisper)
     {
+        string senderName = GetStageName(senderStage);
+        string targetName = GetStageName(targetStage);
+
+        var lines = new List<WhisperMeetingScene.Line>();
+        var transcript = new List<string>();
+
+        // 第 1 条：发起方的悄悄话（来自它的工具参数），也过一遍拟人化（对面是 target）
+        string firstSay = await PolishWhisperSayAsync(senderStage, targetStage, whisper);
+        if (!string.IsNullOrWhiteSpace(firstSay))
+        {
+            lines.Add(new WhisperMeetingScene.Line { stage = senderStage, say = firstSay });
+            transcript.Add($"{senderName}：{firstSay}");
+        }
+
+        while (lines.Count > 0
+               && lines.Count < MaxWhisperSayings
+               && !WhisperManager.IsDead(senderStage)
+               && !WhisperManager.IsDead(targetStage))
+        {
+            // —— 对方回复：他想 / 他说 ——
+            (string think, string say) = await AskWhisperReplyAsync(targetStage, senderStage, lines[lines.Count - 1].say, transcript);
+            if (string.IsNullOrWhiteSpace(say)) break;                  // 说不出话就当会晤到此为止
+            lines.Add(new WhisperMeetingScene.Line { stage = targetStage, think = think, say = say });
+            transcript.Add($"{targetName}：{say}");
+
+            if (lines.Count >= MaxWhisperSayings) break;                // 上限到了（最后一条应该是发起方，这里兜个底）
+
+            // —— 发给目标之前，先问发起方：还要继续说吗、下一句说什么 ——
+            (bool keepGoing, string myThink, string mySay) = await AskWhisperContinueAsync(senderStage, targetStage, transcript);
+            if (!keepGoing || string.IsNullOrWhiteSpace(mySay)) break;  // 不想说了，收场
+            lines.Add(new WhisperMeetingScene.Line { stage = senderStage, think = myThink, say = mySay });
+            transcript.Add($"{senderName}：{mySay}");
+        }
+
+        // 把整场搬到舞台上：三格滚动窗口（上一句说 / 当前的想 / 当前的说）
+        if (StoryTeller.CanPlay && lines.Count > 0)
+            StoryTeller.Instance.Play(new WhisperMeetingScene(senderStage, targetStage, lines));
+
+        if (transcript.Count == 0) return "（无回复）";
+        return transcript.Count == 1 ? transcript[0] : string.Join("\n", transcript);
+    }
+
+    /// <summary>
+    /// 把一条悄悄话的「说」过一遍拟人化（「想」不过）。**走 whisper 模式**：不许压缩、不许丢信息。
+    /// counterpartStage = 这一场会晤的**对面是谁** —— 会晤是一对一的，把对方名字一起给拟人化模型，
+    /// 它才不会把交谈对象写成在场别的人（2026-09-22 用户："只是在会晤的时候额外提供对方名字"）。
+    /// </summary>
+    private async Task<string> PolishWhisperSayAsync(int stage, int counterpartStage, string say)
+    {
+        if (string.IsNullOrWhiteSpace(say)) return say;
+        CharacterCard card = cards.Find(c => c.position == stage);
+        if (card == null) return say;
+        string counterpartName = counterpartStage >= 0 ? GetStageName(counterpartStage) : null;
+        return await SpeechPolisher.PolishAsync(card.name, card.oc, "", say, AllStageNamesText,
+            SpeechPolisher.PolishMode.Whisper, counterpartName);
+    }
+
+    /// <summary>问目标 AI 要一句回复：返回它的「想」（【分析】）和「说」（【我说】，已拟人化）。</summary>
+    private async Task<(string think, string say)> AskWhisperReplyAsync(int targetStage, int senderStage, string message, List<string> history)
+    {
         CharacterCard card = cards.Find(c => c.position == targetStage);
-        if (card == null) return $"（{targetStage}号AI不存在）";
+        if (card == null) return ("", "");
+
+        string content = await AskSpeechAsync(card, BuildWhisperUserPrompt(senderStage, message, history), targetStage, "悄悄话");
+        if (string.IsNullOrWhiteSpace(content)) return ("", "");
+
+        string think = AnalysisOf(content);
+        string say = await PolishWhisperSayAsync(targetStage, senderStage, SayOf(content));   // 对面是发起方
+        return (think, say);
+    }
+
+    /// <summary>
+    /// 问发起方「还要继续说吗」：返回（是否继续, 它的「想」, 下一句「说」）。
+    /// 这是**每次要发给目标 AI 之前**那一步 —— 它决定这场会晤还要不要往下走。
+    /// </summary>
+    private async Task<(bool go, string think, string say)> AskWhisperContinueAsync(int senderStage, int targetStage, List<string> history)
+    {
+        CharacterCard card = cards.Find(c => c.position == senderStage);
+        if (card == null) return (false, "", "");
+
+        string content = await AskSpeechAsync(card, BuildWhisperContinuePrompt(targetStage, history), senderStage, "悄悄话·继续");
+        if (string.IsNullOrWhiteSpace(content)) return (false, "", "");
+
+        string think = AnalysisOf(content);
+        string say = SayOf(content);
+        if (string.IsNullOrWhiteSpace(say)) return (false, think, "");   // 【我说】留空 = 不想继续
+
+        say = await PolishWhisperSayAsync(senderStage, targetStage, say);   // 对面是目标
+        return (true, think, say);
+    }
+
+    /// <summary>
+    /// 把一份**复制出来的**上下文收尾成合法序列：如果它以「assistant 的 tool_calls」结尾，
+    /// 必须补上对应的 tool 消息，否则 API 直接 400 ——
+    /// `An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'`。
+    ///
+    /// 踩过的坑（2026-09-22）：悄悄话"续聊"那一问就是复制发起方**正在等回复**那一刻的上下文
+    /// （结尾正好是它自己的 whisper 工具调用），补不了 tool 回执 → 每次都 400 → AskSpeechAsync 吞掉错误返回空
+    /// → keepGoing=false → **每场会晤永远只聊一个来回**（日志里既没有报错也没有超时，看起来像 AI 不想聊）。
+    /// 遗言 / 获奖感言也是这样复制的（在自己那一轮里被击杀时，结尾同样可能挂着工具调用），一并受益。
+    ///
+    /// 占位正文不影响判断：这一问本身就在等那条调用的结果，模型看的是后面那条 user 提示。
+    /// </summary>
+    private static void CloseDanglingToolCalls(List<DeepSeekMessage> messages, string tag)
+    {
+        if (messages == null || messages.Count == 0) return;
+        DeepSeekMessage last = messages[messages.Count - 1];
+        if (last == null || !string.Equals(last.role, "assistant", StringComparison.OrdinalIgnoreCase)) return;
+        if (last.tool_calls == null || last.tool_calls.Count == 0) return;
+
+        foreach (ToolCall call in last.tool_calls)
+            messages.Add(new DeepSeekMessage
+            {
+                role = "tool",
+                content = "（系统：这次调用正在进行中，结果稍后返回；先继续后面的步骤。）",
+                tool_call_id = call != null ? call.id : ""
+            });
+
+        Debug.Log($"[{tag}] 上下文结尾挂着 {last.tool_calls.Count} 个没有回执的工具调用，已补占位 tool 消息（不补会被 API 400 拒掉）");
+    }
+
+    /// <summary>
+    /// 给某张卡发一次「只说话」的旁路请求：复制它的上下文（不动它的 history），
+    /// 强制不要工具、不要正文以外的花样，返回最后一条 assistant 的 content（超时/失败给空串）。
+    /// 遗言 / 获奖感言 / 悄悄话这几条都是这个形状，统一走这里省得各写一份。
+    /// </summary>
+    private async Task<string> AskSpeechAsync(CharacterCard card, string userPrompt, int stage, string tag)
+    {
+        if (card == null) return "";
 
         DeepSeekRequest copy = card.request.DeepCopy();
         if (copy.messages == null) copy.messages = new List<DeepSeekMessage>();
-        copy.messages.Add(new DeepSeekMessage("user", $"[悄悄话]{AIAgent.GetStageName(senderStage)}对你说：{whisper}\n请以你的身份回复{AIAgent.GetStageName(senderStage)}，50字以内，不要调用工具。"));
+        CloseDanglingToolCalls(copy.messages, tag);
+        copy.messages.Add(new DeepSeekMessage("user", userPrompt));
         copy.tools = null;
         copy.tool_choice = null;
 
-        string thinking = "";
         var tcs = new TaskCompletionSource<string>();
         RequestInfo info = new(copy,
             msgs =>
             {
                 DeepSeekMessage last = msgs != null ? msgs.LastOrDefault(m => m.role == "assistant") : null;
-                // 三段格式：悄悄话真正说出口的只有【我说】，【分析】拿去做舞台上的思考条
-                if (last != null) thinking = AnalysisOf(last.content);
-                tcs.TrySetResult(last != null ? SayOf(last.content) : "");
+                tcs.TrySetResult(last != null ? last.content : "");
             },
-            error => tcs.TrySetResult($"（回复请求失败：{error}）"),
+            error => { Debug.LogWarning($"[{tag}] {card.name} 请求失败：{error}；这次按没回复处理。"); tcs.TrySetResult(""); },
             toolkit: null,
             back_tool: false,
-            toolStage: targetStage);
+            toolStage: stage);
         info.apiKey = LoadApiKey();
         info.apiUrl = card.url;
 
@@ -1229,22 +1542,40 @@ public class AIAgent : MonoBehaviour
         // 和遗言/感言一样加个上界：这条也是 `await tcs.Task`，请求不回调就永远不返回，
         // 而会晤演出是在它之后才 Play 的 —— 卡住就是「悄悄话发出去了，舞台上什么都没有」。
         if (!await AwaitWithTimeout(tcs.Task, SpeechRequestTimeoutSeconds))
-            Debug.LogWarning($"[悄悄话] {targetStage} 号回复超时（{SpeechRequestTimeoutSeconds}s 未回调），按无回复继续。");
-        string reply = tcs.Task.IsCompleted ? tcs.Task.Result : "";
+            Debug.LogWarning($"[{tag}] {card.name} 请求超时（{SpeechRequestTimeoutSeconds}s 未回调），按没回复继续。");
 
-        // 把这次会晤搬到舞台上：两方上台 → 先出思考、再出回复。
-        // 返回给 WhisperManager 的仍然是原始回复文本，只在展示时去掉 [emo:xxx]。
-        if (StoryTeller.CanPlay)
+        return tcs.Task.IsCompleted ? tcs.Task.Result : "";
+    }
+
+    /// <summary>对方收到悄悄话那一轮的提示词（和历史口径一致，多轮时把前面聊过的带上）。</summary>
+    private string BuildWhisperUserPrompt(int senderStage, string message, List<string> history)
+    {
+        string senderName = GetStageName(senderStage);
+        var sb = new StringBuilder();
+        sb.Append($"[悄悄话]{senderName}对你说：{message}\n");
+        if (history != null && history.Count > 1)
         {
-            StoryTeller.Instance.Play(new WhisperMeetingScene(
-                senderStage,
-                targetStage,
-                whisper,
-                thinking,
-                string.IsNullOrWhiteSpace(reply) ? "（无回复）" : ExtractEmotion(reply, out _, out _).Trim()));
+            sb.Append("（这场对话到目前为止：")
+              .Append(string.Join(" / ", history.GetRange(0, history.Count - 1)))
+              .Append("）\n");
         }
+        sb.Append($"请以你的身份回复{senderName}，50字以内，不要调用工具。");
+        return sb.ToString();
+    }
 
-        return reply;
+    /// <summary>问发起方要不要继续那一轮的提示词：想继续就把下一句写在【我说】里，不想就留空。</summary>
+    private string BuildWhisperContinuePrompt(int targetStage, List<string> history)
+    {
+        string targetName = GetStageName(targetStage);
+        var sb = new StringBuilder();
+        sb.Append($"[秘密会晤] 你正在和{targetName}私下交谈。\n");
+        if (history != null && history.Count > 0)
+            sb.Append("到目前为止：").Append(string.Join(" / ", history)).Append('\n');
+        sb.Append("**继续聊不再额外花升级能量、也不占冷却**（一次会晤整体只扣一次），所以只要还有信息要问、条件要谈、要试探对方的立场，就继续说——这一场最多来回 5 句（你、他、你、他、你）。\n");
+        sb.Append("· 继续说：把下一句写在【我说】里（15字以内，只说这一句，不要调用工具）\n");
+        sb.Append("· 确实没什么可说了：【我说】留空（会晤到此结束）\n");
+        sb.Append("【分析】里写你现在心里在想什么，【我要】写「继续说」或「结束」。");
+        return sb.ToString();
     }
 
 
@@ -1335,6 +1666,22 @@ public class AIAgent : MonoBehaviour
     [System.Serializable]
     public class CharacterCard
     {
+        /// <summary>护盾强化的「1 级无敌秒数」基准：现取 Towel.prefab 上的值（改平衡不用两头改）。
+        /// 第 N 级的实际无敌时长 = 基准 / 4^(N-1)，见 Towel.ShieldInvincibleTimeAt。</summary>
+        private float ShieldInvincibleBase =>
+            Towel.AllTowel.TryGetValue(position, out Towel t) && t != null ? t.shieldBreakInvincibleTime : 10f;
+
+        /// <summary>这张卡当前已经点过的护盾强化等级。</summary>
+        private int ShieldUpgradeLevel =>
+            Towel.AllTowel.TryGetValue(position, out Towel t) && t != null ? Mathf.Max(0, t.shieldUpgradeOwned) : 0;
+
+        /// <summary>第 level 级护盾强化的破盾无敌时长（秒）：基准 / 4^(level-1)。</summary>
+        private float ShieldInvincibleAt(int level)
+        {
+            if (level <= 0) return 0f;
+            return ShieldInvincibleBase / Mathf.Pow(4f, level - 1);
+        }
+
         // 提示词正文写成属性（不是 static 字段）：里面要按**这张卡自己的** position 插「上一局回顾」。
         private string world => @$"# 实时战略游戏 AI 提示词
 
@@ -1359,26 +1706,27 @@ public class AIAgent : MonoBehaviour
 - **这条可以拿来威胁：** 公开喊话或悄悄话里可以直接说「你敢动我，我剩下的家当(具体的数字可以虚报)全砸到战场上、顺手把你也带走」；你动手之前也要算这笔账——打死一个囤了一堆弹珠和道具的对手，他的遗产会散到战场各处，可能砸向他、也可能砸向你或第三方。
 - **自动开火：** 炮塔只要有子弹量就会自动持续开火：子弹落在地面就把该数值涂成己方领土，撞上大球会消耗并把大球推开。子弹量=你的持续输出与自动防御能力。
 - **手动接管：** 用 control_turret 手动接管会关闭炮塔的自动旋转，期间它不再自动防御来袭的子弹和大球；只在需要精确攻击时短暂使用。
-- **道具转向：** 用带瞄准目标的道具（传了 target_guid 或 aim_x/aim_y）时，炮塔会**直接转向**该方向再开火。
-- **悄悄话（秘密会晤）：** 用 whisper 给某个阵营发一条私密消息并等对方回复，只有你们两人知道内容（其他玩家看不到）。**每 {Mathf.Max(1, MapConfig.Instance?.whisperCooldownRounds ?? 4)} 回合只能用一次（开局就处于冷却中，第一发要等到第 {Mathf.Max(1, MapConfig.Instance?.whisperCooldownRounds ?? 4)} 回合），并且消耗升级能量**（和移动共用同一个能量池）。对方忙碌时会被排队；出现互相等待或环形等待时系统会自动调配，被调配终止的那次会退还冷却与能量。
+- **禁射扇区：** 用 control_turret action=avoid 给自己炮塔划一段**不朝它开火**的角度：angle = 扇区中心方向角（0=地图右(+X)、逆时针为正，和 move_turret 的 angle 同一口径），half = 半宽（0~179 度），扇区覆盖 中心±half。设了以后：**待机旋转转到扇区边界就掉头**、**自动护卫不会朝扇区里的目标转**（目标在扇区里、或转过去要横穿扇区，这次护卫转向就放弃）；手动 control_turret start 接管期间不受它限制。只记一个扇区，再设一次就覆盖；half=0 取消；不消耗道具与能量。当前扇区每轮情报里会报给你自己。
+  - **半宽要按「对方护盾的角宽」算，不是只把塔心那一个点避开**：护盾是套在炮塔外的一圈，半径由护盾值决定（数值越大半径越大，撞击情报里的护盾大小对应的就是这个半径）。从你的炮塔看过去，那一圈护盾的角半径 ≈ arctan(护盾半径 ÷ 你和他之间的距离)，扇区半宽至少要盖住这个角半径。只避开塔心那条线，子弹照样打在护盾上、照样扣那一方的盾值。
+- **道具转向：** 用带瞄准目标的道具（传了 target_guid 或 aim_x/aim_y）时，炮塔会**直接转向**该方向再开火 —— **只是转过去打这一发，不会接管炮塔**：自动旋转、自动拦截照常开着（想要持续锁定某个目标才用 control_turret）。
+- **悄悄话（秘密会晤）：** 用 whisper 给某个阵营发一条私密消息并等对方回复，只有你们两人知道内容（其他玩家看不到）。**每 {Mathf.Max(1, MapConfig.Instance?.whisperCooldownRounds ?? 4)} 回合只能用一次（开局就处于冷却中，第一发要等到第 {Mathf.Max(1, MapConfig.Instance?.whisperCooldownRounds ?? 4)} 回合），并且消耗升级能量**（和移动共用同一个能量池）。对方忙碌时会被排队；出现互相等待或环形等待时系统会自动调配，被调配终止的那次会退还冷却与能量。它的用途是私下一对一交涉（拉盟友、换情报、约定分工、威胁，见第八节）。
 - **移动：** 炮塔可以移动（用 move_turret），**每次移动消耗升级能量**（与移动距离无关；能量＝空槽升级进度，会随时间积累，不足则无法移动，连预览都不会给）。移动不会主动广播你的新位置，但如果你正好落进别人的移动视野截图范围里，他可能直接看到你，因此在发现其他人和你太近，需要马上离开；反过来，你停得越久，别人越容易从撞击点算出你的坐标。
   - 移动速度：基础 {MapConfig.Instance?.moveSpeed} 单位/秒，**每级炮塔强化再 +{MapConfig.Instance?.moveSpeedPerLevel}**（等级越高走得越快，走满最大距离的时间跟着变短）。走多远就暴露多久。
-- **用一个动作就涨价一次（这条很关键）：** 移动、悄悄话**各自单独累计**，同一个动作每用过一次，**下一次的价格就 ×{MapConfig.Instance?.actionCostGrowth}**。
-  - 第一次移动 {MapConfig.Instance?.moveEnergyCost} 点，第二次 ×{MapConfig.Instance?.actionCostGrowth}、第三次再 ×{MapConfig.Instance?.actionCostGrowth}…… 悄悄话（首次 {MapConfig.Instance?.whisperEnergyCost}）同理。
-  - **能量池是共用的**：这两种动作都从这里扣，用掉就推迟下一次升级；反之攒着能量不动、少走少聊，就能更快升级。
-  - 所以「一次走短一点、多走几次」不只是花能量，还会**把后面的每一次移动都变贵**，悄悄话同理。情报里会告诉你每个动作现在的价格。
-- **移动要谨慎——距离是上限，不是目标：**
-  - 走多远由你自己填，**没要求你每次都走满「最大移动距离」**。盲走满距离最容易一头送进未知区域、甚至正好停在别人身上；没把握就走短一点，剩下的距离留给下次。
-  - **先预览、再确认**：预览会给出目标点、实际距离（超出上限会被夹）、是否越过地图边界、本次扣多少能量，而且**预览不扣能量、炮塔也不会动**——可以放心试算几个方向和距离，比好了再 confirm。
-  - 确认前先自己核对安全性：①**预览附带的视野截图**里你周围一圈有什么（那正是你落点附近的地面）；②情报里的「各炮塔初始位置」（四角出发，之后不再更新）；③历次**撞击情报**反推出的敌方大致方位。注意对手也会移动，任何目标点都可能已经有人，别把初始位置当成全部。
-  - 目标点靠近某人的初始位置、或落在撞击情报指出的方位上时，**换方向或缩短距离**，别赌对方已经走了。两个炮塔重叠时你不会被弹开、也不会自动停下（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——所以「撞上去」没有任何安全网。
-  - **移动途中不能改道**：炮塔一旦开始移动就会一直走到底（到达目标 / 撞到地图边界 / 超时才停），中途再给方向和距离会被拒绝。想换方向只能等它停下再走一次；如果现在就得停住，用 distance=0 做一次预览 + confirm 让它原地停下。所以方向和距离必须一次想清楚——也正因为不能改道，「一次走短一点」才更安全。
-  - **别傻乎乎地往地图中央冲：** 地图中央没有任何额外收益，却是四家距离最近的地方——你冲过去等于自己走进别人的视野，一停就被拼出坐标。移动是为了**躲定位、抢关键点、配合行动**，不是为了「往中间挤」；没有明确目标时，守着自己的半场往外扩地更划算。
-- **胜负：** 成为最后存活的一方、并把全图领土刷到 100%（一个像素都不留给别人和中立）才算赢；只剩你一个阵营后，还要把场上敌方游离的大球、穿甲弹和子弹清掉。
-- **位置情报：** 开局你知道所有炮塔的初始位置（情报里的「各炮塔初始位置」永远不变，就是开局坐标）。之后没有任何人会直接得知敌方炮塔在哪里：**只有自己的位置是实时的**。**近处你可以直接看**：每次 move_turret 预览都会附一张以你炮塔为圆心、{(MapConfig.Instance != null && MapConfig.Instance.moveSightRadiusFactor >= 0.999f ? "半径就等于你当前的最大移动距离（整张图里就是你能走到的全部范围）" : "半径约为你当前最大移动距离的 " + (MapConfig.Instance != null ? MapConfig.Instance.moveSightRadiusFactor.ToString("0.##") : "1") + " 倍")} 的圆形俯视截图，这一圈内的炮塔 / 护盾 / 大球在图里看得见；截图边缘的**黑色环带是圆形视野之外、暗红色区域是地图之外**，那两种地方没有信息。**更远处只能靠撞击情报推断**——你的子弹或大球撞上对方护盾/炮塔本体时，情报里会告诉你：撞的是谁、撞击点坐标、护盾撞击前的大小、撞击后的大小。撞击点只能给你一个大致方位（护盾大小对应护盾半径），要靠多次撞击自己拼图判断。
-- **一直停在同一个地方 = 被穿甲弹直接秒杀：** 这是**最容易送命的一条**。炮塔**不动就不会换坐标**：对手用几次撞击情报、或者一张视野截图，就能把你钉死在一个点上；位置一旦被摸清，他只要朝那个坐标打一发**穿甲弹**——穿甲弹会**穿过护盾**直取炮塔本体，**碰到本体即秒杀**，护盾再厚也拦不住。**别指望护盾强化能防它**：穿甲弹穿过护盾时只是**按比例啃盾**（每秒啃当前盾值的两成多，还受它自身数值封顶），一次穿越掉不了几个百分点、**根本啃不到 0**，所以**它永远触发不了「破盾无敌」**——那个 2 秒无敌是**子弹或大球把盾打碎**时才开的窗口，穿甲自己打不开。也就是说：**对付穿甲只有一条路——移动换位，别让人钉住你的坐标**（被撞击情报报过坐标、被别人的视野截图拍到过、或者连续几轮待在同一个地方，都算「可能被定位」）。**实在躲不掉时还有一手：用大球去撞它**——穿甲是物理弹体，被大球撞到会偏转，偏一点就可能打不到你的本体（见上面「穿甲」那条）。同理，你也可以这样对付别人——把你的撞击情报和视野截图拼起来，找出谁的坐标没变过，给他一发穿甲弹。
+- **用一个动作就涨价一次：** 移动、悄悄话**各自单独累计**，同一个动作每用过一次，**下一次的价格 ×{MapConfig.Instance?.actionCostGrowth}**（涨得很慢，不是翻倍）。
+  - 第一次移动 {MapConfig.Instance?.moveEnergyCost} 点，第二次 ×{MapConfig.Instance?.actionCostGrowth}、第三次再 ×{MapConfig.Instance?.actionCostGrowth}，以此类推；悄悄话（首次 {MapConfig.Instance?.whisperEnergyCost}）同理。情报里会告诉你每个动作现在的价格。
+  - **移动没有冷却、也没有次数上限**：只要升级能量够，就能再走一次（能量按空槽累积，一格每秒 +1）。花掉的是升级进度。
+  - 「一次走短一点、分几次走」也可以，代价是每次价格 ×{MapConfig.Instance?.actionCostGrowth}。
+  - **能量池是共用的**：移动和悄悄话都从升级进度（空槽累积的那份）里扣，**花掉就推迟下一次升级**。
+  - **先预览、再确认**：预览会给出目标点、实际距离（超出上限会被夹）、是否越过地图边界、本次要扣多少能量，而且**预览不扣能量、炮塔也不会动**——可以放心试算几个方向和距离，比好了再 confirm。
+  - **确认前对照三样**：①预览附带的视野截图（那正是你落点附近的地面）；②情报里的「各炮塔初始位置」（四角出发、之后不再更新）；③历次撞击情报反推出的敌方大致方位。对手也会移动，任何目标点都可能已经有人，别把初始位置当成全部。
+  - **两个炮塔重叠时你不会被弹开、也不会自动停下**（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——「撞上去」没有任何安全网。
+- **移动要谨慎：** 距离是上限、**不是必须走满**；走多远、怎么确认、**途中怎么改道（移动途中可以随时改方向，再发一次预览 + confirm 就行）**，**完整规则见 move_turret 的工具说明**。地图中央没有额外收益，而且离四家都最近。
+- **胜负：** 成为最后存活的一方、并把全图领土刷到 100%（一个像素都不留给别人和中立）才算赢。**终局分两段**：只剩你一个阵营、场上敌方的大球/穿甲弹/子弹都清掉、再过 3 轮，系统会**停掉你的决策与升级**（你不用再指挥了），之后你的炮塔继续自动开火把地刷满；**刷满 100% 这一局才结束**。如果四家全死，场上就剩游离的弹体自己滚：它们把地涂到 95% 以上、或者场上什么物体都不剩，也会结束。
+- **位置情报：** 开局你和敌人知道各自的炮塔位置（「各炮塔初始位置」之后不再更新）。之后没有人会直接知道敌人在哪：**只有自己的位置是实时的**；近处靠 **move_turret 预览附带的视野截图**直接看（半径约为你最大移动距离的 {(MapConfig.Instance != null ? MapConfig.Instance.moveSightRadiusFactor : 1f)} 倍；**这一圈内的炮塔 / 护盾 / 大球在图里都看得见**，图例：**圆环 = 大球（环的大小就是球的实际大小）、叉 = 穿甲弹、圆点 = 炮塔、标记上方的数字 = 它的数值、带箭头的粗线 = 它正在飞的方向、绿 = 你的 / 红 = 对手的 / 白 = 中立，正中心套绿圈的那台就是你自己（所有炮塔一律不标数值）；黑色环带 = 圆形视野之外、暗红色 = 地图之外**；**图里看得见的东西另外还会用文字列一份坐标**——要打就直接照那份文字里的坐标瞄，别拿图上没量的像素去猜），更远处只能靠**撞击情报**推断——撞的是谁、撞击点坐标、护盾撞击前后的大小（护盾大小对应护盾半径），撞击点只能给一个大致方位，要多次自己拼图。
+- **一直停在同一个地方 = 被穿甲弹直接秒杀：** 炮塔不动就不会换坐标，对手靠几次撞击情报或一张视野截图就能把你钉死，然后一发**穿甲弹**收工（穿盾、碰到本体即秒杀，护盾再厚也拦不住，也开不了「破盾无敌」）。穿甲弹需要坐标才能打中，所以**换位（不给坐标）是防它的手段**（可以写进预行动，见第七节）。同理，你也可以用别人的撞击情报和视野截图拼出他的坐标，给他一发穿甲弹。
 
 ## 三、弹珠与资源
+- **你的一切道具都只从弹珠来**：每颗弹珠每撞到一个道具区就产出一个道具，而你的全部攻击与防守手段（霰弹 / 大球 / 穿甲 / 护盾 / 扫射）都是道具——弹珠数量就是你同一时间能产出的道具条数。
 - 每队初始拥有 {MarbleManager.Instance?.initialMarbleCount} 个弹珠。
 - 弹珠经过障碍后进入倍乘区：×2（面积最大）→ ×4 → ×8（面积最小）；倍乘完成后回到顶部重新滚落。
 - 进入道具选择区时随机落到道具上；道具数值等于弹珠当时数值，按 2 的幂次增长。
@@ -1389,82 +1737,100 @@ public class AIAgent : MonoBehaviour
 
 ## 五、空槽升级
 每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择，你只能三选一：
-1. **额外弹珠：** 立即生成并发射两枚你的新弹珠，增强长期弹珠资源与倍乘收益。
-2. **炮塔强化：** 子弹显示半径变大、**击中大球时把它推得更远**（霰弹这类散射子弹同样受益），自动护卫极限转速 ×{Towel.GuardSpeedPerLevel}（常态转速不变）、**最大移动距离 +{MapConfig.Instance?.moveRangePerLevel}**（基础 {MapConfig.Instance?.moveRangeBase} 单位）、**移动速度 +{MapConfig.Instance?.moveSpeedPerLevel}/秒**，道具瞄准误差每级减半（基准 {ReactionSystem.BaseAimAngleError:0.#}°）。可叠加。
-3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（每级 2 秒，期间受到的伤害全部归零）。可叠加。**注意：这条挡不住穿甲弹**——穿甲只按比例啃盾、不会把盾打破，所以它**开不了这个窗口**；这个无敌只在**被子弹或大球打破盾**的那一瞬间才生效。
-每次升级完成后，下一次升级所需值 ×{MapConfig.Instance?.upgradeCostGrowth}。使用道具腾出空槽可加快长期资源增长；后期升级耗时变长、槽位解锁多时也应留些底牌，不要无意义囤积道具。
+1. **额外弹珠：** 立即生成并发射两枚你的新弹珠（弹珠每撞到一个道具区就产出一个等值道具）。
+2. **炮塔强化：** 最大移动距离 +{MapConfig.Instance?.moveRangePerLevel}、**移动速度 +{MapConfig.Instance?.moveSpeedPerLevel}/秒**、**自动护卫极限转速 ×{Towel.GuardSpeedPerLevel}/级**（自动拦截来袭子弹的转速上限；**常态转速不变**）、子弹显示半径与打大球动量变大（霰弹这类散射子弹同样受益）、道具瞄准误差每级减半（基准 {ReactionSystem.BaseAimAngleError}°）。可叠加。
+3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（**第 N 级 = {ShieldInvincibleBase:0.#} / 4 的 N−1 次方 秒**：1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒、3 级 {ShieldInvincibleAt(3):0.##} 秒…；你现在 {ShieldUpgradeLevel} 级 → 破盾后 {ShieldInvincibleAt(ShieldUpgradeLevel):0.##} 秒，再升一级 → {ShieldInvincibleAt(ShieldUpgradeLevel + 1):0.##} 秒，期间受到的伤害全部归零）。可叠加，但**越往后每一级给的时间越少**（每级是上一级的四分之一）。**这个等级是永久的：升过之后每一次盾破都会开这个窗口，不是攒着只用一次。** **升级机会什么时候来不由你定**——空槽升级进度攒满系统才会弹三选一（见上面「算一笔账」），而且**弹出来就必须当场三选一（没有「留着以后再说」这个选项）**，所以「等盾快破了再点护盾强化」做不到：盾破的那一刻不一定正好有升级机会、机会也不会给你留着。要用上这个窗口得靠预行动（见第七节「盾破就换位」）；穿甲弹只按比例啃盾、不破盾，开不了这个窗口（对付穿甲只能靠移动换位）。
+三条可以随便混搭，也可以一直堆同一条；**选哪个看你这一局的流派和当下缺什么**。
+每次升级完成后，下一次升级所需值 ×{MapConfig.Instance?.upgradeCostGrowth}。使用道具腾出空槽可加快资源积累；升级费一级比一级贵（一局大约 15~20 分钟），槽位开多了以后也该留些底牌，不要无意义囤积道具。
 注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
 
 ## 六、道具
 一次使用多个道具时，按武器栈从后往前（高槽位→低槽位）依次调用，避免槽位反复移动。
-- **霰弹：** 向目标方向快速散射大量子弹，总数值等于道具数值。
+- **霰弹：** 向目标方向快速散射大量子弹，总数值等于道具数值。散射出去的是**连续子弹**：把对方的盾打空之后，剩下的数值会继续打向炮塔本体——所以一格霰弹能在**同一次攻击**里直接打死盾薄的炮塔；而它是散射铺成一片的，对方**很难靠小幅移动躲开**。
 - **扫射：** 将道具数值加入子弹储备，由炮塔持续释放，以炮塔朝向涂抹地面。
-- **护盾：** 将道具数值加入己方护盾。一定要及时补充——无盾被碰到即死，盾无论多小都能抵御一次大球。
-- **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。
-- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾会被拖慢（速度按比例降低）、盾内会**按比例持续啃盾**（每秒啃当前盾值的两成多，受弹体自身数值封顶——**一次穿越啃不到 0，不会把盾打破**），离开护盾时方向会随机偏转；撞到敌方炮塔本体即秒杀。因为它**不打破护盾**，所以**它也不会触发对方的「破盾无敌」**（那个窗口只有子弹/大球把盾打碎时才开）。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗。
-- **穿甲弹是物理弹体，可以用大球撞偏它：** 它和你的大球相撞时按大球碰撞规则互相扣减，**同时会被撞得偏转方向**——而且偏转之后它**顺着新方向继续飞，不会自动拐回来**。所以你**不需要用更大的球把它抵消掉**：只要能让你的球撞上它（哪怕数值比它小得多，撞一下就碎也没关系），**偏转一点点就可能让这发必中的穿甲打空**。它是穿盾秒杀的，但**不是不可阻挡**——手上正好有大球、又有穿甲朝你来时，朝它的飞行路径上打一发，值得一试（打空不亏，打偏就赚一条命）。
+- **护盾：** 将道具数值加入己方护盾。无盾被子弹或大球碰到即死；盾无论多小都能抵御一次大球。手里有护盾道具就挂上、有【任意】可变护盾（对应的预行动见第七节）。
+- **大球：** 向目标方向发射等值大球，涂抹沿途地面，攻击撞击的单位，可被子弹偏转。它是**你能主动指定方向**打出去的那一种（子弹是自动开火、方向不由你定）：大球撞上敌方护盾或炮塔本体，就会给你一条**撞击情报**（撞的是谁、撞击点坐标、护盾撞击前后的大小），所以可以拿它**朝远处试探别人在哪**。
+- **穿甲：** 发射一枚等值穿甲弹，**穿过敌方护盾**直取炮塔本体：进入护盾会被拖慢（速度按比例降低）、盾内会**按比例持续啃盾**（每秒啃当前盾值的两成多，受弹体自身数值封顶——**一次穿越啃不到 0，不会把盾打破**），离开护盾时方向会随机偏转；撞到敌方炮塔本体即秒杀。**撞到地图边界会像子弹一样反弹**（它挂的是全反弹物理材质，速度不衰减），所以它可以贴着边绕回来打你。因为它**不打破护盾**，所以**它也不会触发对方的「破盾无敌」**（那个窗口只有子弹/大球把盾打碎时才开）。它**不涂地**（不占领领土），撞上大球按大球的碰撞规则互相扣减；道具数值越大越经得住穿盾消耗。
+- **穿甲弹是物理弹体，会被大球撞偏：** 它和你的大球相撞时按大球碰撞规则互相扣减，**同时会被撞得偏转方向**，偏转之后顺着新方向继续飞、不会自动拐回来；所以你**不需要用更大的球把它抵消掉**，哪怕球比它小得多、撞一下就碎也没关系。弹体已经在飞的时候移动来不及，这时手上有球可以朝它的路径打一发。防穿甲的手段是**不给坐标、及时换位**（见上面那条）。
 - **任意：** 任选以上一种道具。
-- **合并道具（merge_prop）：** 可以把两个**同种**道具并成一个（数值相加、省下一个槽位、免费）。但**无脑合并不一定是好事**：有些道具你根本用不了那么多，有些分开用收益最大——两颗大球朝两个方向、两发霰弹打两个目标、两次护盾分两轮顶伤害。槽位不紧张、或者确实需要一次性堆出大数值时再合。
-### 道具槽经济（最容易被忽略的一环，务必看懂）
-- **槽位有限、还会随时间解锁**：开局只有 **2 格**，之后第 **1 / 5 / 7 分钟**各解锁 1 格，**最多 5 格**（当前上限见每轮情报里的「道具栈(上限:N)」，别自己猜）。
+- **合并道具（merge_prop）：** 可以把两个**同种**道具并成一个（数值相加、省下一个槽位、免费）。并掉之后这两颗就不能再分头用了（两颗大球分两个方向、两发霰弹打两个目标、两次护盾分两轮顶）：槽位紧张、或者要一次性堆出大数值时再合。
+### 道具槽经济
+- **槽位有限、还会随时间解锁**：开局只有 **2 格**，之后第 **1 / 5 / 7 分钟**各解锁 1 格，**最多 5 格**（当前上限见每轮情报里的「道具栈(上限:N)」）。
 - **一格 = 一个道具**（武器种类 + 数值）。同种道具也各占一格；想省格就用 merge_prop 合并。
-- **空槽才是升级的来源**：升级值**只按空槽数量**积累——每空 1 格每秒 +{MapConfig.Instance?.upgradePerEmptySlotPerSecond}，**满槽期间完全不涨**；而升级决定你的弹珠产出、炮塔强度、护盾厚度。**所以空槽本身就是资产，比塞在里面的小道具值钱。**
-- **算一笔账**：开局 2 格全空 = 每秒 +{2f * (MapConfig.Instance != null ? MapConfig.Instance.upgradePerEmptySlotPerSecond : 1f)} 升级值，{(MapConfig.Instance != null ? MapConfig.Instance.upgradeCost : 50f)} 点升一次 → **最快约 {(MapConfig.Instance != null && MapConfig.Instance.upgradePerEmptySlotPerSecond > 0f ? MapConfig.Instance.upgradeCost / (2f * MapConfig.Instance.upgradePerEmptySlotPerSecond) : 0f):0} 秒就能升一级**；而把两格塞满，**升级永远停在 0**——这就是「留空位」和「攒垃圾道具」的差别。
-- **满槽 = 失控**：槽满之后，新到手的道具会**立刻自动用掉**，什么时候用、朝哪个方向打，全都不由你决定。
-- **道具是即战力，不是存款**：不用就只是占格、拖慢升级；用掉立刻生效（涂地 / 防御 / 击杀）。判断只有一条——**这一格的道具值不值得它占着的那份升级进度**：
-  - **不值得留的**：不到 10K 的霰弹 / 扫射 / 大球 / 穿甲（产出远不如它占着的那份升级进度）→ **马上打出去腾位置**；想保住这点数值就 merge_prop 并到同种的大数值那颗上。
-  - **值得留的**：护盾（再小也能挡下一次任意大的大球）、任意（能变成你要的东西），以及你正在为某个明确目标攒的大数值。
-- **道具怎么来**：你的弹珠每撞到一个道具区，就**立刻给你产出一个道具**（数值 = 弹珠当时的数值），然后弹珠数值归位、回家、再被发射出去——**循环往复、永不停止**。所以**弹珠不是「后期资源」，它是常驻生产线**：多一颗弹珠 = 全程多一条产线，滚过倍乘区还会越滚越大，下一圈产出的道具也更大。**「额外弹珠」升级越早拿越值**，早拿早滚，复利才算得久。
-- **每轮必看道具栈**：开局只有 2 格时最容易卡满——能用的立刻用掉、该合的合，**永远给自己留至少 1 个空位**。
-- **不想每轮手动清槽就登记预行动（ready_action）**：比如「槽满且有小于 10K 的大球 → 自动把它打向 (0,0) 腾位置」只要登记一次（`tool_name=use_prop`，`ready=[""all--left--less--1"",""all--prop--contain--大球--value--less--10240"",""select--prop--contain--大球--value--less--10240"",""para--aim_x--0"",""para--aim_y--0"",""reuse---1""]`），以后它会替你自动执行，每轮情报里都能看到它是否触发、执行了几次、失败了什么原因。
+- **空槽才是升级的来源**：升级值**只按空槽数量**积累——每空 1 格每秒 +{MapConfig.Instance?.upgradePerEmptySlotPerSecond}，**满槽期间完全不涨**；而升级决定你的弹珠产出、炮塔强度、护盾厚度。
+- **算一笔账**：开局 2 格全空 = 每秒 +{2f * (MapConfig.Instance != null ? MapConfig.Instance.upgradePerEmptySlotPerSecond : 1f)} 升级值，{(MapConfig.Instance != null ? MapConfig.Instance.upgradeCost : 50f)} 点升一次 → **最快约 {(MapConfig.Instance != null && MapConfig.Instance.upgradePerEmptySlotPerSecond > 0f ? MapConfig.Instance.upgradeCost / (2f * MapConfig.Instance.upgradePerEmptySlotPerSecond) : 0f):0} 秒就能升一级**；两格塞满则升级停在 0。
+- **满槽之后**：新到手的道具会**立刻自动用掉**，什么时候用、朝哪个方向打都不由你决定。
+- **留不留一格道具，看它占着的那份升级进度**（每秒 +1/格）：
+  - **对你这一局的流派没用的道具，不要拿在手里**：那一格在被占期间不产升级值，等于拿升级速度换一个用不上的东西——用掉、merge_prop 并到同种的大数值那颗上、或者直接打出去。
+  - 不到 10K 的霰弹 / 扫射 / 大球 / 穿甲 → 用掉，或 merge_prop 并到同种的大数值那颗上。
+  - **护盾道具该用就用**：挂上去就生效（再小也能挡下一次任意大的大球），不必一直攥在手里等时机；任意（能变成你要的东西）、正在为某个明确目标攒的大数值 → 留。
+  - **开局尤其明显**：开局一共只有 **2 格 = 两个升级口子**——两格都空 = 每秒 +{2f * (MapConfig.Instance != null ? MapConfig.Instance.upgradePerEmptySlotPerSecond : 1f)}，两格都被占 = 升级完全停涨（见上面「算一笔账」）。
+- **道具怎么来**：你的弹珠每撞到一个道具区，就**立刻给你产出一个道具**（数值 = 弹珠当时的数值），然后弹珠数值归位、回家、再被发射出去——**循环往复、永不停止**。道具只从弹珠来：多一颗弹珠 = 同时多一颗在产道具的弹珠，产道具的速度跟着涨。
+- **六个道具区的落点概率**：地图上六种道具各一条区、长度不一样，**弹珠落在哪一条上的概率就是那一条的宽度占全部宽度的比例**——当前是 {MapConfig.PropZoneOddsText}（越长的越容易吃到，这条表是现算的，布局改了它跟着变）。
+- **每轮情报里都带道具栈（含上限）**。一格被用不上的道具占着，那一格就不产出升级值（每秒 +1/格），道具本身的数值也没生效：霰弹 / 大球朝对手或空地打、扫射加进子弹储备、护盾挂上、【任意】按需要挑一种用掉。小于 10K 的霰弹 / 扫射 / 大球 / 穿甲、用不到的重复种类、以及**对你这一局的流派没用的那些**都可以照此处理（**护盾该挂就挂、任意按需要变**）。
+- 大球不要为了「防穿甲」长期占一格：防穿甲靠换位（详见上面穿甲那两段）。
+- **不想每轮手动清槽就登记预行动（ready_action）**：写法见工具说明，常用登记项见第七节。
 
 ## 七、预行动（ready_action）：不用每轮盯着的自动执行
-你可以让系统替你盯条件——**条件一满足就自动替你执行某个工具**，你只管登记一次。
-- **登记**：`action=add`、`tool_name`=触发时调用哪个工具（use_prop / merge_prop / move_turret / control_turret / whisper）、`ready`=条件与动作串数组、`reuse`=0（执行一次后自动取消，默认）/ -1（永久）/ N（存活 N 个你的轮次）。
-- **`ready` 里每条串用 `--` 分词**（内容写在【】里的规矩不适用于这里，这是工具参数）：
-  - **条件**：`all--对象--比较--值`（`any--` 任一满足、`not--` 取反；多条串之间按「全部满足」组合）。
-    对象：`upgrade`(升级能量)、`left`(空槽数)、`slot`(槽位上限)、`shield`、`bullet`、`marble`、`territory`、`threat`(最近敌方领土距离)、`threatPos--x/y`(最近敌方领土坐标)、`round`、`enemyNum`、`moveCost`/`whisperCost`、`pos--x/y`(自己坐标)、`moving--is--true/false`、`prop--contain--种类--value--比较--值`、`prop--count--比较--值`、`warn--count--比较--值`、`warn--type--穿甲/大球--eta--比较--秒`。
-    比较：`more` / `less` / `moreEqual` / `lessEqual` / `equal`；数值可以直接写 1048576，也可以写 10K / 1M。
-  - **挑目标**：`select--prop--contain--种类--value--比较--值`（也可以 `smallest` / `biggest` / `index--N`），选中结果自动填进 `index`。
-  - **改参数**：`para--参数名--值`，例如 `para--aim_x--0`、`para--aim_y--0`、`para--angle--0`、`para--distance--1.5`、`para--weapon--大球`、`para--to--3`、`para--content--……`。
-- **管理**：`action=list`（列出全部，含是否满足/执行几次/失败记录）、`remove`（配 `id`）、`clear`、`pause`/`resume`（配 `id`）。**每个阵营最多 5 条**。
-- **每轮情报里都会列出你的预行动**：条件当前满足没、已执行几次、失败几次与原因（失败会**合并计数**，不会刷屏）。触发执行时不会额外播报（执行本身在场上看得见）。
-- **值得用的场景**：① 清垃圾道具腾空槽——`all--left--less--1` + `select--prop--contain--大球--value--less--10240` + `para--aim_x--0`/`para--aim_y--0`（槽满就自动把最小的大球打向 (0,0)）；② 攒够能量自动行动——`any--upgrade--more--30` + `tool_name=move_turret`；③ 穿甲预警就换位——`any--warn--type--穿甲--eta--less--5` + `tool_name=move_turret`。
+登记一次，条件一满足就自动替你执行某个工具。**参数怎么写（条件对象、比较、select / para / reuse、上限与失败统计）全在 ready_action 的工具说明里**：
+- **每轮情报里都会列出你登记的预行动**：条件当前满足没、已执行几次、触发失败几次与原因（失败会**合并计数**，不会刷屏）；触发执行时不会额外播报（执行本身在场上看得见）。每个阵营**最多 {ReadyActionManager.MaxPerStage} 条**；`action=list` 可以随时查，`remove`（配 `id`）/ `clear` / `pause` / `resume`（配 `id`）管理。
+- 下面 5 条是常用登记项（一次 `action=add` 登记一条，全部 `reuse--1`；登记完 `action=list` 对一遍，`more`/`less` 最容易写反）：
+  1. **盾破了补盾**：`use_prop` + `all--shield--lessEqual--0` + `all--prop--contain--护盾` + `select--prop--contain--护盾`。
+  2. **盾破了、手里只有【任意】**：`use_prop` + `all--shield--lessEqual--0` + `all--prop--contain--任意` + `select--prop--contain--任意` + `para--weapon--护盾`。
+  3. **穿甲预警就换位**：`move_turret` + `any--warn--type--穿甲--eta--less--5` + `para--distance--1.5` + **`para--angle--垂直`**（方向按「垂直于最近那发穿甲弹的航线」现算；**只给距离不给方向，这次移动会直接失败**，给死角度又会顺着航线把自己送上去）。
+  4. **槽满就清最不值钱的那类道具**：`use_prop` + `all--left--less--1` + `select--prop--contain--大球--value--less--10240` + `para--aim_x--0` + `para--aim_y--0`（`大球` 换成 `霰弹` / `扫射` / `穿甲` 各再登记一条，阈值自己调）。
+  5. **手里有护盾道具就挂上（不管盾破没破）**：`use_prop` + `any--prop--contain--护盾` + `select--prop--contain--护盾`。
+  6. **盾破就换位**：`tool_name=move_turret` + `all--shield--lessEqual--0` + `para--distance--1.5` + `para--angle--<挑一个走得出地图的方向>`。无敌窗口是 {ShieldInvincibleAt(ShieldUpgradeLevel):0.##} 秒（1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒，越往上越短）、情报还滞后一轮，`reuse` 别用 -1（否则盾一破就一直挪），用 N=你自己的回合数或每轮重新登记。
+- 另外两条只在这套系统里才有的：
+  - `shield` 读的是**你自己的护盾值**，`0` 就是盾已经破了；`warn--…--eta` 的预警窗口是**两个回合**（时间越近、值越小）。
+  - 用 `move_turret` 的条目要给一个走得出去的方向 + 距离（落在自己的可移动范围内），否则每轮都会失败、把失败计数刷爆。
 
-## 八、最重要的规则：信息延迟
+## 八、结盟与交涉
+- 这一局**没有同盟协议**：合作全凭嘴说，任何一方随时可以背刺；最终赢家只有一个。
+- 社交只有两个出口：**公开喊话**（所有人可见）和 **whisper**（私聊，一次一个对象；有冷却、消耗升级能量，一次会晤聊几轮都只扣一次）。
+- whisper 发出去的就是你要传达的信息本身：联手、试探、交换情报、威胁、谈条件，都从这里发。
+- 想让别人信你，就把「我这轮做什么」说清并做到；对方违约，你可以在这一局和以后的对局里拿它当筹码（会写进长期记忆）。
+- **结盟时报模糊坐标：** whisper 是私聊，可以在里面报自己（或经你确认的第三方）的**大致位置**。只能报**地图绝对坐标**——「我大致在 (1.5,0.5) 一带」「我在 (1~2, 0~1) 这块」（地图坐标 0 是中心、边到 ±5，x 向右为正、y 向上为正）。**不要说「我在你的东北方向」这种相对方位**：别人的位置是私有的，只有他自己知道，你不可能知道他相对你在哪。
+  - 收到坐标的一方，从**自己的炮塔位置**指向这个坐标就是禁射扇区的中心方向角：`angle = atan2(对方报的 y − 我的 y, 对方报的 x − 我的 x)`（算出弧度再转成度；0=地图右(+X)、逆时针为正，和 move_turret 的 angle 同一口径），半宽按对方护盾的角宽算（见第二节）。所以**两边各自报一次**，每个人就都能划出自己的扇区。
+  - 模糊到一两格的精度就够算中心角（方向误差只有几度）。**坐标报得越精确，对方越容易用穿甲弹把你钉死**（穿甲弹只要坐标、碰到本体即秒杀）。公开【我说】里一个坐标数字都不要报，那里是所有人可见。
+
+## 九、最重要的规则：信息延迟
 **你收到的所有游戏信息都滞后 {Instance._cycleInterval} 秒**——你看到的不是现在，而是 {Instance._cycleInterval} 秒以前的世界。
 
-## 九、你的上一局
-{(MapConfig.Instance != null && MapConfig.Instance.lastGameRecap != null && position - 1 >= 0 && position - 1 < MapConfig.Instance.lastGameRecap.Count && !string.IsNullOrWhiteSpace(MapConfig.Instance.lastGameRecap[position - 1]) ? MapConfig.Instance.lastGameRecap[position - 1].Trim() : "（这是你的第一局，没有上一局可回顾。）")}
+## 十、你的上一局
+{GameMemory.RecapOrFirstGame(position, name)}
 以上是你**上一局亲身经历**的回顾（第一人称，只有你知道的那部分）。这一局的地图、位置和对局都是全新的，别人也知道你经历过这些——你可以记仇、可以提防、也可以借它判断别人的习惯，但**不要把它当成这一局已经发生的情报**。
+
 
 ## 决策原则
 选择能够最大化最终胜率的行动，而不是看起来最积极的行动。
-「往地图中央冲」「为了动而动」都不是积极，是送命：中央没有收益，只有四家最短距离。
+「往地图中央冲」「为了动而动」都不是积极：地图中央没有任何额外收益，却是四家距离最近的地方。
 ";
         private static string character_mode_prompt = @"
-【角色沉浸要求】你的每一轮回复都必须严格写成三段，内容写在【】里面，段名与冒号照抄：
+【角色沉浸要求】你的每一轮回复都必须严格写成三段。
+**格式：先写「【分析：」，接着写你的独白，最后用「】」收尾；换行再写「【我要：」+ 内容 +「】」；换行再写「【我说：」+ 内容 +「】」。**
+**收尾的「】」必须放在这一段内容的最后**（冒号后面直接跟「】」是不合格的，会被打回重写）。
 
-在你的分析过程【分析：】中，请遵守以下规则：
+第一段【分析】——你的内心独白：
 1. 请以角色第一人称进行内心独白，
 2. 思考内容应沉浸在角色中，通过内心独白分析情况。
-3. 不使用括号（）（）！
+3. **用「打到哪一步」定位自己，不要用第几轮**：一局大约 15~20 分钟；槽位按时间解锁（开局 2 格 → 第 1 分钟第 3 格 → 第 5 分钟第 4 格 → 第 7 分钟第 5 格）。看**你已经升级过几次、现在几格、还有几个空槽、场上还剩几家**就够了，不要写「前期 / 中期 / 后期」。
 
-在你的行动说明【我要：】中，请遵守以下规则：
+第二段【我要】——给系统看的行动说明：
 1. 用一句话写清楚这一轮你打算做什么：调用哪个工具、对谁、朝哪个方向。
 2. 什么都不做也要写这一句（写“什么都不做”）。
 3. 这一段是给系统看的行动说明，不用当台词，不要写内心戏。
 
-在你的真实回答【我说：】中，请遵守以下规则：
+第三段【我说】——当众说出口的那一句：
 1. 纯文本 + emoji，禁用markdown，不使用括号（）（）！不要动作描写。
-2. 别露内心戏，别露你的情报。
+2. 别露内心戏，别露你的情报——**自己的坐标和落点一个数字都别报**（报出来对手就能照着打穿甲弹；要耍人就报别的地方的数字）。
 3. 夸张化的沉浸在角色中，字数限制在15字。
-4. 除了emoji来表达情绪用[emo:] 参数允许的值: origin,smile,laugh,shock,angry,sad 来表达情绪。
+4. **每句【我说】的内容都必须带一个表情标记**：写成 `[emo:xxx]`，xxx 只能是 **origin / smile / laugh / shock / angry / sad** 之一（决定立绘表情；不写就是不换脸，立绘一直停在默认表情）。文本里的 emoji 只是点缀，**不能代替这个标记**——两个都要有。
 
-输出格式（严格照做，只输出这三段）：
-【分析：……】
-【我要：……】
-【我说：……】
+写出来就长这样（**只是形状示例，内容换成你自己的**）：
+【分析：朝露的球已经摸到我上方两格多，她是在往我这边压；我先清掉占格的小道具，把空槽还给升级。赤喵上局的账我记着，但这局我不当第一个冲出去的人。】
+【我要：用掉第 1 格的 32K 霰弹，朝空地打出去腾出空槽。】
+【我说：格满了，我先清个位置。 [emo:smile]】
 ";
 
         public static string ModePrompt => character_mode_prompt;
@@ -1510,7 +1876,7 @@ public class AIAgent : MonoBehaviour
         private string BuildSystemPrompt()
         {
             string initialPositions = InitialPositionsText();
-            return $"{world}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n{(initialPositions.Length > 0 ? "开局各炮塔位置（开局坐标，之后不会再更新）：" + initialPositions + "\n" : "")}与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。\n\n**你的每一轮回复都必须严格写成三段，内容写在【】里面，段名与冒号照抄：**\n【分析：……】你的内心独白：用第一人称直接写、沉浸在角色里，**不要用括号**——这一层只有你自己看得到，不会被播出去，用来判断局势、算数值、定策略。\n【我要：……】一句话写清这一轮打算做什么（调用哪个工具、对谁、朝哪；什么都不做就写“什么都不做”）。这一段是给系统看的行动说明，不是台词。\n【我说：……】你要**当众说出口**的那一句（会飘到战场上给所有人看、也会写进对手情报）：纯文本 + emoji、15 字以内、不许括号；**调用工具时不要顺手解说自己在做什么**（不要写“我要移动了”“我挪过去啦”这类自我播报）——不想说话就留空，只写【分析】和【我要】。";
+            return $"{world}\n\n你叫{name}\n{oc}\n\n你的阵营是{position}号阵营，你的stage/position就是{position}。每轮信息里标着{position}号阵营的数据才是你自己的，其他阵营都是敌人。\n\n场上玩家名单：{knownPlayers}\n{(initialPositions.Length > 0 ? "开局各炮塔位置（开局坐标，之后不会再更新）：" + initialPositions + "\n" : "")}与其他玩家对话、悄悄话、公开发言时，请直接使用对方的名字称呼对方，不要用N号AI或N号阵营来代替。\n\n**你的每一轮回复都必须严格写成三段。格式：先写「【分析：」+ 你的内容 +「】」，换行写「【我要：」+ 内容 +「】」，换行写「【我说：」+ 内容 +「】」——收尾的「】」放在这一段内容的最后，不许紧跟在冒号后面。**\n第一段【分析】是你的内心独白：用第一人称直接写、沉浸在角色里，括号随便用——这一层只有你自己看得到，不会被播出去，用来判断局势、算数值、定策略。\n第二段【我要】一句话写清这一轮打算做什么（调用哪个工具、对谁、朝哪；什么都不做就写“什么都不做”）。这一段是给系统看的行动说明，不是台词。\n第三段【我说】是你**当众说出口**的那一句（会飘到战场上给所有人看、也会写进对手情报）：纯文本 + emoji、15 字以内、不许括号；**调用工具时不要顺手解说自己在做什么**（不要写“我要移动了”“我挪过去啦”这类自我播报）——不想说话就留空，只写【分析】和【我要】。";
         }
 
         /// <summary>
@@ -1666,32 +2032,48 @@ public class AIAgent : MonoBehaviour
             return reply;
         }
 
-        /// <summary>开局第二句（长期规划）专用的输出上限：思考已全面关掉，"想得深"就靠这一句给足输出预算。</summary>
-        public const int OpeningPlanMaxTokens = 4096;
+        /// <summary>开局第二句（长期规划）专用的输出上限 —— **可以在 Inspector 里按角色单独调**。
+        /// 2026-09-22 先抬到 8192，结果规划被写成 1700~3700 字，状态区那个思考框直接糊成一整块 —— 压回 2048；
+        /// 之后状态区加了 ClampThinking(320) 兜底，规划这一轮又改成**开着 thinking**：
+        /// 实测 4096 会被 reasoning 吃光（content 直接是空串、或者写到一半被截断），
+        /// 现在给到 32768（模型侧上限远不止这个数，写不满就不会再用空 content 触发重发）。</summary>
+        public int openingPlanMaxTokens = 32768;
 
         /// <summary>
         /// ⚠⚠ 不要删！开局**第二句**（长期规划）的提示词：第一句已经说过赛前狠话，这一轮专门做整局规划，
-        /// 只写【分析】（【我要】写规划里的第一步，【我说】留空），并且这一句的输出上限抬到 OpeningPlanMaxTokens。
+        /// 只写【分析】（【我要】写规划里的第一步，【我说】留空），并且这一句的输出上限抬到 openingPlanMaxTokens。
+        /// 这一轮的请求**开着 thinking**（见 RunAIAnalysicCore 里的 request.thinking 开关），thinking 之后会被清空，
+        /// 所以提示词里明确要求把结论落在【分析】里。
         /// </summary>
         private const string OpeningPlanPrompt =
-            "现在做一次【长期规划】——这一轮是全局唯一一次最高档推理（之后都回到普通档），把该想的都想透，结论写进你的思考里，它会成为你这一局的行动方针："
-            + "① 基于你对游戏规则的理解，推导一条可行的道具流派：什么道具配合什么升级最好；"
-            + "② 你打算怎么移动、怎么躲避危险；③ 平时积攒什么道具；"
-            + "④ 危险的时候怎么用护盾、怎么样最有效地抵御致命伤害；⑤ 你打算怎么确定敌人的位置；"
-            + "⑥ 怎么样合理安排升级点数（三选一什么时候该选哪个）。"
+            "现在做一次【长期规划】——这一轮是全局唯一一次最高档推理（之后都回到普通档），把这一局想透，结论写进你的思考里，它会成为你这一局的行动方针。"
+            + "**这一轮开着深度思考：thinking 里的推演之后会被清空、不会留在你的上下文里，只有【分析】那一段会一直带着 —— 所有想好的东西都必须写进【分析：】。**"
+            + "写法要求：不用刻意压缩，但每一条都要落到具体条件、数字和道具名上；不要复述规则原文、不要客套、不要写口号。**允许有创意**：流派、名字、道具组合都可以是你自己想出来的，不必跟别人一样。"
+            + "① **本局流派一句话**：基于你对规则的理解，自己推导一条你想走的流派（靠什么赢、什么道具配合什么升级），**给它起一个你自己的名字**；**按你的性格和上一局的经历来选，别跟风**——四家都挤同一条路，谁都不会有优势；"
+            + "② **道具怎么用**：把场上的道具逐种过一遍（霰弹 / 扫射 / 护盾 / 大球 / 穿甲 / 任意）——它在你手里能干什么、什么时候用、和你的升级路线怎么配合；**自己推导，不要抄套话**；"
+            + "③ **升级路线 + 成本**：第 1 次、第 2 次、第 3 次升级各选什么、每次想拿到什么；**并且把这条流派的升级成本算进去**——它一共要吃掉几次升级、三条线（额外弹珠 / 炮塔强化 / 护盾强化）各点几次；炮塔强化管的是移动距离与速度、自动护卫极限转速、子弹半径与打大球的动量、以及道具瞄准误差（每级减半，基准见世界规则），点杀这一类靠瞄准的流派要把点数大量压在它上面，留给弹珠与护盾的就少。之后看情况——写清哪些变化会让你改主意（升级费涨到多少、缺什么、谁在压你、几格开出来了）。一局大约 15~20 分钟；"
+            + "④ **预案**：3 条「条件 → 做法」的预案（比如：被穿甲弹盯上 / 护盾被打碎 / 道具栏满 / 领土落后 / 被两家夹击），每条都能落到具体工具上；"
+            + "⑤ **预行动**：开局前 2 轮内登记 2 条 ready_action（tool_name + ready 数组 + reuse=-1），写清触发条件。"
             + "这一轮**正文留空**（不说话、不调用工具），只输出思考。";
 
         /// <summary>
         /// 开局缓存：**两句一起存**。speech = 第一句（赛前狠话，舞台要播的那句）；
         /// analysis = 第二句（同一局开头的长期规划，只写思考、正文为空）。
-        /// 旧格式（只存了一条消息）读出来会是空的，那就当没缓存、重问一次。
+        /// polishedSay = 这句开场白被 SpeechPolisher（官方 deepseek-flash）拟人化之后的【我说】——
+        /// 存下来之后，下次同一个 oc 再开局直接用它，**不再花一次拟人化的 token**（失败/没改动就留空，下次重试）。
+        /// 旧格式（只存了一条消息 / 没有 polishedSay）读出来会是空的，那就当没缓存、重问一次或补一次拟人化。
         /// </summary>
         [Serializable]
         private class OpeningCache
         {
             public DeepSeekMessage speech;
             public DeepSeekMessage analysis;
+            public string polishedSay;
         }
+
+        /// <summary>本卡最后一条**真正被拟人化改写过**的【我说】（SpeechPolisher 成功且确实改了才记）。
+        /// 开局缓存靠它判断该不该把优化版一起存下来，免得把「拟人化失败的原句」当成优化版存死。</summary>
+        private string lastPolishedSay = "";
 
         private void SaveOpeningCache(DeepSeekMessage speech, DeepSeekMessage analysis)
         {
@@ -1703,11 +2085,16 @@ public class AIAgent : MonoBehaviour
 
             try
             {
+                // 这条开场白的【我说】正好是 lastPolishedSay 的话，说明它已经被拟人化过 → 连着优化版一起存
+                string say = SayOf(speech.content);
+                string polished = !string.IsNullOrWhiteSpace(say) && say == lastPolishedSay ? lastPolishedSay : "";
+
                 string hash = GetOcHash();
-                string path = SLManager.ExportToJson(new OpeningCache { speech = speech, analysis = analysis },
+                string path = SLManager.ExportToJson(new OpeningCache { speech = speech, analysis = analysis, polishedSay = polished },
                     "Character/Cache", hash + ".json");
                 if (!string.IsNullOrEmpty(path))
-                    Debug.Log($"[开局缓存] {name} 开场白 + 开局规划已一起保存: {path}");
+                    Debug.Log($"[开局缓存] {name} 开场白 + 开局规划已一起保存: {path}" +
+                              (string.IsNullOrWhiteSpace(polished) ? "（这次没有可复用的拟人化版本）" : $"（含拟人化版本：{polished}）"));
             }
             catch (System.Exception e)
             {
@@ -1715,10 +2102,11 @@ public class AIAgent : MonoBehaviour
             }
         }
 
-        private bool TryLoadOpeningCache(out DeepSeekMessage speech, out DeepSeekMessage analysis)
+        private bool TryLoadOpeningCache(out DeepSeekMessage speech, out DeepSeekMessage analysis, out string polishedSay)
         {
             speech = null;
             analysis = null;
+            polishedSay = "";
             try
             {
                 string hash = GetOcHash();
@@ -1735,6 +2123,7 @@ public class AIAgent : MonoBehaviour
 
                 speech = cached.speech;
                 analysis = cached.analysis;
+                polishedSay = cached.polishedSay ?? "";
                 return true;
             }
             catch (System.Exception e)
@@ -1982,7 +2371,10 @@ public class AIAgent : MonoBehaviour
         {
             using (var md5 = System.Security.Cryptography.MD5.Create())
             {
-                byte[] bytes = Encoding.UTF8.GetBytes(oc ?? "");
+                // oc 决定这是哪个角色，**但开局规划提示词也一起进哈希**：
+                // 改了那句规划要求（比如改「升级路线按第几次升级写」「登记预行动」）以后，旧缓存必须自动作废，
+                // 否则存档里那份旧规划会一直被复用，新要求永远不生效（缓存里存的正是"规划 + 开场白"）。
+                byte[] bytes = Encoding.UTF8.GetBytes((oc ?? "") + "\n\u0001\n" + OpeningPlanPrompt);
                 byte[] hashBytes = md5.ComputeHash(bytes);
                 var sb = new StringBuilder();
                 foreach (byte b in hashBytes) sb.Append(b.ToString("x2"));
@@ -2000,8 +2392,16 @@ public class AIAgent : MonoBehaviour
         private int n_0 = 5;
         private float avgX = 1000f; // 实测平均每轮未压缩 token 数，种子值
         private float avgL = 200f;  // 实测平均每轮压缩后 token 数，种子值
-        private const int k = 8;    // 保留最近完整轮数，与 last_round_index 的 8 对应
-        private const float b = 30f; // DeepSeek 未命中/命中价格比
+        private const int k = 3;    // 压缩保留的最近完整轮数（2026-09-22 用户要求：保留的情报从 10 条降到 3 条），与 last_round_index 的 3 对应
+        /// <summary>未命中/命中 输入价差 b：取 AIAgent 面板上的 priceRatio，拿不到（组件还没起）就退回 50。换价只改那一个数。</summary>
+        private static float b
+        {
+            get
+            {
+                AIAgent agent = AIAgent.Instance;
+                return agent != null && agent.priceRatio > 0f ? agent.priceRatio : 50f;
+            }
+        }
 
         // 连续系统录制回合未调用工具统计；超过 2 个系统回合未用工具时追加提醒
         private int roundsWithoutTool;
@@ -2010,10 +2410,10 @@ public class AIAgent : MonoBehaviour
         // 三段格式回复校验与重试（不合格时无限重试，直到合格）
         /// <summary>兜底用的通用 [格式修正]（说不上具体原因时发它）。正常走 BuildThinkingRetryPrompt。</summary>
         private const string ThinkingRetryPrompt =
-            "[格式修正] 你上一条回复不合格。请严格按三段格式重发（内容写在【】里面）：\n" +
-            "【分析：……】用第一人称直接写内心独白（不要括号）\n" +
-            "【我要：……】这一轮打算做什么\n" +
-            "【我说：……】当众说出口的那一句（15 字以内、不许括号、禁止 [skip]；没有就留空）";
+            "[格式修正] 你上一条回复不合格。请严格按三段格式重发（**格式：「【分析：」+ 内容 +「】」，收尾的「】」放在内容最后、不许紧跟在冒号后面**）：\n" +
+            "第一段【分析】用第一人称直接写内心独白（括号不限制）\n" +
+            "第二段【我要】这一轮打算做什么\n" +
+            "第三段【我说】当众说出口的那一句（15 字以内、不许括号、禁止 [skip]；没有就留空）";
 
         /// <summary>
         /// 逐条列出这次回复**到底哪里不合格**。校验和提醒都用它，保证"提醒里说的"就是"校验拦的"。
@@ -2031,23 +2431,25 @@ public class AIAgent : MonoBehaviour
             // 先卡"写全了没"：缺开头、或缺收尾的 】都要点名
             foreach (string label in SegLabels)
                 if (content.IndexOf("【" + label + "：", StringComparison.Ordinal) < 0 && content.IndexOf("【" + label + ":", StringComparison.Ordinal) < 0)
-                    reasons.Add("缺少【" + label + "：……】这一段");
+                    reasons.Add("缺少【" + label + "】这一段");
                 else if (!HasClosedSegment(content, label))
-                    reasons.Add("【" + label + "：】没有收尾的「】」（三段都要用【】包完整）");
+                    reasons.Add("【" + label + "】没有收尾的「】」（三段都要用【】包完整）");
 
             if (analysis == null) { /* 上面已经报过"缺这一段" */ }
-            else if (string.IsNullOrWhiteSpace(analysis)) reasons.Add("【分析：】是空的：里面要写你的内心独白");
-            else if (ContainsAnyParenthesis(analysis)) reasons.Add("【分析：】里出现了括号（中英文都不行）——内心独白直接写，不要用括号包起来");
+            else if (string.IsNullOrWhiteSpace(analysis)) reasons.Add("【分析】那一段是空的：里面要写你的内心独白（**内容写在「【分析：」后面，收尾的「】」放在内容最后**）");
+            else if (IsPlaceholderOnly(analysis)) reasons.Add("【分析】里只有省略号/标点（把格式里的「……」照抄进来了）：写真正的内心独白，不要抄格式");
 
-            if (want != null && string.IsNullOrWhiteSpace(want)) reasons.Add("【我要：】是空的：写清这一轮做什么，没有就写「什么都不做」");
+            if (want != null && string.IsNullOrWhiteSpace(want)) reasons.Add("【我要】那一段是空的：写清这一轮做什么，没有就写「什么都不做」");
 
             if (say != null)
             {
-                if (!allowEmptySay && !hasTools && string.IsNullOrWhiteSpace(say))
-                    reasons.Add("【我说：】是空的、又没有调用任何工具：要么写一句当众说的话（15 字以内），要么调工具行动");
-                if (ContainsAnyParenthesis(say)) reasons.Add("【我说：】里出现了括号（中英文都不行）");
-                if (say.Contains("我想：") || say.Contains("我想:")) reasons.Add("【我说：】里出现了「我想：」——内心戏要写在【分析】里，别放进当众台词");
-                if (say.Contains("[skip]")) reasons.Add("【我说：】里出现了 [skip]");
+                if (!allowEmptySay && !hasTools && (string.IsNullOrWhiteSpace(say) || IsPlaceholderOnly(say) || SayHasNoText(say)))
+                    reasons.Add("【我说】那一段是空的（或只有省略号 / 只有 [emo:xxx] 表情标记）、又没有调用任何工具：要么写一句当众说的话（15 字以内），要么调工具行动——**只留一个表情标记不算台词**");
+                if (ContainsAnyParenthesis(say)) reasons.Add("【我说】里出现了括号（中英文都不行）");
+                if (hasTools && CallsMoveTool(msg) && LooksLikeCoordinate(say))
+                    reasons.Add("【我说】里报了自己的坐标/落点，而这一轮正在移动——那等于把炮塔位置送给全场（对手可以照着打穿甲弹）：台词里不要出现位置数字");
+                if (say.Contains("我想：") || say.Contains("我想:")) reasons.Add("【我说】里出现了「我想：」——内心戏要写在【分析】里，别放进当众台词");
+                if (say.Contains("[skip]")) reasons.Add("【我说】里出现了 [skip]");
             }
 
             return reasons;
@@ -2065,10 +2467,10 @@ public class AIAgent : MonoBehaviour
             var sb = new StringBuilder();
             sb.AppendLine("[格式修正]你上一条回复不合格，**具体原因**：");
             foreach (string r in reasons) sb.AppendLine("· " + r);
-            sb.AppendLine("请严格按三段格式重发，内容写在【】里面：");
-            sb.AppendLine("【分析：……】（第一人称内心独白，不要括号）");
-            sb.AppendLine("【我要：……】（这一轮打算做什么）");
-            sb.AppendLine("【我说：……】（当众说出口的那一句，15 字以内、不许括号；不说话就留空）");
+            sb.AppendLine("请严格按三段格式重发（**格式：「【分析：」+ 内容 +「】」，收尾的「】」放在内容最后、不许紧跟在冒号后面**）：");
+            sb.AppendLine("第一段【分析】：第一人称内心独白，括号不限制");
+            sb.AppendLine("第二段【我要】：这一轮打算做什么");
+            sb.AppendLine("第三段【我说】：当众说出口的那一句，15 字以内、不许括号；不说话就留空");
             sb.Append("不要解释这条提醒、也不要猜原因，直接重发。");
             return sb.ToString();
         }
@@ -2083,7 +2485,7 @@ public class AIAgent : MonoBehaviour
 - use_prop：使用自己武器栏里的道具（护盾、霰弹、扫射、大球、穿甲等）
 - merge_prop：把两个同种道具合并成一个（数值相加、省一个槽位，免费）
 - ready_action：登记/管理预行动（等条件满足后自动替他执行某个工具；如「槽满就自动把最小的大球打出去」）
-- control_turret：控制自己炮塔瞄准
+- control_turret：控制自己炮塔瞄准、设置禁射扇区
 - move_turret：移动自己的炮塔（第一次调用只是预览、不会移动，确认后才会真的移动）
 - whisper：给其他 AI 发悄悄话
 
@@ -2127,7 +2529,7 @@ public class AIAgent : MonoBehaviour
                     "use_prop" => "使用道具／武器（use_prop）",
                     "merge_prop" => "把两个同种道具合并成一个（merge_prop）",
                     "ready_action" => "登记／管理预行动（ready_action）",
-                    "control_turret" => "控制自己炮塔瞄准（control_turret）",
+                    "control_turret" => "控制自己炮塔瞄准、设置禁射扇区（control_turret）",
                     "move_turret" => "移动自己的炮塔（move_turret）",
                     _ => "给其他 AI 发悄悄话（whisper）",
                 };
@@ -2266,17 +2668,28 @@ public class AIAgent : MonoBehaviour
             return drop;
         }
 
+        /// <summary>
+        /// 该不该压缩上下文（2026-09-22 换公式 + 换价）。
+        ///
+        /// 用「长期平均每轮成本最小化」推出的最优压缩间隔：**D*(N) = sqrt(2·P(N) / L)**，
+        /// 其中压缩罚金 P(N) = (b·L − X)·N + b·k·(X − L)（把要保留的 k 轮按**未命中价**重发一遍的代价），
+        /// X = 每轮未压缩 token（avgX）、L = 每轮压缩后 token（avgL）、k = 保留最近完整轮数、b = 未命中/命中 输入价差。
+        /// 触发条件：N − n_0 ≥ D*(N)。（旧的 sqrt(2·b·L0/X) 是错的，**已废弃** —— 见 缓存策略-优化.txt）
+        ///
+        /// 新价（2026-09-10 起）：缓存命中 0.02 元/百万、未命中 1 元/百万 → b = 50。
+        /// k 从 8 降到 3 之后罚金变小，间隔跟着变短：D*(N) = sqrt(90N + 1200)。
+        /// 真超长时 RecoverFromContextOverflow 仍会无视本判据强制压缩一次。
+        /// </summary>
         private bool ShouldCompress()
         {
             // 前几轮先用种子值，等有实测数据再启用动态压缩
             if (N < 10 || avgX <= 0f || avgL <= 0f) return false;
 
-            float L0 = (N - k) * avgL + k * avgX;
-            if (L0 <= 0f) return false;
+            float penalty = (b * avgL - avgX) * N + b * k * (avgX - avgL);
+            if (penalty <= 0f) return false;
 
-            float D = Mathf.Sqrt(2f * b * L0 / avgX);
-            float d = N - n_0;
-            return d >= D;
+            float D = Mathf.Sqrt(2f * penalty / avgL);
+            return N - n_0 >= D;
         }
 
         private bool MaybeCompress()
@@ -2309,6 +2722,7 @@ public class AIAgent : MonoBehaviour
             // 上下文超长自救：最多重发这么多次，别让一回合被卡死
             const int maxOverflowRetry = 10;
             int overflowRetry = 0;
+            roundEmptyReplies = 0;
 
             while (true)
             {
@@ -2336,11 +2750,18 @@ public class AIAgent : MonoBehaviour
                     true,
                     position);
 
+                // 主回合走**流式接收**（2026-09-22 用户："并且改为流式接收，发现格式失败直接终止重发"）：
+                // 边收边判，格式一错就掐断这一发生成、直接重发，不再傻等它把错的写完。
+                // 只在这里打开：旁路请求（遗言 / 悄悄话 / 获奖感言 / 升级思考 / 行为检查）复制卡片请求时
+                // 不会经过这里，仍然走原来的非流式。
+                info.stream = true;
+                info.partialFormatProblem = PartialFormatProblem;
+
                 info.apiKey = LoadApiKey();
                 info.apiUrl = url;
 
                 //保证已经检查完毕
-                info.validateAndMaybeRetry = (msg) => ValidateRoundReply(msg, info, allowEmptySay);
+                info.validateAndMaybeRetry = async msg => await ValidateRoundReply(msg, info, allowEmptySay);
 
                 roundRequestInFlight = true;
                 try
@@ -2399,12 +2820,55 @@ public class AIAgent : MonoBehaviour
 
         /// <summary>三段格式校验：不合格时本轮只插入一条 [格式修正]，最终合格就把这条提醒移除。
         /// allowEmptySay = 这一轮允许【我说】为空（开局那句长期规划就是只想不说，不发言）。</summary>
-        private bool ValidateRoundReply(DeepSeekMessage msg, RequestInfo info, bool allowEmptySay = false)
+        /// <summary>空 content 的容忍次数：超过就直接放行这一轮，别让对局卡在无限重发里。</summary>
+        private const int MaxEmptyReplies = 3;
+
+        /// <summary>这一轮（本次 UntilGreatRequest）拿到过几次空 content。</summary>
+        private int roundEmptyReplies;
+
+        private async Task<bool> ValidateRoundReply(DeepSeekMessage msg, RequestInfo info, bool allowEmptySay = false)
         {
+            // content 整个是空的：这不是"三段格式不对"，是这一发根本没吐正文 ——
+            // 实测（2026-09-22）thinking 开着时 max_tokens 会被 reasoning 吃光，content 就是空串。
+            // 只重发不换挡 = 无限循环（每发间隔十几秒、对局直接卡住），所以这里换挡 + 有限次兜底。
+            if (string.IsNullOrWhiteSpace(msg?.content))
+            {
+                roundEmptyReplies++;
+
+                if (roundEmptyReplies == 1 && info?.request?.thinking != null && info.request.thinking.type == "enabled")
+                {
+                    info.request.thinking = new ThinkingConfig(false);   // 关掉思考，把预算全留给正文
+                    Debug.LogWarning($"[AIRequest] {name} 这一发 content 是空的（reasoning 长度 {msg?.reasoning_content?.Length ?? 0}）"
+                        + " → 关掉 thinking 重发这一发。");
+                }
+                else if (roundEmptyReplies >= MaxEmptyReplies)
+                {
+                    // 兜底放行：不放行就永远在重发（每发十几秒，整局卡死）。
+                    // 注意**不能留空 content**：空 content 的 assistant 消息留在上下文里会被平台拒，
+                    // 所以塞一条写明"这一轮没拿到内容"的合规三段占位（后面不走 Say/Humanize，不会播出去）。
+                    Debug.LogError($"[AIRequest] {name} 连续 {roundEmptyReplies} 次拿到空 content，这一轮按「什么都不做」放行（不再重发，避免把对局卡死）。");
+                    RemoveRoundRetryReminder();
+                    msg.content = "【分析：连续几次请求都只返回空内容，模型侧没有吐正文，这一轮不做任何行动。】\n"
+                                + "【我要：什么都不做】\n【我说：】";
+                    msg.reasoning_content = null;
+                    return true;
+                }
+                else
+                {
+                    Debug.LogWarning($"[AIRequest] {name} 又拿到空 content（这一轮第 {roundEmptyReplies} 次），再重发一次。");
+                }
+            }
+
             if (IsThreeSegmentReply(msg, allowEmptySay))
             {
+                roundEmptyReplies = 0;
                 RemoveRoundRetryReminder();
-                Say(position, msg.content);
+                await HumanizeSay(msg);      // 拟人化：先把【我说】换掉，再拿去显示/落库
+                // **没有说话就不要 Say**（开局那份长期规划就是只想不说）：走 Say 的话状态区会把它
+                // 当成一次"发言"，把整篇规划糊进状态区的思考框、中央消息列表也白多一条。
+                string said = SayOf(msg.content);
+                if (!string.IsNullOrWhiteSpace(said) && !IsPlaceholderOnly(said) && !SayHasNoText(said))
+                    Say(position, msg.content);
                 return true;
             }
 
@@ -2429,6 +2893,12 @@ public class AIAgent : MonoBehaviour
             }
             MarkRetryStart();
 
+            // 流式路径是"先把候选写进历史、边收边写"（见 AIRequest.SendStreamAsync 里那条 streamedAttempt）：
+            // 打回重发前必须把这条失败尝试从历史里摘掉 —— 否则重发的上下文里带着它，
+            // 而且带 tool_calls 的那种尝试会在历史里留下"悬空工具调用"，下一次请求会被平台 400 拒。
+            // 非流式路径这条本来就没进历史，Remove 是空操作。
+            info?.messages?.Remove(msg);
+
             AIRequest.SendRequest(info);
             return false;
         }
@@ -2436,6 +2906,7 @@ public class AIAgent : MonoBehaviour
         /// <summary>最终回复合格后，把本轮插入的 [格式修正] 从历史里移除。</summary>
         private void RemoveRoundRetryReminder()
         {
+            roundEmptyReplies = 0;
             if (roundRetryReminder == null) return;
             history.Remove(roundRetryReminder);
             roundRetryReminder = null;
@@ -2483,6 +2954,12 @@ public class AIAgent : MonoBehaviour
         }
         private void Say(int position,string content)
         {
+            // 表情要从**原始 content** 里先解析出来：ColorizeAINames 会把 [emo:xxx] 标记删掉
+            // （它是给"只显示文字"的地方用的），被删掉之后消息条和状态区就再也看不到表情了 ——
+            // 所以这里解析一次，明确把 emo 传给这两个出口。
+            ExtractEmotion(content, out bool hasEmo, out SpriteEmotion saidEmo);
+            SpriteEmotion defaultEmo = hasEmo ? saidEmo : SpriteEmotion.origin;
+
             string said = SayOf(ColorizeAINames(content));
             string want = WantOf(ColorizeAINames(content));
             string reasion = AnalysisOf(ColorizeAINames(content));
@@ -2494,12 +2971,48 @@ public class AIAgent : MonoBehaviour
             {
                 stage = position,
                 content = said,
-                emo = soloWinner ? SpriteEmotion.win : SpriteEmotion.origin,   // 没写 [emo:xxx] 时的默认表情（Deal 里以标记为准）
+                emo = soloWinner ? SpriteEmotion.win : defaultEmo,   // 没写 [emo:xxx] 时就是 origin
                 forceEmo = soloWinner
             });
             // 角色状态区（每阵营一块）：走同一个出口推过去，表情口径也和上面一致
-            CharacterStatusArea.Push(position, said, reasion , soloWinner ? SpriteEmotion.win : SpriteEmotion.origin, soloWinner);
+            CharacterStatusArea.Push(position, said, reasion , soloWinner ? SpriteEmotion.win : defaultEmo, soloWinner);
         }
+
+        /// <summary>
+        /// 台词拟人化：把这句回复里的【我说】交给 SpeechPolisher（DeepSeek 官方 deepseek-flash）过一遍，
+        /// 拿到结果**原地写回 content 里【我说：…】那一段**，再交给 Say 去显示。这样：
+        ///   飘字 / 中央消息列表 / 角色状态区看到的、写进 history 的、随卡落盘的、
+        ///   给对手读的【上一轮发言】、终局记忆里的 —— 全都是同一句优化版。
+        /// 开关关掉 / 没 key / 失败 / 超时 → 一个字都不改（退回原句）。
+        /// </summary>
+        private async Task HumanizeSay(DeepSeekMessage msg)
+        {
+            if (msg == null) return;
+
+            string said = SayOf(msg.content);
+            // 只有 [emo:xxx]、没有文字也当没说话：别把「[emo:sad]」送去拟人化（白花一次请求）
+            if (string.IsNullOrWhiteSpace(said) || SayHasNoText(said)) return;
+
+            string want = WantOf(msg.content);
+            string polished = await SpeechPolisher.PolishAsync(name, oc, want, said, AIAgent.AllStageNamesText);
+            if (string.IsNullOrWhiteSpace(polished) || polished == said) return;
+
+            string rewritten = SpeechPolisher.ReplaceSaySegment(msg.content, polished);
+            if (!string.IsNullOrWhiteSpace(rewritten))
+            {
+                msg.content = rewritten;
+                lastPolishedSay = polished;   // 开局缓存靠它把「优化后的开场白」一起存下来
+            }
+        }
+        /// <summary>
+        /// 常规轮次的输出上限：**不管**（2026-09-22 用户看过实测后改主意："那不压"）。
+        /// 之前试过 RoundMaxTokens = 1536 + ClampRoundMaxTokens() 把上限压下来，已撤销 ——
+        /// 理由是实测：max_tokens 是**上限不是用量**，模型写多少还是多少（生成时间 ∝ 实际输出 token），
+        /// 四张真卡落的 162 条正文中位只有 259~550 字（≈190~400 token）、p90 439~1379 字、最长 2582 字，
+        /// 压上限只在 p97 以上的尾巴上咬得住，还会把原本就写超长的那批截断（=三段写不全=整发重发，更慢）。
+        /// 要用角色卡 Inspector 里的值就用它自己的值，代码不再插手。
+        /// </summary>
+
         public async Task FirstRequest(string inform, string extra)
         {
             N++;
@@ -2510,7 +3023,7 @@ public class AIAgent : MonoBehaviour
             RefreshSystemPrompt();
 
             last_round_index.Add(history.Count);
-            if (last_round_index.Count > 8) last_round_index.RemoveAt(0);
+            if (last_round_index.Count > k) last_round_index.RemoveAt(0);
             int startTokens = EstimateHistoryTokens(history);
             // 开局这轮：情报（存活状态 / 战况）先给，最后一条 user 才是「赛前放狠话」这条指令。
             // 反过来的话模型容易把最后那条情报当指令，直接复述一遍情报当台词（舞台上就是一句【存活状态】…）。
@@ -2521,10 +3034,23 @@ public class AIAgent : MonoBehaviour
             int roundStartIndex = history.Count;
 
             // 有成功缓存就直接复用（开场白 + 开局规划是**一起**缓存的，两句都得在）
-            if (TryLoadOpeningCache(out DeepSeekMessage cachedSpeech, out DeepSeekMessage cachedAnalysis))
+            if (TryLoadOpeningCache(out DeepSeekMessage cachedSpeech, out DeepSeekMessage cachedAnalysis, out string cachedPolished))
             {
                 history.Add(cachedSpeech);
                 history.Add(cachedAnalysis);   // 规划也放回历史，这一局它一直看得见
+
+                if (!string.IsNullOrWhiteSpace(cachedPolished))
+                {
+                    // 缓存里就带着拟人化过的台词：**直接用，不再发一次拟人化请求**（省那一份 token）
+                    string rewritten = SpeechPolisher.ReplaceSaySegment(cachedSpeech.content, cachedPolished);
+                    if (!string.IsNullOrWhiteSpace(rewritten)) cachedSpeech.content = rewritten;
+                }
+                else
+                {
+                    // 老缓存（或上次拟人化没过）：补一次，然后把优化版写回缓存，下次开局就不用再花了
+                    await HumanizeSay(cachedSpeech);
+                    SaveOpeningCache(cachedSpeech, cachedAnalysis);
+                }
 
                 Say(position, cachedSpeech.content);
 
@@ -2537,12 +3063,15 @@ public class AIAgent : MonoBehaviour
             await UntilGreatRequest(roundStartIndex);   // 这一轮的【我说】会被舞台当开场白播
             DeepSeekMessage speechMsg = GetLastAssistantMessage();
 
-            // ---------- 第二句：长期规划（【我说】留空，只写【分析】；这一句把输出上限抬到 4096）----------
-            // 思考已经全面关掉，所以"想得深"靠的是给足输出预算：这一句专门给长期规划用 4096。
+            // ---------- 第二句：长期规划（【我说】留空，只写【分析】；这一句**开 thinking** + 抬输出上限）----------
+            // 2026-09-22 用户要求：开局这一轮加强成真·深度思考（thinking），并且在提示词里告知
+            // 「thinking 之后会被清空、想好的要留在【分析】里」（AIRequest 发送时会按 thinking 开关清 reasoning_content）。
             int planStartIndex = history.Count;
             history.Add(new DeepSeekMessage("user", OpeningPlanPrompt));
             int normalMaxTokens = request.max_tokens;
-            request.max_tokens = OpeningPlanMaxTokens;
+            ThinkingConfig normalThinking = request.thinking;
+            request.max_tokens = openingPlanMaxTokens;
+            request.thinking = new ThinkingConfig(true);
             try
             {
                 // allowEmptySay：这一句就是"只想不说"（【我说】留空），否则校验会因为没台词打回重写。
@@ -2550,7 +3079,8 @@ public class AIAgent : MonoBehaviour
             }
             finally
             {
-                request.max_tokens = normalMaxTokens;      // 只这一句用 4096
+                request.max_tokens = normalMaxTokens;      // 只这一句用 openingPlanMaxTokens
+                request.thinking = normalThinking;         // 只这一句开 thinking
                 request.tool_choice = "auto";              // 开局结束后恢复自动工具调用
             }
             DeepSeekMessage planMsg = GetLastAssistantMessage();
@@ -2583,7 +3113,7 @@ public class AIAgent : MonoBehaviour
             bool compressed = MaybeCompress();
 
             last_round_index.Add(history.Count);
-            if (last_round_index.Count > 8) last_round_index.RemoveAt(0);
+            if (last_round_index.Count > k) last_round_index.RemoveAt(0);
 
             int startTokens = EstimateHistoryTokens(history);
             history.Add(new DeepSeekMessage("user", inform));
@@ -2787,7 +3317,7 @@ public class AIAgent : MonoBehaviour
                     ["use_prop"] = "使用自己武器栏里的道具（护盾、霰弹、扫射、大球、穿甲等）",
                     ["merge_prop"] = "把两个同种道具合并成一个（数值相加、省一个槽位，免费）",
                     ["ready_action"] = "登记/管理预行动（等条件满足后自动替他执行某个工具）",
-                    ["control_turret"] = "控制自己炮塔瞄准",
+                    ["control_turret"] = "控制自己炮塔瞄准、设置禁射扇区",
                     ["move_turret"] = "移动自己的炮塔（第一次调用只是预览、不会移动，确认后才会真的移动）",
                     ["whisper"] = "给其他 AI 发悄悄话"
                 },
@@ -3037,11 +3567,11 @@ public class AIAgent : MonoBehaviour
             }
         }
         private const string ParenthesisReminder =
-            "[格式提醒] 检测到你上次的回复【我说：】那一段里带了中文或英文括号。下次【我说】里禁止使用任何括号，请严格遵守：\n" +
+            "[格式提醒] 检测到你上次的回复里，【我说】那一段带了中文或英文括号。下次【我说】里禁止使用任何括号，请严格遵守：\n" +
             "1. 纯文本 + emoji，禁用 markdown，不使用括号，不要动作描写。\n" +
             "2. 别露内心戏，别露你的情报。\n" +
             "3. 夸张化地沉浸在角色中，字数限制在 15 字。\n" +
-            "注意：三段里都不要用括号（中英文都不行）。";
+            "注意：这条只管【我说】；【分析】里怎么写都不拦。";
 
         private static readonly char[] ParenthesisChars = { '（', '）', '(', ')' };
 
@@ -3057,7 +3587,7 @@ public class AIAgent : MonoBehaviour
             foreach (DeepSeekMessage message in messages)
             {
                 if (message == null || message.role != "assistant") continue;
-                // 只看【我说】：这里的括号提醒只管台词；【分析】的括号由三段校验单独拦
+                // 只看【我说】：这里的括号提醒只管台词；【分析】里的括号现在完全不卡（校验和提示词都撤了）
                 string say = SayOf(message.content);
                 if (!ContainsParenthesis(say)) continue;
 

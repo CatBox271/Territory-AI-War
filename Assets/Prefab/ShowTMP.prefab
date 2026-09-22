@@ -188,7 +188,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   startScale: 0.15
-  scaleUpTime: 1
+  scaleUpTime: 0.25
   scaleOvershoot: 0.25
   scaleCurve:
     serializedVersion: 2
@@ -215,8 +215,8 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   yTarget: 0
-  driftSpeed: 0.2
+  driftSpeed: 0.8
   driftDelay: 0.1
-  holdTime: 3
-  fadeTime: 1
+  holdTime: 1.5
+  fadeTime: 0.4
   destroyOnFinish: 1

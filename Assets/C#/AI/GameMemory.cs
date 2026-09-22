@@ -378,6 +378,146 @@ public static class GameMemory
         }
     }
 
+    // ==================== 读回（接入「你的上一局」） ====================
+
+    /// <summary>
+    /// 读这个阵营记忆文件里**最新的一段**（最后一个 ===== 分节，也就是上一局）：
+    /// 系统提示「## 九、你的上一局」那段就是拿它来拼的。文件不在 / 是空的返回 ""，
+    /// 这时调用方保持原样（MapConfig.lastGameRecap 里手填的内容仍然有效）。
+    /// </summary>
+    public static string LoadLatestMemory(int stage, string characterName)
+    {
+        try
+        {
+            string path = ResolveMemoryFile(stage, characterName);
+            if (string.IsNullOrEmpty(path)) return "";
+
+            string text = File.ReadAllText(path).Trim();
+            if (text.Length == 0) return "";
+
+            // 只取最后一段：从最后一个行首的 "=====" 开始（文件头那行 "# …长期记忆" 不算一段）
+            int idx = text.LastIndexOf("\n=====", StringComparison.Ordinal);
+            if (idx >= 0) text = text.Substring(idx + 1).Trim();
+            return text;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[终局记忆] 读记忆失败（{stage}号 {characterName}）：{e.Message}");
+            return "";
+        }
+    }
+
+    /// <summary>「你的上一局」没记忆时的兜底文案（和提示词里原来的那句一字不差）。</summary>
+    public const string NoRecapText = "（这是你的第一局，没有上一局可回顾。）";
+
+    /// <summary>
+    /// 给 system 提示「## 九、你的上一局」用：**记忆文件优先**——文件里最新的一段就是上一局，
+    /// 读出来直接返回并写回 MapConfig.lastGameRecap（Inspector 里也看得到，会盖掉手填的那份）。
+    /// 只有文件不存在时，才退回 lastGameRecap 里手填的内容；都没有就 NoRecapText。
+    /// </summary>
+    public static string RecapOrFirstGame(int stage, string characterName)
+    {
+        MapConfig config = MapConfig.Instance;
+
+        // 1) 记忆文件优先
+        string memory = LoadLatestMemory(stage, characterName);
+        if (!string.IsNullOrWhiteSpace(memory))
+        {
+            if (config != null)
+            {
+                if (config.lastGameRecap == null) config.lastGameRecap = new List<string>();
+                while (config.lastGameRecap.Count <= stage - 1) config.lastGameRecap.Add("");
+                config.lastGameRecap[stage - 1] = memory;
+            }
+            Debug.Log($"[终局记忆] 「你的上一局」用 {characterName}（{stage}号）记忆文件里最新的一段：{memory.Length} 字");
+            return memory;
+        }
+
+        // 2) 没有文件：用手填的（如果有）
+        if (config != null && config.lastGameRecap != null &&
+            stage - 1 >= 0 && stage - 1 < config.lastGameRecap.Count &&
+            !string.IsNullOrWhiteSpace(config.lastGameRecap[stage - 1]))
+        {
+            Debug.LogWarning($"[终局记忆] {characterName}（{stage}号）没有记忆文件，暂时用 MapConfig 里手填的那段");
+            return config.lastGameRecap[stage - 1].Trim();
+        }
+
+        Debug.LogWarning($"[终局记忆] {characterName}（{stage}号）既没有记忆文件、MapConfig 里也没手填，按第一局来（找过 {FolderPath} 下的 {stage}号_{SanitizeFileName(characterName)}.txt）");
+        return NoRecapText;
+    }
+
+    /// <summary>
+    /// 把每个阵营记忆文件里最新的一段写进 MapConfig.lastGameRecap——「你的上一局」就这么接上。
+    /// 一局只在开局调一次（AIAgent 第 1 轮）；找不到文件的阵营保持原值，不动手填的那份。
+    /// </summary>
+    public static void LoadLatestIntoLastGameRecap()
+    {
+        try
+        {
+            MapConfig config = MapConfig.Instance;
+            AIAgent agent = AIAgent.Instance;
+            if (config == null)
+            {
+                Debug.LogWarning("[终局记忆] MapConfig.Instance 还是空的，这一轮先接不上「你的上一局」（拼提示词时还会再试一次）");
+                return;
+            }
+            if (agent == null || agent.cards == null || agent.cards.Count == 0) return;
+
+            if (config.lastGameRecap == null) config.lastGameRecap = new List<string>();
+
+            int maxStage = 0;
+            foreach (CharacterCard card in agent.cards)
+                if (card != null && card.position > maxStage) maxStage = card.position;
+            while (config.lastGameRecap.Count < maxStage) config.lastGameRecap.Add("");
+
+            foreach (CharacterCard card in agent.cards)
+            {
+                if (card == null || card.position <= 0 || card.position > config.lastGameRecap.Count) continue;
+
+                string memory = LoadLatestMemory(card.position, card.name);
+                if (string.IsNullOrWhiteSpace(memory))
+                {
+                    Debug.LogWarning($"[终局记忆] {card.name}（{card.position}号）没有找到记忆文件，保持 lastGameRecap 原样（找过 {FolderPath}）");
+                    continue;
+                }
+
+                config.lastGameRecap[card.position - 1] = memory;
+                Debug.Log($"[终局记忆] 已把 {card.name}（{card.position}号）的最新记忆接进「你的上一局」（{memory.Length} 字）");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[终局记忆] 接入「你的上一局」失败：{e}");
+        }
+    }
+
+    /// <summary>找这个阵营的记忆文件：先按 "N号_名字.txt"，再按 "N号.txt"，最后退回该阵营最新的那个文件（改过名也能对上）。</summary>
+    private static string ResolveMemoryFile(int stage, string characterName)
+    {
+        string named = Path.Combine(FolderPath, $"{stage}号_{SanitizeFileName(characterName)}.txt");
+        if (File.Exists(named)) return named;
+
+        string bare = Path.Combine(FolderPath, $"{stage}号.txt");
+        if (File.Exists(bare)) return bare;
+
+        try
+        {
+            if (!Directory.Exists(FolderPath)) return null;
+            string best = null;
+            DateTime bestTime = DateTime.MinValue;
+            foreach (string file in Directory.GetFiles(FolderPath, $"{stage}号_*.txt"))
+            {
+                DateTime t = File.GetLastWriteTime(file);
+                if (best == null || t > bestTime) { best = file; bestTime = t; }
+            }
+            return best;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string LoadApiKey()
     {
         try

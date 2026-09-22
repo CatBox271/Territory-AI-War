@@ -345,6 +345,8 @@ public class DeepSeekResponse
     public class Choice
     {
         public Message message;
+        /// <summary>停下来的原因：stop / length（被 max_tokens 截断）/ tool_calls 等。空回复与截断诊断用。</summary>
+        public string finish_reason;
 
         [System.Serializable]
         public class Message
@@ -407,11 +409,28 @@ public class RequestInfo
     public bool back_tool = true;
 
     /// <summary>
+    /// 这一发是否用**流式接收**（SSE）。默认跟随 <see cref="DeepSeekRequest.stream"/>；
+    /// 主回合由 AIAgent 单独置 true（见 UntilGreatRequest），这样"复制卡片请求"的旁路
+    /// （遗言 / 获奖感言 / 悄悄话 / 升级思考 / 行为检查）仍然走非流式，不受影响。
+    /// </summary>
+    public bool stream;
+
+    /// <summary>
+    /// 流式**增量**校验钩子（由 AIAgent 注入）：每收到一段 delta 就调用一次，传当前已收到的正文。
+    /// 返回非 null（原因文字）= 这份回复**已经不可挽回地不合格**，后面的字再补也救不回来
+    /// → AIRequest 立刻掐断这次生成（不再等剩下的 token），把这条半成品交给
+    /// <see cref="validateAndMaybeRetry"/>，由它点名原因并重发（与流结束后的正常校验同一个出口）。
+    /// 判据必须与最终校验同源（只提前判、不新增规则），否则会造出"最终校验本来会放过、却被提前掐死"的新失败。
+    /// </summary>
+    public Func<string, string> partialFormatProblem;
+
+    /// <summary>
     /// 回复落库/执行工具前的外部校验钩子（由 AIAgent 注入）。
     /// 参数：本次 RequestInfo、候选 assistant 回复、该候选是否已经作为占位消息写入 history。
     /// 返回 true 表示通过并继续流程；返回 false 表示本次响应已由外部处理（重发或报错），AIRequest 停止当前流水线。
+    /// **是异步的**：台词拟人化（SpeechPolisher）要在这一步把【我说】换掉再落库，得等它回来。
     /// </summary>
-    public Func<DeepSeekMessage, bool> validateAndMaybeRetry;
+    public Func<DeepSeekMessage, Task<bool>> validateAndMaybeRetry;
 
     public void AddMessage(List<DeepSeekMessage> message)
     {
@@ -437,6 +456,7 @@ public class RequestInfo
         this.toolkit = toolkit;
         this.back_tool = back_tool;
         this.toolStage = toolStage;
+        this.stream = request != null && request.stream;
     }
 }
 
@@ -733,6 +753,11 @@ public static class AIRequest
         // 保存时只会剩下最后一条思考。
         DeepSeekRequest outgoingRequest = requestInfo.request.DeepCopy();
 
+        // 流式开关以 RequestInfo 为准（主回合 = true），并**同步写进发送副本** ——
+        // 只改 RequestInfo.stream 而忘了这里，payload 里还是 "stream": false，
+        // 服务端会回一整份非流式 JSON，SSE 处理器读不到 "data: " 行 → content 全空 → 每一轮都空回复。
+        outgoingRequest.stream = requestInfo.stream;
+
         // 非 DeepSeek 模型去掉专属/不支持字段
         bool isDeepSeek = outgoingRequest.model.ToLower().Contains("deepseek");
         if (!isDeepSeek)
@@ -759,7 +784,7 @@ public static class AIRequest
         string jsonData = JsonConvert.SerializeObject(outgoingRequest, json_serializer_settings);
 
         //判断流式
-        if (requestInfo.request.stream)
+        if (requestInfo.stream)
         {
             _ = SendStreamAsync(jsonData, requestInfo);
         }
@@ -817,6 +842,15 @@ public static class AIRequest
                 string aiResponse = back_message.content;
                 string after_thinking = back_message.reasoning_content;
 
+                // 空回复 / 被截断：日志里写清 finish_reason 与 reasoning 长度，方便定位（多数是 max_tokens 被 thinking 吃光）
+                if (string.IsNullOrEmpty(aiResponse))
+                    Debug.LogWarning($"[AIRequest] 这一发 content 是空的：finish_reason={response.choices[0].finish_reason}、"
+                        + $"reasoning 长度={(after_thinking != null ? after_thinking.Length : 0)}、"
+                        + $"max_tokens={requestInfo.request.max_tokens}、thinking={requestInfo.request.thinking?.type}");
+                else if (response.choices[0].finish_reason == "length")
+                    Debug.LogWarning($"[AIRequest] 这一发被 max_tokens 截断：finish_reason=length、content 长度={aiResponse.Length}、"
+                        + $"max_tokens={requestInfo.request.max_tokens}");
+
                 var assistant = new DeepSeekMessage()
                 {
                     role = "assistant",
@@ -827,7 +861,7 @@ public static class AIRequest
 
                 // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
                 if (requestInfo.validateAndMaybeRetry != null &&
-                    !requestInfo.validateAndMaybeRetry(assistant))
+                    !await requestInfo.validateAndMaybeRetry(assistant))
                 {
                     request.Dispose();
                     return;
@@ -891,8 +925,16 @@ public static class AIRequest
         Dictionary<int, StringBuilder> toolCallArguments = new Dictionary<int, StringBuilder>();
         Dictionary<int, ToolCall> toolCalls = new Dictionary<int, ToolCall>();
         bool hasToolCalls = false;
+        // 增量校验的结果：一旦为 true，这一份回复已经判死，主循环里立刻 Abort，
+        // 不再等剩下的 token 生成完（这是"流式接收"唯一的收益点）。
+        bool abortedEarly = false;
+        string abortReason = null;
 
-        requestInfo.AddMessage(new DeepSeekMessage() { role = "assistant", reasoning_content = final_thinking.ToString(), content = final_content.ToString() });
+        // 边收边写的那条 assistant 占位消息：delta 直接写进它、也直接写进 history。
+        // 注意：这条是"先落库、后校验"，所以校验没过时必须在 AIAgent 侧按引用把它摘掉
+        // （非流式路径是校验通过才落库，历史里不会留失败尝试）。
+        DeepSeekMessage streamedAttempt = new DeepSeekMessage() { role = "assistant", reasoning_content = final_thinking.ToString(), content = final_content.ToString() };
+        requestInfo.AddMessage(streamedAttempt);
 
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = new StreamDownloadHandler(
@@ -909,6 +951,20 @@ public static class AIRequest
                         {
                             final_content.Append(delta.content);
                             requestInfo.messages[^1].content = final_content.ToString();
+
+                            // 增量校验：只看"已经判死"的错误（判据在 AIAgent.PartialFormatProblem，与最终校验同源）。
+                            // 这里只打标记，真正的 Abort 放在下面的等待循环里 —— 从下载回调里直接掐断容易踩 Unity 的重入。
+                            if (!abortedEarly && requestInfo.partialFormatProblem != null)
+                            {
+                                string problem = requestInfo.partialFormatProblem(final_content.ToString());
+                                if (!string.IsNullOrEmpty(problem))
+                                {
+                                    abortedEarly = true;
+                                    abortReason = problem;
+                                    Debug.LogWarning($"[流式] stage {requestInfo.toolStage}：正文才收到 {final_content.Length} 字就看出不合格（{problem}）"
+                                        + " → 立刻掐断这次生成、直接重发，不再等它写完。");
+                                }
+                            }
                         }
 
                         if (!string.IsNullOrEmpty(delta.reasoning_content))
@@ -964,7 +1020,31 @@ public static class AIRequest
         request.SetRequestHeader("Authorization", $"Bearer {key}");
 
         request.SendWebRequest();
-        while (!request.isDone) await Task.Yield();
+        float abortWaitSeconds = 0f;
+        while (!request.isDone)
+        {
+            if (abortedEarly)
+            {
+                request.Abort();     // 增量校验已判死：这一帧就掐断，别再等剩下的 token
+                // 兜底：个别情况下 Abort 之后 isDone 不翻，就会在这里空转（整轮卡死）。
+                // 这份回复已经判死，最多再等 2 秒就直接走人，交给重发流程。
+                abortWaitSeconds += Time.unscaledDeltaTime;
+                if (abortWaitSeconds > 2f) break;
+            }
+            await Task.Yield();
+        }
+
+        // 被增量校验掐断的：不是网络错误，是"这份回复已经不合格"。
+        // 把它（历史里那条半成品）交给外部校验，由它点名原因 + 打回重发（与流结束后的校验同一个出口）。
+        if (abortedEarly)
+        {
+            if (requestInfo.validateAndMaybeRetry != null)
+                await requestInfo.validateAndMaybeRetry(streamedAttempt);
+            else
+                requestInfo.onError?.Invoke($"流式回复被提前掐断（{abortReason}）但没有校验钩子");
+            request.Dispose();
+            return;
+        }
 
         if (request.result != UnityWebRequest.Result.Success)
         {
@@ -990,7 +1070,7 @@ public static class AIRequest
 
             // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
             if (requestInfo.validateAndMaybeRetry != null &&
-                !requestInfo.validateAndMaybeRetry(assistantMessage))
+                !await requestInfo.validateAndMaybeRetry(assistantMessage))
             {
                 request.Dispose();
                 return;
@@ -1033,7 +1113,7 @@ public static class AIRequest
 
             // 回复校验交给外部（AIAgent）处理；返回 false 表示已拦截或重发，停止本次响应
             if (requestInfo.validateAndMaybeRetry != null &&
-                !requestInfo.validateAndMaybeRetry(assistantMessage))
+                !await requestInfo.validateAndMaybeRetry(assistantMessage))
             {
                 request.Dispose();
                 return;

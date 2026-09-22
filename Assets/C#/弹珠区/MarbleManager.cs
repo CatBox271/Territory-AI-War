@@ -105,6 +105,12 @@ public class MarbleManager : MonoBehaviour
         UpdateEmptySlotUpgrade();
     }
 
+    /// <summary>
+    /// 收尾阶段开关（由 AIAgent.TickSoloWrapUp 置 true、每局开局在 AIAgent.StartCycle 里复位）：
+    /// 置上之后空槽升级进度不再累加、也不会再弹升级三选一（这一局已经定了，升级没有意义）。
+    /// </summary>
+    public static bool UpgradesStopped;
+
     /// <summary>空槽升级进度：AI 模式按空槽数累计；非 AI 模式每个弹珠固定每秒 +1。</summary>
     private void UpdateEmptySlotUpgrade()
     {
@@ -137,6 +143,8 @@ public class MarbleManager : MonoBehaviour
     private void AdvanceUpgrade(int stage, float gain)
     {
         if (gain <= 0f) return;
+        // 收尾阶段（只剩一家 + 场上没威胁 + 过了 3 轮）：停升级——进度不再涨、也不再弹三选一。
+        if (UpgradesStopped) return;
 
         if (!upgradeProgress.ContainsKey(stage))
         {
@@ -279,6 +287,21 @@ public class MarbleManager : MonoBehaviour
         turret = turretUpgradeCount.TryGetValue(stage, out int t) ? t : 0;
         shield = shieldUpgradeCount.TryGetValue(stage, out int s) ? s : 0;
         return aiStages.Contains(stage) || marble + turret + shield > 0;
+    }
+
+    /// <summary>某阵营当前还活着的弹珠数（升级三选一里写"当前 → 升级后"要用）。</summary>
+    public int GetMarbleCount(int stage)
+    {
+        if (teamMarbleObs == null || stage <= 0 || stage >= teamMarbleObs.Length) return 0;
+        List<GameObject> list = teamMarbleObs[stage];
+        if (list == null) return 0;
+        int count = 0;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            if (list[i] == null) { list.RemoveAt(i); continue; }
+            count++;
+        }
+        return count;
     }
 
     /// <summary>炮塔/护盾升级：从升级槽连线到炮塔，线到后再应用升级并弹上升文本。</summary>

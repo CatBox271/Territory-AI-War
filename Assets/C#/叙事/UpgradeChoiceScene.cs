@@ -311,26 +311,27 @@ public class UpgradeChoiceScene : StoryScene
         {
             case 1:
             {
-                uint exp = MarbleManager.Instance != null ? MarbleManager.Instance.startValueExponent : 10u;
-                string val = HugeInt.Pow(2, (int)exp).ToShortString(true);
-                return "立即生成\n<color=#FFFFFF>两枚新弹珠</color> " + Num(val)
-                     + "\n\n长期弹珠资源与\n倍乘收益更厚";
+                int now = MarbleManager.Instance != null ? MarbleManager.Instance.GetMarbleCount(owner) : 0;
+                return "弹珠数 " + Num(now + " → " + (now + 2) + " 颗")
+                     + "\n\n道具全靠弹珠产出";
             }
             case 2:
             {
                 float radius = t != null ? t.upgradedBulletRadiusScale : 1.7f;
                 float impact = t != null ? t.upgradedBulletImpactScale : 1.6f;
-                float move = t != null ? t.moveRangePerLevel : 2f;
-                return "子弹显示半径 " + Num("×" + radius.ToString("0.##")) + "\n"
-                     + "打大球动量 " + Num("×" + impact.ToString("0.##")) + "\n"
+                float move = t != null ? t.moveRangePerLevel : 1f;
+                float speed = t != null ? t.moveSpeedPerLevel : 0.1f;
+                return "最大移动距离 " + Num("+" + move.ToString("0.##")) + "\n"
+                     + "移动速度 " + Num("+" + speed.ToString("0.##") + "/秒") + "\n"
                      + "护卫极限转速 " + Num("×" + Towel.GuardSpeedPerLevel.ToString("0.##")) + "\n"
-                     + "最大移动距离 " + Num("+" + move.ToString("0.##")) + "\n"
-                     + "瞄准误差 " + Num(ReactionSystem.BaseAimAngleError.ToString("0.#") + "°") + " 每级减半";
+                     + "子弹半径 " + Num("×" + radius.ToString("0.##")) + "／大球动量 " + Num("×" + impact.ToString("0.##"));
             }
             default:
             {
-                float sec = t != null ? t.shieldBreakInvincibleTime : 2f;
-                return "护盾破碎后炮塔\n<color=#FFFFFF>无敌时间+ " + Num(sec.ToString("0.#") + " 秒") + "</color>"
+                // 第 N 级无敌 = 基准 / 4^(N-1)：卡片写「当前 → 升级后」（越往上每级给的时间越少）
+                float now = t != null ? t.ShieldInvincibleTimeAt(t.shieldUpgradeOwned) : 0f;
+                float next = t != null ? t.ShieldInvincibleTimeAt(t.shieldUpgradeOwned + 1) : 0f;
+                return "护盾破碎后炮塔\n<color=#FFFFFF>无敌时间 " + Num(now.ToString("0.##") + " → " + next.ToString("0.##") + " 秒") + "</color>"
                      + "\n\n无视敌方子弹\n与大球伤害";
             }
         }
