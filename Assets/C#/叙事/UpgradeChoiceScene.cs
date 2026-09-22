@@ -328,7 +328,7 @@ public class UpgradeChoiceScene : StoryScene
             }
             default:
             {
-                // 第 N 级无敌 = 基准 / 4^(N-1)：卡片写「当前 → 升级后」（越往上每级给的时间越少）
+                // 每次升级累加 基准/2^N（N 从 0 开始）：卡片写「当前 → 升级后」（新增的一份逐级减半、总时长封顶 2 倍基准）
                 float now = t != null ? t.ShieldInvincibleTimeAt(t.shieldUpgradeOwned) : 0f;
                 float next = t != null ? t.ShieldInvincibleTimeAt(t.shieldUpgradeOwned + 1) : 0f;
                 return "护盾破碎后炮塔\n<color=#FFFFFF>无敌时间 " + Num(now.ToString("0.##") + " → " + next.ToString("0.##") + " 秒") + "</color>"

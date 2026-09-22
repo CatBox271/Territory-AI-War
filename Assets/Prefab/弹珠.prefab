@@ -242,20 +242,20 @@ MonoBehaviour:
     - serializedVersion: 3
       time: 19.906748
       value: 0.4537124
-      inSlope: 0.01480685
-      outSlope: 0.01480685
+      inSlope: 0.025937432
+      outSlope: 0.025937432
       tangentMode: 0
       weightedMode: 0
       inWeight: 0.2621967
-      outWeight: 0.14672518
+      outWeight: 0.12242215
     - serializedVersion: 3
       time: 35.05627
-      value: 0.8878719
-      inSlope: 0.05281412
-      outSlope: 0.05281412
+      value: 0.75
+      inSlope: 0.009736359
+      outSlope: 0.009736359
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.11035678
+      inWeight: 0.27331516
       outWeight: 0.33333334
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -268,7 +268,7 @@ MonoBehaviour:
   stuckBounceMinY: 3
   stuckBounceMaxY: 8
   shrinkThreshold: 15
-  shrinkRate: 0.0125
+  shrinkRate: 0.00625
   minShrinkScale: 0.075
 --- !u!114 &6891342313085790704
 MonoBehaviour:

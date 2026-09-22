@@ -36,6 +36,13 @@ public class BallPainter : MonoBehaviour, IStageValue
     public CurveTransform Brightness;
     public float BrightnessTimes = 1;
 
+    [Header("和子弹的动能合并")]
+    [Tooltip("子弹打到大球时，把子弹的动能并进来多少（完全非弹性碰撞 V' = V球 + k*(V弹 − V球) 里再乘这个系数）。\n" +
+             "1 = 初始口径（照原来那样按质量比 k 被子弹带走速度、会被子弹推着/弹飞）；\n" +
+             "越大越容易被子弹带偏（>1 = 偏转更猛）；\n" +
+             "0 = **完全不和子弹发生动能合并** —— 子弹打上来不会让它偏移，伤害照常结算（穿甲弹用这个）。")]
+    public float bulletImpactFactor = 1f;
+
     private TerritoryCanvas canvas;
     private MapConfig config;
     private Vector2 lastWorldPos;

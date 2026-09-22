@@ -137,7 +137,7 @@ public static class SpeechPolisher
         return content.Substring(0, bodyStart) + newSay + content.Substring(end);
     }
 
-    /// <summary>把模型返回的东西洗成「一句台词」：去思考块、去引号、去【】、折掉换行。</summary>
+    /// <summary>把模型返回的东西洗成「一句台词」：去思考块、去引号、去【】、去掉它自己乱写的 [emo:xxx]、折掉换行。</summary>
     private static string Sanitize(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
@@ -147,6 +147,10 @@ public static class SpeechPolisher
         s = s.Trim().Trim('"', '\'', '“', '”', '‘', '’', '「', '」', '『', '』', ' ');
         s = s.Replace("【", "").Replace("】", "");   // 括号会破坏三段格式的解析，直接拿掉
         s = SayPrefixRegex.Replace(s, "");          // 模型偶尔自己带一个「我说：」前缀
+        // [emo:xxx] 是系统自己的表情记号：发出去之前已经剔掉了（见 PolishAsync 里的 plain），
+        // 模型**不该看到、也不该写**；它万一自己写了一个，这里再剔一次 ——
+        // 只认原句那一个、由 PolishAsync 在末尾原样贴回，绝不让模型碰它。
+        s = EmoTagRegex.Replace(s, "");
         s = SpaceRegex.Replace(s, " ").Trim();
         return s;
     }
@@ -157,20 +161,21 @@ public static class SpeechPolisher
     ///   ① 内容逐字节稳定 → 平台的前缀缓存（prompt caching）能命中，那段 oc + 规则的输入按缓存价算、首字也更快；
     ///   ② 不再每次调用都重拼一遍（一次请求省几微秒，但主要是为了让缓存一定命中）。
     /// key 用 oc 原文参与，所以改了角色卡自然就是新的一条，不会拿错别人的头；
-    /// **会晤的对方名字（counterpartName）也要进 key** —— 不然跟不同人谈的两套头会互相串。
+    /// **会晤的对方名字（counterpartName）和当众台词的字数上限（sayMaxChars）也要进 key** ——
+    /// 不然跟不同人谈、或者 15 字与 25 字两套口径，会共用同一份头互相串。
     /// </summary>
     private static readonly Dictionary<string, string> headerCache = new();
 
-    public static string HeaderFor(string name, string oc, string otherNames, PolishMode mode = PolishMode.Public, string counterpartName = null)
+    public static string HeaderFor(string name, string oc, string otherNames, PolishMode mode = PolishMode.Public, string counterpartName = null, int sayMaxChars = 0)
     {
         string tag = mode == PolishMode.Whisper ? "W" : (mode == PolishMode.LastWords ? "L" : "P");
-        string key = (name ?? "") + "\u0001" + (otherNames ?? "") + "\u0001" + tag + "\u0001" + (oc ?? "") + "\u0001" + (counterpartName ?? "");
+        string key = (name ?? "") + "\u0001" + (otherNames ?? "") + "\u0001" + tag + "\u0001" + (oc ?? "") + "\u0001" + (counterpartName ?? "") + "\u0001" + sayMaxChars;
         if (headerCache.TryGetValue(key, out string cached)) return cached;
 
-        string built = BuildSystem(name, oc, otherNames, mode, counterpartName);
+        string built = BuildSystem(name, oc, otherNames, mode, counterpartName, sayMaxChars);
         headerCache[key] = built;
         if (LogRequests)
-            Debug.Log($"{Stamp()} {name} 消息头已缓存（{ModeName(mode)}{(string.IsNullOrWhiteSpace(counterpartName) ? "" : "·对" + counterpartName)} {built.Length} 字，之后每次都原样复用，方便平台前缀缓存命中）");
+            Debug.Log($"{Stamp()} {name} 消息头已缓存（{ModeName(mode)}{(string.IsNullOrWhiteSpace(counterpartName) ? "" : "·对" + counterpartName)}{(mode == PolishMode.Public && sayMaxChars > 0 ? "·" + sayMaxChars + "字" : "")} {built.Length} 字，之后每次都原样复用，方便平台前缀缓存命中）");
         return built;
     }
 
@@ -218,7 +223,7 @@ public static class SpeechPolisher
     /// 后来又按用户要求：(a) **撤掉人名护栏**（只靠提示词）、(b) 会晤那一档额外提供对方名字。
     /// 脚本：DSH草稿区\polish-prompt-ab.mjs、polish-live-verify.mjs
     /// </summary>
-    private static string BuildSystem(string name, string oc, string otherNames, PolishMode mode, string counterpartName = null)
+    private static string BuildSystem(string name, string oc, string otherNames, PolishMode mode, string counterpartName = null, int sayMaxChars = 0)
     {
         var sb = new StringBuilder();
 
@@ -253,7 +258,17 @@ public static class SpeechPolisher
         }
         else
         {
-            sb.Append("7. 这是**当众说出口**的一句台词：长度跟原句差不多（不要明显变长，也别缩成冷淡的一句话）；口癖、语气词、称呼该加就加，但不许多说新信息。");
+            // 当众台词：**顺手把超长的压回字数上限**（2026-09-22 用户："AI会超字数啊" + "2的回写会修复这个习惯"）。
+            // 实测【我说】中位 25 字、76% 超过 15 字、最长 102 字（超长的几乎都是把"行动计划"当台词说：
+            // 登记预行动、打哪颗球、腾空槽、报坐标）。校验层硬卡会让七成回合打回重发，太贵；
+            // 所以在改写这一层浓缩 —— 改写结果会回写进 content，落库/飘字/下一轮情报都是浓缩版，
+            // AI 自己历史里也都是短台词，下一轮自然不容易再写长。
+            if (sayMaxChars > 0)
+                sb.Append($"7. 这是**当众说出口**的一句台词：**{sayMaxChars} 字以内**。" +
+                          $"原句超过 {sayMaxChars} 字就**浓缩**到 {sayMaxChars} 字以内 —— 保留它的意思、态度和该点的人名，" +
+                          "砍掉解释、罗列、行动计划、坐标和数值；原句本来就没超就正常改写。口癖、语气词该留就留。");
+            else
+                sb.Append("7. 这是**当众说出口**的一句台词：长度跟原句差不多（不要明显变长，也别缩成冷淡的一句话）；口癖、语气词、称呼该加就加，但不许多说新信息。");
         }
         return sb.ToString();
     }
@@ -276,9 +291,15 @@ public static class SpeechPolisher
     /// name = 说话人名字，oc = 角色卡设定，want = 这一轮的【我要】，say = 【我说】原文，otherNames = 场上其他人的名字。
     /// counterpartName = **秘密会晤的对方名字**（只有 mode = Whisper 时用；2026-09-22 用户："只是在会晤的时候额外提供对方名字"）：
     /// 会晤是一对一的，把对面是谁告诉模型，它才不会把交谈对象写成在场别的人。
+    /// sayMaxChars = **这一句当众台词的字数上限**（只有 mode = Public 用；0 = 不在提示词里写字数要求）。
+    /// 2026-09-22 用户："AI会超字数啊" —— 实测【我说】中位 25 字、76% 超过规则写的 15 字、最长 102 字，
+    /// 而校验层硬卡会让七成回合打回重发（太贵）。所以改成**在这一层顺手浓缩**：
+    /// 提示词里要求"原句超过就浓缩到 N 字以内（保留意思与情报）"，改写结果会**回写进 content**，
+    /// 落库 / 飘字 / 消息列表 / 下一轮给对手读的【上一轮发言】用的都是浓缩版 ——
+    /// 于是 AI 自己的历史里也都是短台词，下一轮不容易再写长（用户："2的回写会修复这个习惯"）。
     /// 开关关掉 / 没 key / 失败 / 超时 / 返回空 → 原样返回 say。
     /// </summary>
-    public static async Task<string> PolishAsync(string name, string oc, string want, string say, string otherNames, PolishMode mode = PolishMode.Public, string counterpartName = null)
+    public static async Task<string> PolishAsync(string name, string oc, string want, string say, string otherNames, PolishMode mode = PolishMode.Public, string counterpartName = null, int sayMaxChars = 0)
     {
         string original = say ?? "";
         if (string.IsNullOrWhiteSpace(original)) return original;
@@ -324,7 +345,7 @@ public static class SpeechPolisher
             ["model"] = Model,
             ["messages"] = new JArray
             {
-                new JObject { ["role"] = "system", ["content"] = HeaderFor(name, oc, otherNames, mode, counterpartName) },
+                new JObject { ["role"] = "system", ["content"] = HeaderFor(name, oc, otherNames, mode, counterpartName, sayMaxChars) },
                 new JObject { ["role"] = "user", ["content"] = BuildUser(want, plain) },
             },
             ["temperature"] = Temperature,
@@ -394,6 +415,18 @@ public static class SpeechPolisher
                 //      它知道这一段是说给谁听的，就不会把对象写成在场别的人。
                 // 代价（已知并接受）：提示词管不住时，屏幕上可能出现"叫错人"的台词 —— 那属于模型侧的问题，
                 // 不再由代码替它兜；实在要收紧就改提示词或把这一档关掉（MapConfig.humanizeSpeech）。
+                // 当众台词浓缩后还是超字数：不截断（按项目口径不替模型捞），只记一笔，
+                // 方便从日志统计"浓缩到底管不管用"。
+                if (mode == PolishMode.Public && sayMaxChars > 0 && polished.Length > sayMaxChars)
+                {
+                    // 第一遍压不下来 → 再来一发**专门压缩**（见 CompressSayAsync 的注释：
+                    // 把压缩要求塞进改写提示词里基本压不动，单独的压缩提示词 6/6 都能压到上限内）。
+                    string shorter = await CompressSayAsync(name, oc, polished, sayMaxChars);
+                    if (!string.IsNullOrEmpty(shorter) && shorter.Length < polished.Length)
+                        polished = shorter;
+                    if (polished.Length > sayMaxChars)
+                        Debug.LogWarning($"{Stamp()} {name} 台词压缩后仍超字数：{polished.Length} 字 > 上限 {sayMaxChars} 字（原句 {plain.Length} 字）→ 照原样用，不截断。改写：{polished}");
+                }
                 if (!string.IsNullOrEmpty(emoTag)) polished += " " + emoTag;
 
                 if (LogRequests)
@@ -407,6 +440,97 @@ public static class SpeechPolisher
             sw.Stop();
             Debug.LogWarning($"{name} 拟人化异常（{sw.ElapsedMilliseconds}ms）：{e.Message}；这一句用原句");
             return original;
+        }
+    }
+
+    #endregion
+
+    #region 超字数时的第二遍：专门压缩
+
+    /// <summary>
+    /// 压缩器的系统提示：只干"压到 N 字"这一件事。
+    /// 实测：把压缩要求塞进原来那套改写提示词里**压不动**（6 条真实超长台词 0/6，有的改写后还更长）；
+    /// 换成这个专一短提示词，6/6 都压到 15 字以内，而且读起来还像角色在说话
+    /// （「盾软软的，挠不动的嘛～」「谁先动谁先疼哦～☆」「露水先醒醒神☆」）。
+    /// </summary>
+    private static string BuildCompressSystem(string name, string oc, int limit)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(oc)) sb.Append(oc.Trim()).Append("\n\n");
+        sb.Append($"你是台词压缩器。把给你的那句台词，用「{name}」的口吻压到 **{limit} 字以内**，只输出压缩后那一句，不要任何解释。\n");
+        sb.Append("1. 只保留说给别人听的部分：一句态度或情绪 + 这个角色的口癖/语气词（可以带对方名字）。\n");
+        sb.Append("2. 下面这些**全部删掉**：行动计划、登记/预行动、道具名、第几格、道具词（大球/穿甲/护盾这类）、方向、坐标、数字、能量、腾空槽、「我先把…登记一下」这种交代。\n");
+        sb.Append("3. 不许新增原句没有的人名、承诺、数字。\n");
+        sb.Append($"4. 宁可短，不许超：超过 {limit} 字算没完成。");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 当众台词超字数时的第二发：拿专一的压缩提示词再压一次（失败/拿不到东西返回 ""，调用方保留第一遍结果）。
+    /// 这就是 2026-09-22 用户定的"2"：**在拟人化这一层浓缩**，不硬卡不打回；
+    /// 压缩结果会和第一遍一起回写进 content，落库/飘字/下一轮情报/AI 自己的历史全是短台词。
+    /// </summary>
+    private static async Task<string> CompressSayAsync(string name, string oc, string say, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(say)) return "";
+        if (!HasKey) return "";
+
+        var payload = new JObject
+        {
+            ["model"] = Model,
+            ["messages"] = new JArray
+            {
+                new JObject { ["role"] = "system", ["content"] = BuildCompressSystem(name, oc, limit) },
+                new JObject { ["role"] = "user", ["content"] = "【我说】" + say.Trim() },
+            },
+            ["temperature"] = 1.0,
+            ["max_tokens"] = 200,
+            ["stream"] = false,
+            ["thinking"] = new JObject { ["type"] = "disabled" },
+        };
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using (var request = new UnityWebRequest(ApiUrl, "POST"))
+            {
+                request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload.ToString(Formatting.None)));
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.SetRequestHeader("Authorization", $"Bearer {Key}");
+                if (TimeoutSeconds > 0) request.timeout = TimeoutSeconds;
+
+                request.SendWebRequest();
+                while (!request.isDone) await Task.Yield();
+                sw.Stop();
+
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    Debug.LogWarning($"{Stamp()} {name} 台词压缩失败（{sw.ElapsedMilliseconds}ms）：{Describe(request)}；保留第一遍的改写");
+                    return "";
+                }
+
+                string body = request.downloadHandler != null ? request.downloadHandler.text : "";
+                string content;
+                try { content = JObject.Parse(body)["choices"]?[0]?["message"]?["content"]?.Value<string>(); }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"{Stamp()} {name} 台词压缩返回解析失败（{sw.ElapsedMilliseconds}ms）：{e.Message}；原文：{Head(body, 300)}");
+                    return "";
+                }
+
+                string compressed = Sanitize(content);
+                if (string.IsNullOrWhiteSpace(compressed)) return "";
+                if (LogRequests)
+                    Debug.Log($"{name} 台词压缩（{sw.ElapsedMilliseconds}ms）{say.Trim().Length} 字 → {compressed.Length} 字：「{compressed}」");
+                return compressed;
+            }
+        }
+        catch (Exception e)
+        {
+            sw.Stop();
+            Debug.LogWarning($"{name} 台词压缩异常（{sw.ElapsedMilliseconds}ms）：{e.Message}；保留第一遍的改写");
+            return "";
         }
     }
 

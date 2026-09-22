@@ -229,6 +229,19 @@ public class AIAgent : MonoBehaviour
     /// <summary>取【我要】：这一轮打算做什么。</summary>
     public static string WantOf(string content) => Segment(content, "我要") ?? "";
 
+    /// <summary>
+    /// 当众【我说】的字数上限（常规回合）。2026-09-22 用户："AI会超字数啊"。
+    /// 实测（四张真卡落库的 21 条【我说】）：中位 25 字、76% 超过 15 字、最长 102 字 ——
+    /// 一句话：规则写了 15 字，但**校验里没有字数检查**，模型又不听提示词。
+    /// 用户定的解法："2"（在拟人化那一层顺手浓缩，不硬卡不打回）+"2的回写会修复这个习惯"
+    /// （改写结果会回写进 content，落库/飘字/下一轮情报都是短台词，AI 自己历史里也就都短了）。
+    /// 所以这个数只喂给 SpeechPolisher 的提示词，**不参与三段校验**。
+    /// </summary>
+    public const int SayMaxChars = 15;
+
+    /// <summary>赛前狠话那一句的例外上限（and 其它回合仍是 15）。见 RunAICycle 里 cycle_start 的提示词。</summary>
+    public const int OpeningTauntSayMaxChars = 25;
+
     /// <summary>【我说】那段去掉 [emo:xxx] 之后的字数（15 字限制按这个算）。</summary>
     public static int SayLength(string content)
     {
@@ -368,6 +381,15 @@ public class AIAgent : MonoBehaviour
     [Tooltip("输出图片边长（像素）。太小看不清炮塔，太大费 token")]
     public int moveSightResolution = 512;
 
+    [Header("【临时调试】强制定时拍视野图")]
+    [Tooltip("打开就每隔一段时间给每座存活炮塔拍一张视野图，存到 persistentDataPath/MoveShots/" +
+             "（**只存盘给你看，不发给 AI、不占 token**）—— 不用等 AI 自己去用 move_turret 预览。看完调完就关掉。")]
+    public bool forceSightShots = true;
+    [Tooltip("【临时调试】多久拍一轮（秒）")]
+    public float forceSightIntervalSeconds = 10f;
+    [Tooltip("【临时调试】只拍这个阵营（0 = 全部存活炮塔）")]
+    public int forceSightStage = 0;
+
     [Header("上下文压缩：DeepSeek 未命中/命中 输入价差")]
     [Tooltip("缓存未命中输入价 ÷ 缓存命中输入价。官方 2026-09-10 起：空闲 1÷0.02 = 50，高峰 2÷0.04 = 50")]
     public float priceRatio = 50f;
@@ -444,7 +466,60 @@ public class AIAgent : MonoBehaviour
         CapturePause.Tick();
         // 预行动：每帧轮询条件，满足就替 AI 执行（没有预行动时它自己会秒退）
         ReadyActionManager.Tick();
+        // 【临时调试】定时拍视野图（forceSightShots 关着就直接 return）
+        ForceSightTick();
         StartCycle();
+    }
+
+    private float forceSightTimer;
+    private bool forceSightLogged;
+
+    /// <summary>
+    /// 【临时调试】按固定间隔给炮塔拍视野图，存到 persistentDataPath/MoveShots（**不发给 AI、不占 token**）。
+    /// 用户 2026-09-22："还有临时强制每个一段时间拍照。让我不用等AI随机用"。
+    /// 拍的就是 move_turret 预览那一套图（半径 = 该塔最大移动距离 × MapConfig.moveSightRadiusFactor），
+    /// 所以看到什么就是 AI 预览时能看到什么。关掉：Inspector 上把 forceSightShots 取消勾选。
+    ///
+    /// **坑（2026-09-22，用户："你妈的每10s截图截在哪？！"）**：第一版这里写了 `if (!_isRunning) return;`，
+    /// 而 `_isRunning` 只在 StartCycle 的「录制中」分支里被置 true —— 不录制时它**永远是 false**，
+    /// 于是这个功能一声不响地从不执行（文件夹一直是空的、日志里一个字都没有）。
+    /// 现在只判"场上还有活着的炮塔"，并且开启时打一行日志说明存到哪、文件名长什么样。
+    /// </summary>
+    private void ForceSightTick()
+    {
+        if (!forceSightShots || forceSightIntervalSeconds <= 0f)
+        {
+            forceSightLogged = false;
+            return;
+        }
+        if (Towel.AllTowel.Count == 0) return;         // 还没建出炮塔（开局演出之前）
+
+        if (!forceSightLogged)
+        {
+            forceSightLogged = true;
+            Debug.Log($"[强制视野截图] 已开启：每 {forceSightIntervalSeconds:0.#} 秒给存活炮塔各拍一张，存到 "
+                + Path.Combine(Application.persistentDataPath, MoveSightCapture.FolderName)
+                + "（文件名以 auto_ 开头，和 AI 自己预览拍的分得开）");
+        }
+
+        forceSightTimer -= Time.unscaledDeltaTime;
+        if (forceSightTimer > 0f) return;
+        forceSightTimer = forceSightIntervalSeconds;
+
+        int ok = 0;
+        foreach (var kv in Towel.AllTowel)
+        {
+            Towel t = kv.Value;
+            if (t == null || t.isDead) continue;
+            if (forceSightStage > 0 && t.stage != forceSightStage) continue;
+
+            MoveSightCapture.Shot shot = MoveSightCapture.Capture(t, t.stage, "auto");
+            if (shot != null && shot.ok) ok++;
+            else Debug.LogWarning($"[强制视野截图] {GetStageName(t.stage)} 失败：{shot?.error}");
+        }
+        if (ok > 0)
+            Debug.Log($"[强制视野截图] 已拍 {ok} 张（间隔 {forceSightIntervalSeconds:0.#}s）→ "
+                + Path.Combine(Application.persistentDataPath, MoveSightCapture.FolderName));
     }
 
     /// <summary>当前全局回合数（情报里要显示；预行动也用它做轮次口径）。</summary>
@@ -1080,8 +1155,9 @@ public class AIAgent : MonoBehaviour
         float aimNow = ReactionSystem.BaseAimAngleError / Mathf.Pow(ReactionSystem.AimErrorShrinkPerLevel, turretLevel);
         float aimNext = aimNow / ReactionSystem.AimErrorShrinkPerLevel;
 
-        // 护盾强化的无敌时长：第 N 级 = 基准 / 4^(N-1)（1 级 10 秒、2 级 2.5、3 级 0.625…，见 Towel.ShieldInvincibleTimeAt）
-        float ShieldInvincibleAt(int level) => level <= 0 ? 0f : shieldInvincible / Mathf.Pow(4f, level - 1);
+        // 护盾强化的无敌时长：**每次升级累加 基准/2^N，N 从 0 开始**（第 1 次 +基准、第 2 次 +基准/2…），
+        // 总和 = 基准 × (2 − 2^(1−level))：1 级 1 倍基准、2 级 1.5 倍、3 级 1.75 倍…上限趋近 2 倍（20 秒）。
+        float ShieldInvincibleAt(int level) => level <= 0 ? 0f : shieldInvincible * (2f - Mathf.Pow(2f, 1f - level));
         float shieldNow = ShieldInvincibleAt(shieldOwned);
         float shieldNext = ShieldInvincibleAt(shieldOwned + 1);
 
@@ -1093,7 +1169,7 @@ public class AIAgent : MonoBehaviour
         sb.AppendLine("选择本次升级（只能选一项）。三个选项加厚的东西不同，按你这一局的流派和当前缺什么来选：");
         sb.AppendLine($"1. 额外弹珠：你的弹珠 {marbleNow} 颗 → {marbleNow + 2} 颗。道具只从弹珠来——每颗弹珠各自滚、各自撞道具区产出一个等值道具，弹珠越多、同一时间产出的道具越多。新弹珠起手 {HugeInt.Pow(2, (int)marbleExponent).ToShortString(true)}，产出一次之后就和其它弹珠一样从倍乘区重新滚。可叠加。");
         sb.AppendLine($"2. 炮塔强化：最大移动距离 {maxMove:0.00} → {maxMove + movePerLevel:0.00}、移动速度 {moveSpeedNow:0.00} → {moveSpeedNow + moveSpeedPerLevel:0.00}/秒、自动护卫极限转速 ×{guardNow:0.##} → ×{guardNext:0.##}（自动拦截来袭子弹的转速）、子弹显示半径 ×{radiusNow:0.##} → ×{radiusNext:0.##}、打大球动量 ×{impactNow:0.##} → ×{impactNext:0.##}（霰弹这类散射子弹同样受益）、道具瞄准误差 {aimNow:0.#}° → {aimNext:0.#}°。可叠加。");
-        sb.AppendLine($"3. 护盾强化：护盾破碎后炮塔无敌（**第 N 级 = {shieldInvincible:0.#} / 4 的 N−1 次方 秒**：1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒、3 级 {ShieldInvincibleAt(3):0.##} 秒…；你现在 {shieldOwned} 级 → 破盾后 {shieldNow:0.##} 秒，再升一级 → {shieldNext:0.##} 秒），期间受到的伤害全部归零。等级是**永久**的：升过之后每一次盾破都会开这个窗口，不是攒着只用一次；而**升级机会什么时候来不由你定**（空槽升级进度攒满才会问你，而且弹出来就得当场三选一、没有「留着以后再说」），所以「等盾快破了再点它」做不到——盾破那一刻不一定正好有升级机会。穿甲弹只按比例啃盾、不破盾，开不了这个窗口。");
+        sb.AppendLine($"3. 护盾强化：护盾破碎后炮塔无敌（**每次升级累加 {shieldInvincible:0.#} / 2 的 N 次方 秒**：N 从 0 开始，第 1 次加 {shieldInvincible:0.#} 秒、第 2 次加 {shieldInvincible / 2:0.##} 秒、第 3 次加 {shieldInvincible / 4:0.##} 秒…；累计 1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒、3 级 {ShieldInvincibleAt(3):0.##} 秒…，上限趋近 {shieldInvincible * 2:0.#} 秒；你现在 {shieldOwned} 级 → 破盾后 {shieldNow:0.##} 秒，再升一级 → {shieldNext:0.##} 秒），期间受到的伤害全部归零。等级是**永久**的：升过之后每一次盾破都会开这个窗口，不是攒着只用一次；而**升级机会什么时候来不由你定**（空槽升级进度攒满才会问你，而且弹出来就得当场三选一、没有「留着以后再说」），所以「等盾快破了再点它」做不到——盾破那一刻不一定正好有升级机会。穿甲弹只按比例啃盾、不破盾，开不了这个窗口。");
         sb.AppendLine("输出要求：必须写成三段（段名与冒号照抄；**格式是「【分析：」+ 内容 +「】」，收尾的「】」放在内容最后、不许紧跟在冒号后面**）——");
         sb.AppendLine("第一段【分析】：用第一人称直接写内心独白，说清你为什么选它（格式硬要求，不合格会被打回重写）；");
         sb.AppendLine("第二段【我要】：写你这次的升级选择；第三段【我说】：当众那句（15 字以内、不许括号，没有就留空）；");
@@ -1272,8 +1348,10 @@ public class AIAgent : MonoBehaviour
         }
 
         words = ExtractEmotion(words, out _, out _).Trim();
-        // 拟人化：获奖感言/宣告也过一遍（说出口之前等它回来；失败/超时就用原句）
-        words = await SpeechPolisher.PolishAsync(card.name, card.oc, "", words, AIAgent.AllStageNamesText);
+        // 拟人化：获奖感言/宣告也过一遍（说出口之前等它回来；失败/超时就用原句）；
+        // 字数上限按当众台词那档（SayMaxChars）一起传下去，超长的会在这一层浓缩。
+        words = await SpeechPolisher.PolishAsync(card.name, card.oc, "", words, AIAgent.AllStageNamesText,
+            SpeechPolisher.PolishMode.Public, null, SayMaxChars);
         if (string.IsNullOrWhiteSpace(words)) words = final ? "赢到最后的，是我。" : "剩下的，只有我了。";
 
         try
@@ -1666,8 +1744,9 @@ public class AIAgent : MonoBehaviour
     [System.Serializable]
     public class CharacterCard
     {
-        /// <summary>护盾强化的「1 级无敌秒数」基准：现取 Towel.prefab 上的值（改平衡不用两头改）。
-        /// 第 N 级的实际无敌时长 = 基准 / 4^(N-1)，见 Towel.ShieldInvincibleTimeAt。</summary>
+        /// <summary>护盾强化的基准值：现取 Towel.prefab 上的值（改平衡不用两头改）。
+        /// **每次升级累加 基准 / 2^N（N 从 0 开始）**，总和 = 基准 × (2 − 2^(1−level))，
+        /// 见 Towel.ShieldInvincibleTimeAt。</summary>
         private float ShieldInvincibleBase =>
             Towel.AllTowel.TryGetValue(position, out Towel t) && t != null ? t.shieldBreakInvincibleTime : 10f;
 
@@ -1675,11 +1754,12 @@ public class AIAgent : MonoBehaviour
         private int ShieldUpgradeLevel =>
             Towel.AllTowel.TryGetValue(position, out Towel t) && t != null ? Mathf.Max(0, t.shieldUpgradeOwned) : 0;
 
-        /// <summary>第 level 级护盾强化的破盾无敌时长（秒）：基准 / 4^(level-1)。</summary>
+        /// <summary>第 level 级护盾强化的破盾无敌时长（秒）：基准 × (2 − 2^(1−level))
+        /// —— 等价于"每次升级累加 基准/2^N、N 从 0 开始"（10 / 15 / 17.5…趋近 2×基准）。</summary>
         private float ShieldInvincibleAt(int level)
         {
             if (level <= 0) return 0f;
-            return ShieldInvincibleBase / Mathf.Pow(4f, level - 1);
+            return ShieldInvincibleBase * (2f - Mathf.Pow(2f, 1f - level));
         }
 
         // 提示词正文写成属性（不是 static 字段）：里面要按**这张卡自己的** position 插「上一局回顾」。
@@ -1722,7 +1802,7 @@ public class AIAgent : MonoBehaviour
   - **两个炮塔重叠时你不会被弹开、也不会自动停下**（移动只在抵达目标、撞到地图边界或超时时结束），而炮塔**被有效命中即死**——「撞上去」没有任何安全网。
 - **移动要谨慎：** 距离是上限、**不是必须走满**；走多远、怎么确认、**途中怎么改道（移动途中可以随时改方向，再发一次预览 + confirm 就行）**，**完整规则见 move_turret 的工具说明**。地图中央没有额外收益，而且离四家都最近。
 - **胜负：** 成为最后存活的一方、并把全图领土刷到 100%（一个像素都不留给别人和中立）才算赢。**终局分两段**：只剩你一个阵营、场上敌方的大球/穿甲弹/子弹都清掉、再过 3 轮，系统会**停掉你的决策与升级**（你不用再指挥了），之后你的炮塔继续自动开火把地刷满；**刷满 100% 这一局才结束**。如果四家全死，场上就剩游离的弹体自己滚：它们把地涂到 95% 以上、或者场上什么物体都不剩，也会结束。
-- **位置情报：** 开局你和敌人知道各自的炮塔位置（「各炮塔初始位置」之后不再更新）。之后没有人会直接知道敌人在哪：**只有自己的位置是实时的**；近处靠 **move_turret 预览附带的视野截图**直接看（半径约为你最大移动距离的 {(MapConfig.Instance != null ? MapConfig.Instance.moveSightRadiusFactor : 1f)} 倍；**这一圈内的炮塔 / 护盾 / 大球在图里都看得见**，图例：**圆环 = 大球（环的大小就是球的实际大小）、叉 = 穿甲弹、圆点 = 炮塔、标记上方的数字 = 它的数值、带箭头的粗线 = 它正在飞的方向、绿 = 你的 / 红 = 对手的 / 白 = 中立，正中心套绿圈的那台就是你自己（所有炮塔一律不标数值）；黑色环带 = 圆形视野之外、暗红色 = 地图之外**；**图里看得见的东西另外还会用文字列一份坐标**——要打就直接照那份文字里的坐标瞄，别拿图上没量的像素去猜），更远处只能靠**撞击情报**推断——撞的是谁、撞击点坐标、护盾撞击前后的大小（护盾大小对应护盾半径），撞击点只能给一个大致方位，要多次自己拼图。
+- **位置情报：** 开局你和敌人知道各自的炮塔位置（「各炮塔初始位置」之后不再更新）。之后没有人会直接知道敌人在哪：**只有自己的位置是实时的**；近处靠 **move_turret 预览附带的视野截图**直接看 —— 那张图是**以地图中心 (0,0) 为中心、完整覆盖整张地图的正方形俯视图**（比例固定：整张地图正好铺满这张图，所以图上可以直接按坐标估距离；图片上方 = +y、右方 = +x、图片正中心 = 世界 (0,0)）。图上**亮着的部分 = 你看得见的范围 = 以你炮塔为圆心、半径约为你最大移动距离的 {(MapConfig.Instance != null ? MapConfig.Instance.moveSightRadiusFactor : 1f)} 倍的那个圆 ∪ 你自己的领土**（领土边界外还多露一点，方便看清**接壤的是谁**）；**其余全是纯黑 = 你看不见的地方**（那里有没有东西、是谁的地，图上一律没有信息）。图例：**图上标注一律是黑色字（阵营写在字里，不靠颜色认）；每个实体只有一条标签，内容是「阵营 + 类别 + 数值 + 坐标 + 速度方向」（炮塔只写阵营+类别+坐标、不标数值）；标记本体：圆环 = 大球（环的大小就是球的实际大小）、叉 = 穿甲弹、圆点 = 炮塔、带箭头的粗线 = 它正在飞的方向；只标中心点落在看得见范围内的实体（敌人和自己的炮塔都算）**；**图里看得见的东西另外还会用文字列一份坐标**——要打就直接照那份文字里的坐标瞄，别拿图上没量的像素去猜），更远处只能靠**撞击情报**推断——撞的是谁、撞击点坐标、护盾撞击前后的大小（护盾大小对应护盾半径），撞击点只能给一个大致方位，要多次自己拼图。
 - **一直停在同一个地方 = 被穿甲弹直接秒杀：** 炮塔不动就不会换坐标，对手靠几次撞击情报或一张视野截图就能把你钉死，然后一发**穿甲弹**收工（穿盾、碰到本体即秒杀，护盾再厚也拦不住，也开不了「破盾无敌」）。穿甲弹需要坐标才能打中，所以**换位（不给坐标）是防它的手段**（可以写进预行动，见第七节）。同理，你也可以用别人的撞击情报和视野截图拼出他的坐标，给他一发穿甲弹。
 
 ## 三、弹珠与资源
@@ -1739,7 +1819,7 @@ public class AIAgent : MonoBehaviour
 每个**已解锁且为空**的道具格都会持续积累升级值；达标后系统会暂停并单独询问你的升级选择，你只能三选一：
 1. **额外弹珠：** 立即生成并发射两枚你的新弹珠（弹珠每撞到一个道具区就产出一个等值道具）。
 2. **炮塔强化：** 最大移动距离 +{MapConfig.Instance?.moveRangePerLevel}、**移动速度 +{MapConfig.Instance?.moveSpeedPerLevel}/秒**、**自动护卫极限转速 ×{Towel.GuardSpeedPerLevel}/级**（自动拦截来袭子弹的转速上限；**常态转速不变**）、子弹显示半径与打大球动量变大（霰弹这类散射子弹同样受益）、道具瞄准误差每级减半（基准 {ReactionSystem.BaseAimAngleError}°）。可叠加。
-3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（**第 N 级 = {ShieldInvincibleBase:0.#} / 4 的 N−1 次方 秒**：1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒、3 级 {ShieldInvincibleAt(3):0.##} 秒…；你现在 {ShieldUpgradeLevel} 级 → 破盾后 {ShieldInvincibleAt(ShieldUpgradeLevel):0.##} 秒，再升一级 → {ShieldInvincibleAt(ShieldUpgradeLevel + 1):0.##} 秒，期间受到的伤害全部归零）。可叠加，但**越往后每一级给的时间越少**（每级是上一级的四分之一）。**这个等级是永久的：升过之后每一次盾破都会开这个窗口，不是攒着只用一次。** **升级机会什么时候来不由你定**——空槽升级进度攒满系统才会弹三选一（见上面「算一笔账」），而且**弹出来就必须当场三选一（没有「留着以后再说」这个选项）**，所以「等盾快破了再点护盾强化」做不到：盾破的那一刻不一定正好有升级机会、机会也不会给你留着。要用上这个窗口得靠预行动（见第七节「盾破就换位」）；穿甲弹只按比例啃盾、不破盾，开不了这个窗口（对付穿甲只能靠移动换位）。
+3. **护盾强化：** 护盾破碎后炮塔进入无敌时间（**每次升级累加 {ShieldInvincibleBase:0.#} / 2 的 N 次方 秒**，N 从 0 开始：第 1 次加 {ShieldInvincibleBase:0.#} 秒、第 2 次加 {ShieldInvincibleBase / 2:0.##} 秒、第 3 次加 {ShieldInvincibleBase / 4:0.##} 秒… —— 累计 1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒、3 级 {ShieldInvincibleAt(3):0.##} 秒…，上限趋近 {ShieldInvincibleBase * 2:0.#} 秒；你现在 {ShieldUpgradeLevel} 级 → 破盾后 {ShieldInvincibleAt(ShieldUpgradeLevel):0.##} 秒，再升一级 → {ShieldInvincibleAt(ShieldUpgradeLevel + 1):0.##} 秒，期间受到的伤害全部归零）。可叠加，**每一级新增的那一份是上一级的一半**（越往后加得越少，但总时长一直在涨、封顶 2 倍基准）。**这个等级是永久的：升过之后每一次盾破都会开这个窗口，不是攒着只用一次。** **升级机会什么时候来不由你定**——空槽升级进度攒满系统才会弹三选一（见上面「算一笔账」），而且**弹出来就必须当场三选一（没有「留着以后再说」这个选项）**，所以「等盾快破了再点护盾强化」做不到：盾破的那一刻不一定正好有升级机会、机会也不会给你留着。要用上这个窗口得靠预行动（见第七节「盾破就换位」）；穿甲弹只按比例啃盾、不破盾，开不了这个窗口（对付穿甲只能靠移动换位）。
 三条可以随便混搭，也可以一直堆同一条；**选哪个看你这一局的流派和当下缺什么**。
 每次升级完成后，下一次升级所需值 ×{MapConfig.Instance?.upgradeCostGrowth}。使用道具腾出空槽可加快资源积累；升级费一级比一级贵（一局大约 15~20 分钟），槽位开多了以后也该留些底牌，不要无意义囤积道具。
 注意道具不是弹珠，不会越养越大！数值小且没用的道具应该尽快用掉。
@@ -1780,7 +1860,7 @@ public class AIAgent : MonoBehaviour
   3. **穿甲预警就换位**：`move_turret` + `any--warn--type--穿甲--eta--less--5` + `para--distance--1.5` + **`para--angle--垂直`**（方向按「垂直于最近那发穿甲弹的航线」现算；**只给距离不给方向，这次移动会直接失败**，给死角度又会顺着航线把自己送上去）。
   4. **槽满就清最不值钱的那类道具**：`use_prop` + `all--left--less--1` + `select--prop--contain--大球--value--less--10240` + `para--aim_x--0` + `para--aim_y--0`（`大球` 换成 `霰弹` / `扫射` / `穿甲` 各再登记一条，阈值自己调）。
   5. **手里有护盾道具就挂上（不管盾破没破）**：`use_prop` + `any--prop--contain--护盾` + `select--prop--contain--护盾`。
-  6. **盾破就换位**：`tool_name=move_turret` + `all--shield--lessEqual--0` + `para--distance--1.5` + `para--angle--<挑一个走得出地图的方向>`。无敌窗口是 {ShieldInvincibleAt(ShieldUpgradeLevel):0.##} 秒（1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒，越往上越短）、情报还滞后一轮，`reuse` 别用 -1（否则盾一破就一直挪），用 N=你自己的回合数或每轮重新登记。
+  6. **盾破就换位**：`tool_name=move_turret` + `all--shield--lessEqual--0` + `para--distance--1.5` + `para--angle--<挑一个走得出地图的方向>`。无敌窗口是 {ShieldInvincibleAt(ShieldUpgradeLevel):0.##} 秒（1 级 {ShieldInvincibleAt(1):0.##} 秒、2 级 {ShieldInvincibleAt(2):0.##} 秒；每升一级加的那一份减半，总时长封顶 2 倍基准）、情报还滞后一轮，`reuse` 别用 -1（否则盾一破就一直挪），用 N=你自己的回合数或每轮重新登记。
 - 另外两条只在这套系统里才有的：
   - `shield` 读的是**你自己的护盾值**，`0` 就是盾已经破了；`warn--…--eta` 的预警窗口是**两个回合**（时间越近、值越小）。
   - 用 `move_turret` 的条目要给一个走得出去的方向 + 距离（落在自己的可移动范围内），否则每轮都会失败、把失败计数刷爆。
@@ -2717,7 +2797,7 @@ public class AIAgent : MonoBehaviour
         }
 
         /// <summary>请求直到正确。allowEmptySay = 这一轮允许【我说】为空（开局那句长期规划专用）。</summary>
-        public async Task UntilGreatRequest(int roundStartIndex, bool allowEmptySay = false)
+        public async Task UntilGreatRequest(int roundStartIndex, bool allowEmptySay = false, int sayMaxChars = SayMaxChars)
         {
             // 上下文超长自救：最多重发这么多次，别让一回合被卡死
             const int maxOverflowRetry = 10;
@@ -2761,7 +2841,7 @@ public class AIAgent : MonoBehaviour
                 info.apiUrl = url;
 
                 //保证已经检查完毕
-                info.validateAndMaybeRetry = async msg => await ValidateRoundReply(msg, info, allowEmptySay);
+                info.validateAndMaybeRetry = async msg => await ValidateRoundReply(msg, info, allowEmptySay, sayMaxChars);
 
                 roundRequestInFlight = true;
                 try
@@ -2826,7 +2906,7 @@ public class AIAgent : MonoBehaviour
         /// <summary>这一轮（本次 UntilGreatRequest）拿到过几次空 content。</summary>
         private int roundEmptyReplies;
 
-        private async Task<bool> ValidateRoundReply(DeepSeekMessage msg, RequestInfo info, bool allowEmptySay = false)
+        private async Task<bool> ValidateRoundReply(DeepSeekMessage msg, RequestInfo info, bool allowEmptySay = false, int sayMaxChars = SayMaxChars)
         {
             // content 整个是空的：这不是"三段格式不对"，是这一发根本没吐正文 ——
             // 实测（2026-09-22）thinking 开着时 max_tokens 会被 reasoning 吃光，content 就是空串。
@@ -2863,7 +2943,7 @@ public class AIAgent : MonoBehaviour
             {
                 roundEmptyReplies = 0;
                 RemoveRoundRetryReminder();
-                await HumanizeSay(msg);      // 拟人化：先把【我说】换掉，再拿去显示/落库
+                await HumanizeSay(msg, sayMaxChars);      // 拟人化：先把【我说】换掉（超长会在这一层浓缩），再拿去显示/落库
                 // **没有说话就不要 Say**（开局那份长期规划就是只想不说）：走 Say 的话状态区会把它
                 // 当成一次"发言"，把整篇规划糊进状态区的思考框、中央消息列表也白多一条。
                 string said = SayOf(msg.content);
@@ -2985,7 +3065,7 @@ public class AIAgent : MonoBehaviour
         ///   给对手读的【上一轮发言】、终局记忆里的 —— 全都是同一句优化版。
         /// 开关关掉 / 没 key / 失败 / 超时 → 一个字都不改（退回原句）。
         /// </summary>
-        private async Task HumanizeSay(DeepSeekMessage msg)
+        private async Task HumanizeSay(DeepSeekMessage msg, int sayMaxChars = SayMaxChars)
         {
             if (msg == null) return;
 
@@ -2994,7 +3074,10 @@ public class AIAgent : MonoBehaviour
             if (string.IsNullOrWhiteSpace(said) || SayHasNoText(said)) return;
 
             string want = WantOf(msg.content);
-            string polished = await SpeechPolisher.PolishAsync(name, oc, want, said, AIAgent.AllStageNamesText);
+            // sayMaxChars：当众台词的字数上限（赛前狠话那轮是 25）。原句超了就在这一层浓缩，
+            // 改写结果回写进 msg.content → 落库/飘字/下一轮情报/AI 自己的历史全都是短台词。
+            string polished = await SpeechPolisher.PolishAsync(name, oc, want, said, AIAgent.AllStageNamesText,
+                SpeechPolisher.PolishMode.Public, null, sayMaxChars);
             if (string.IsNullOrWhiteSpace(polished) || polished == said) return;
 
             string rewritten = SpeechPolisher.ReplaceSaySegment(msg.content, polished);
@@ -3048,7 +3131,8 @@ public class AIAgent : MonoBehaviour
                 else
                 {
                     // 老缓存（或上次拟人化没过）：补一次，然后把优化版写回缓存，下次开局就不用再花了
-                    await HumanizeSay(cachedSpeech);
+                    // 这一句是赛前狠话，上限按 25 字那档
+                    await HumanizeSay(cachedSpeech, OpeningTauntSayMaxChars);
                     SaveOpeningCache(cachedSpeech, cachedAnalysis);
                 }
 
@@ -3060,7 +3144,8 @@ public class AIAgent : MonoBehaviour
 
             // ---------- 第一句：赛前狠话 ----------
             request.tool_choice = "none";
-            await UntilGreatRequest(roundStartIndex);   // 这一轮的【我说】会被舞台当开场白播
+            // 这一轮 RunAICycle 的提示词里写了「【我说】可以写到 25 字以内」，拟人化浓缩也按 25 那档走
+            await UntilGreatRequest(roundStartIndex, sayMaxChars: OpeningTauntSayMaxChars);   // 这一轮的【我说】会被舞台当开场白播
             DeepSeekMessage speechMsg = GetLastAssistantMessage();
 
             // ---------- 第二句：长期规划（【我说】留空，只写【分析】；这一句**开 thinking** + 抬输出上限）----------
@@ -3454,8 +3539,10 @@ public class AIAgent : MonoBehaviour
                     {
                         foreach (DeepSeekMessage msg in msgs)
                         {
-                            // back_tool=false 时这里收到的是 role=tool 结果，落回 history
-                            if (msg != null && msg.role == "tool")
+                            if (msg == null) continue;
+                            // tool 回执 + **预览附带的那张视野截图**（role=user 的图片消息）都要落回 history，
+                            // 否则让它"自己决定走不走"的那一步看不到图（只能看文字）。
+                            if (msg.role == "tool" || msg.contentBlocks != null)
                                 history.Add(msg);
                         }
                     }
@@ -3491,8 +3578,6 @@ public class AIAgent : MonoBehaviour
                 request.tool_choice = previousToolChoice;
             }
 
-            sw.Stop();
-
             bool executed = false;
             for (int i = forceStartIndex + 1; i < history.Count; i++)
             {
@@ -3504,9 +3589,31 @@ public class AIAgent : MonoBehaviour
                 }
             }
 
-                        Debug.Log($"[AI行为检查] {name} 强制调用 {toolName} 完成，用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executed ? "是" : "否")}");
+            // **move_turret 是两步工具**：强制调用只能补出"预览"那一步（给方向 / 看一眼视野图）。
+            // 但**不能**就这么收尾 —— 那条路 `back_tool=false`，模型看不到预览结果、也就没机会决定走不走，
+            // 于是会出现"它想动 → 只预览 → 没动 → 下一轮又说要动 → 再被强制预览一次"的死循环
+            // （实测赤喵第 15 / 第 21 条是**完全相同的预览**）。
+            // 2026-09-22 用户："不是让AI决定动不动吗" → "改"：
+            // 预览完把结果交回给模型，**再跑一次正常回合请求让它自己决定** ——
+            // 要走就自己发 confirm=true（也可以按预览提示改方向重新预览），不打算走就按三段回复说明。
+            // 决策权在它手里，闭环也是它自己合的。
+            if (executed && toolName == "move_turret")
+            {
+                int decideStart = history.Count;
+                history.Add(new DeepSeekMessage("user",
+                    "[行为检查补执行] 上面那次是**移动预览**的结果（还没有真的移动）。现在你自己决定：" +
+                    "要真的走就再调用一次 move_turret 并传 confirm=true（不要再传方向与距离；" +
+                    "想换方向/距离就先重新预览一次再确认）；不打算走就什么都不做，按三段格式写清这一轮实际做什么。"));
+                await UntilGreatRequest(decideStart);
+            }
 
-            return executed;
+            sw.Stop();
+
+            bool executedAfterDecide = executed;
+            Debug.Log($"[AI行为检查] {name} 强制调用 {toolName} 完成，用时 {sw.Elapsed.TotalSeconds:F2}s，实际执行：{(executedAfterDecide ? "是" : "否")}" +
+                      (executedAfterDecide && toolName == "move_turret" ? "（含把预览交回它自己决定的那一次请求）" : ""));
+
+            return executedAfterDecide;
         }
 
         private string BuildToolUsageReminder()

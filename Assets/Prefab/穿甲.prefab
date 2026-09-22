@@ -361,6 +361,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   BrightnessTimes: 1
+  bulletImpactFactor: 0.01
 --- !u!114 &2128266677755943854
 MonoBehaviour:
   m_ObjectHideFlags: 0

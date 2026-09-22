@@ -393,15 +393,18 @@ public class Towel : MonoBehaviour, IStageValue
     }
 
     /// <summary>
-    /// 第 level 级护盾强化的**破盾无敌时长**（秒）：`shieldBreakInvincibleTime / 4^(level-1)`
-    /// —— 1 级 = 基准值、2 级 = 基准/4、3 级 = 基准/16…（2026-09-22 用户要求改成这个口径；
-    /// 基准值在 Towel.prefab 上是 10，也就是 10 / 2.5 / 0.625 / 0.156…）。
+    /// 第 level 级护盾强化的**破盾无敌时长**（秒）：**每次升级累加 `shieldBreakInvincibleTime / 2^N`，N 从 0 开始**
+    /// （第 1 次升级 N=0 → 加满一份基准、第 2 次 N=1 → 加半份、第 3 次 N=2 → 加四分之一份…）。
+    /// 于是总和 = `基准 × (2 − 2^(1−level))`：1 级 基准、2 级 1.5×基准、3 级 1.75×基准…
+    /// **上限趋近 2×基准**（基准在 Towel.prefab 上是 10 → 10 / 15 / 17.5 / 18.75…趋近 20 秒）。
+    /// （2026-09-22 用户："把护盾无敌改为+=10/(2的N次升级)" + "N初始值为0！"；
+    ///  这条取代了更早的 `基准 / 4^(level-1)` 口径。）
     /// level &lt;= 0 = 没升过护盾强化，没有无敌窗口。
     /// </summary>
     public float ShieldInvincibleTimeAt(int level)
     {
         if (level <= 0) return 0f;
-        return shieldBreakInvincibleTime / Mathf.Pow(4f, level - 1);
+        return shieldBreakInvincibleTime * (2f - Mathf.Pow(2f, 1f - level));
     }
 
     /// <summary>护盾被击碎（或检测到已碎）时调用，立即开启无敌窗口与发光。</summary>
@@ -752,6 +755,8 @@ public class Towel : MonoBehaviour, IStageValue
         {
             bp.stage = stage;
             bp.value = val;
+            // 子弹不能弹飞穿甲：口径同样放在 MapConfig（见 PierceShellBulletImpactFactor），发射时刷进弹体
+            bp.bulletImpactFactor = config.PierceShellBulletImpactFactor;
         }
 
         // 穿盾口径：MapConfig → 弹体上的 ShieldSlow

@@ -66,8 +66,9 @@ public static class PixelDraw
         text = Filter(text);
         if (text.Length == 0) return;
 
-        // 底：比字身宽高各大一圈（左右各 1 格、上下各半格）
-        FillRect(px, size, x, y - scale, TextWidth(text, scale), GH * scale + 2 * scale, bg, false);
+        // 底：比字身宽高各大一圈（左右各 1 格、上下各半格）。
+        // bg 的 alpha 为 0 时**不刷底**（2026-09-22 用户："不要背景"）。
+        if (bg.a > 0) FillRect(px, size, x, y - scale, TextWidth(text, scale), GH * scale + 2 * scale, bg, false);
 
         int penX = x;
         foreach (char c in text)

@@ -110,6 +110,10 @@ public class MapConfig : MonoBehaviour
     public float PierceShieldSlowFactor = 0.5f;
     [Tooltip("离开护盾时的随机偏转角（±度）")]
     public float PierceExitDeflectAngle = 30f;
+    [Tooltip("穿甲弹和**子弹**的动能合并系数（发射时写进弹体的 BallPainter.bulletImpactFactor）：\n" +
+             "0 = 子弹打上来**不会让穿甲弹偏移**（默认，用户口径：子弹不能弹飞穿甲）；\n" +
+             "1 = 照原来那样按质量比被子弹推走；越大越容易被带偏。")]
+    public float PierceShellBulletImpactFactor = 0f;
 
     [Header("子弹出膛环（Towel 的子弹从环形区域出膛，不从塔心出）")]
     [Tooltip("出膛环半径（世界单位）：子弹沿瞄准方向、从塔心这个半径处出膛。0 = 关掉、恢复从塔心出膛")]

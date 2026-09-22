@@ -605,10 +605,15 @@ public class BulletManager : MonoBehaviour
 
 
     /// <summary>子弹并入大球：完全非弹性碰撞。质量直接用 HugeInt value。</summary>
-    /// <remarks>同队质量融合为 M+m；敌队数值相消，按 M-m 计算。</remarks>
+    /// <remarks>同队质量融合为 M+m；敌队数值相消，按 M-m 计算。
+    /// 最后再乘弹体自己的 <see cref="BallPainter.bulletImpactFactor"/>：1 = 原来的口径，
+    /// 越大越容易被子弹带偏，**0 = 完全不和子弹发生动能合并**（子弹打上来不让它偏移，伤害照常结算）——
+    /// 用户 2026-09-22："怎么子弹能够弹飞穿甲"。</remarks>
     void ApplyBulletImpact(BallPainter bp, BulletHit hit)
     {
-        float impact = MapConfig.Instance.BulletImpactForce * hit.impactScale;
+        if (bp.bulletImpactFactor <= 0f) return;      // 0 = 不和子弹发生动能合并
+
+        float impact = MapConfig.Instance.BulletImpactForce * hit.impactScale * bp.bulletImpactFactor;
         if (impact <= 0f || bp.rb == null || hit.value <= 0) return;
 
         HugeInt M = bp.value;
